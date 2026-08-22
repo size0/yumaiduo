@@ -84,6 +84,7 @@ export async function createApplication({ config, platformRuntime, backendClient
     const workerStatus = lifecycle.status();
     return {
       ok: true,
+      agent_runtime_version: AGENT_RUNTIME_VERSION,
       worker: workerStatus.worker,
       agent_worker: workerStatus.agent_worker,
       agent_outbox_worker: workerStatus.agent_outbox_worker,

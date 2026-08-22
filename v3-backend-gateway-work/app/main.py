@@ -34,6 +34,7 @@ from .wanda_quote_store import WandaQuoteSettingsStore
 COS_CLEANUP_INTERVAL_SECONDS = 30 * 60
 PREVIEW_VISION_RETRY_DELAY_SECONDS = 0.35
 QUOTE_SHUTDOWN_TIMEOUT_SECONDS = 65
+V3_RUNTIME_CONTRACT = "wanda-v3-v11-pricing-account-evidence"
 SCREENSHOT_PRICE_CONFIDENCE_THRESHOLD = 0.85
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "runtime_contract": V3_RUNTIME_CONTRACT}
 
     def require_plugin_bridge_key(
         x_plugin_bridge_key: str | None = Header(default=None, alias="X-Plugin-Bridge-Key"),

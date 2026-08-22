@@ -25,6 +25,15 @@ from app.wanda_quote_store import WandaQuoteSettingsStore
 from app.quote_preview_store import QuotePreviewStore, empty_pending_record
 
 
+def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
+    response = TestClient(create_app()).get("/health")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "runtime_contract": "wanda-v3-v11-pricing-account-evidence",
+    }
+
+
 def test_quote_service_waits_for_delayed_release_rechecks_on_close() -> None:
     class DirectGateway:
         def __init__(self) -> None:
