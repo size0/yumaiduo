@@ -12,6 +12,13 @@ import { hasUnresolvedReplyPlaceholder } from './agent/response-composer.mjs';
 import { EVENT_ROUTE_KIND, routeWorkflowEvent } from './event-router.mjs';
 import { createReplyOrchestrator, isBuyerReplyAction } from './reply/reply-orchestrator.mjs';
 import {
+  configuredReply,
+  configuredReplyImage,
+  createBuyerReplyAction as autoReplyAction,
+  createQuoteFollowUpAction as quoteFollowUpAction,
+  withConfiguredReplyImage,
+} from './reply/reply-policy.mjs';
+import {
   isBareAcknowledgement,
   isCurrentQuoteQuestion,
   isExplicitTypedSeatChoice,
@@ -1502,24 +1509,6 @@ export function paymentSafeOrderInstruction(value) {
   return text.includes(PAYMENT_HOLD_INSTRUCTION) ? text : `${text}\n${PAYMENT_HOLD_INSTRUCTION}`;
 }
 
-function configuredReply(settings, key, fallback) {
-  const templates = settings?.reply_templates;
-  const candidate = templates && typeof templates === 'object' ? templates[key] : null;
-  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : fallback;
-}
-
-function configuredReplyImage(settings, key) {
-  const images = settings?.reply_template_images;
-  const candidate = key && images && typeof images === 'object' ? String(images[key] ?? '').trim() : '';
-  return /^https:\/\/[^\s]{1,1992}$/iu.test(candidate) ? candidate : '';
-}
-
-function withConfiguredReplyImage(action, settings, key) {
-  if (!action) return null;
-  const imageUrl = configuredReplyImage(settings, key);
-  return imageUrl ? { ...action, kind: 'reply_with_image', image_url: imageUrl } : action;
-}
-
 function imageFailureReplyAction(envelope, mayFollowRecognition, enabled, settings = {}) {
   if (!enabled) return null;
   const text = configuredReply(settings, 'recognition_failed', '选座截图暂未识别成功，请重新发送清晰完整的选座图，并补充影院、影片、场次和需要张数。');
@@ -1560,25 +1549,6 @@ function agentStateSnapshot(value, observedAt = Date.now()) {
   }
   if (facts.quote_reply_delivered === true) snapshot.quote_reply_delivered = true;
   return Object.freeze(snapshot);
-}
-
-function autoReplyAction(envelope, text, replyOrigin, actionSuffix = 'auto-reply') {
-  if (hasUnresolvedReplyPlaceholder(text)) return null;
-  const payload = envelope.payload ?? {};
-  const accountUnb = String(payload.accountUnb ?? payload.account_unb ?? '').trim();
-  const chatId = String(payload.chatId ?? payload.chat_id ?? '').trim();
-  const peerUnb = String(payload.peerUnb ?? payload.peer_unb ?? '').trim();
-  if (!accountUnb || !chatId || !peerUnb) return null;
-  return {
-    action_id: `${envelope.id}:${actionSuffix}`, 
-    kind: 'reply',
-    tenant_id: String(envelope.tenantId),
-    account_unb: accountUnb,
-    chat_id: chatId,
-    peer_unb: peerUnb,
-    text: String(text ?? '').trim(),
-    reply_origin: replyOrigin,
-  };
 }
 
 function duplicateQuoteClosureAction(envelope, quoteContext) {
@@ -1666,11 +1636,6 @@ function conflictingRecentTicketCount(messages, quotedCount) {
     if (requested && requested !== quoteCount) return requested;
   }
   return null;
-}
-
-function quoteFollowUpAction(envelope, message) {
-  const action = autoReplyAction(envelope, message, 'quote_follow_up', 'quote-conversation-follow-up');
-  return action ? { ...action, allow_plugin_followup: true } : null;
 }
 
 function orderSubmitGuideAction(envelope) {
