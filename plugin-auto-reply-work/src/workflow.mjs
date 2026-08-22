@@ -9,6 +9,7 @@ import { requestedTicketCount } from './agent/ticket-request-inspector.mjs';
 import { agentCanaryDecision } from './agent/agent-canary-router.mjs';
 import { AGENT_RUNTIME_VERSION } from './agent/shadow-agent-runtime.mjs';
 import { hasUnresolvedReplyPlaceholder } from './agent/response-composer.mjs';
+import { EVENT_ROUTE_KIND, routeWorkflowEvent } from './event-router.mjs';
 
 // Buyers commonly send the screenshot, city, seats, and quantity as separate
 // messages. Process only the final event after this quiet window.
@@ -16,16 +17,6 @@ const MIN_IM_REPLY_DELAY_MS = 2_000;
 const IMAGE_SUPPLEMENT_WINDOW_MS = 10 * 60 * 1_000;
 const MULTI_IMAGE_PAIR_WINDOW_MS = 30 * 1_000;
 const ORDER_SUBMIT_GUIDE_BASE64 = readFileSync(new URL('../assets/order-submit-guide.jpg', import.meta.url)).toString('base64');
-const STATUS_BY_EVENT = Object.freeze({
-  'order.price.changed': 'awaiting_payment',
-  'order.paid': 'paid',
-  'order.closed': 'cancelled',
-});
-const CONVERSATION_STAGE_BY_ORDER_EVENT = Object.freeze({
-  'order.price.changed': 'waiting_payment',
-  'order.closed': 'cancelled',
-});
-
 export function createWorkflow({
   backend,
   coreFor,
@@ -73,21 +64,22 @@ export function createWorkflow({
 
   async function processClaimed(record) {
     const { envelope } = record;
+    const eventRoute = routeWorkflowEvent(envelope.event);
     try {
-      if (envelope.event !== 'im.message.received') await updateConversationOrderStage(envelope);
+      if (eventRoute.kind !== EVENT_ROUTE_KIND.MESSAGE) await updateConversationOrderStage(envelope, eventRoute);
       // Await lifecycle handlers so their failures pass through the terminal/
       // retry classifier below instead of leaving a leased event to recover
       // only after its 60-second lease expires.
-      if (quotePreviewClient && typeof conversationContextStore?.get === 'function' && envelope.event === 'order.created') return await processQuotedOrderCreated(record);
-      if (quotePreviewClient && typeof conversationContextStore?.get === 'function' && envelope.event === 'order.paid') return await processQuotedOrderPaid(record);
-      if (quotePreviewClient && typeof conversationContextStore?.get === 'function' && envelope.event === 'order.price.changed') return await processQuotedOrderPriceChanged(record);
-      if (envelope.event === 'im.message.received' && isPlatformSystemMessage(envelope.payload)) {
+      if (quotePreviewClient && typeof conversationContextStore?.get === 'function' && eventRoute.kind === EVENT_ROUTE_KIND.ORDER_CREATED) return await processQuotedOrderCreated(record);
+      if (quotePreviewClient && typeof conversationContextStore?.get === 'function' && eventRoute.kind === EVENT_ROUTE_KIND.ORDER_PAID) return await processQuotedOrderPaid(record);
+      if (quotePreviewClient && typeof conversationContextStore?.get === 'function' && eventRoute.kind === EVENT_ROUTE_KIND.ORDER_PRICE_CHANGED) return await processQuotedOrderPriceChanged(record);
+      if (eventRoute.kind === EVENT_ROUTE_KIND.MESSAGE && isPlatformSystemMessage(envelope.payload)) {
         await eventStore.complete(record.key, record.leaseId, {
           mode: 'quote_preview_only', skipped: 'platform_system_message', actions: [],
         });
         return { status: 'completed', mode: 'quote_preview_only', actions: [] };
       }
-      if (envelope.event === 'im.message.received' && await isOwnedShopPeer(envelope)) {
+      if (eventRoute.kind === EVENT_ROUTE_KIND.MESSAGE && await isOwnedShopPeer(envelope)) {
         await eventStore.complete(record.key, record.leaseId, {
           mode: 'quote_preview_only',
           skipped: 'owned_shop_peer',
@@ -95,7 +87,7 @@ export function createWorkflow({
         });
         return { status: 'completed', mode: 'quote_preview_only', actions: [] };
       }
-      if ((quotePreviewClient || replyPreviewClient || conversationAgentPlanner) && envelope.event === 'im.message.received') {
+      if ((quotePreviewClient || replyPreviewClient || conversationAgentPlanner) && eventRoute.kind === EVENT_ROUTE_KIND.MESSAGE) {
         const settings = await loadRuntimeSettings(envelope);
         if (!settings.automation_enabled) {
           await eventStore.complete(record.key, record.leaseId, {
@@ -124,14 +116,14 @@ export function createWorkflow({
       const settings = await loadRuntimeSettings(envelope);
 
       let bridgeResult = upsert;
-      if (envelope.event === 'im.message.received') {
+      if (eventRoute.kind === EVENT_ROUTE_KIND.MESSAGE) {
         bridgeResult = await handleMessage(envelope, taskId, upsert, settings);
-      } else if (STATUS_BY_EVENT[envelope.event]) {
-        const statusInput = await statusPayload(envelope, STATUS_BY_EVENT[envelope.event], coreFor);
+      } else if (eventRoute.bridge_status) {
+        const statusInput = await statusPayload(envelope, eventRoute.bridge_status, coreFor);
         bridgeResult = await backend.updateTaskStatus(
           taskId,
           statusInput,
-          context(envelope, `status:${STATUS_BY_EVENT[envelope.event]}`),
+          context(envelope, `status:${eventRoute.bridge_status}`),
         );
       }
 
@@ -1261,7 +1253,7 @@ export function createWorkflow({
     }, context(envelope, 'review'));
   }
 
-  async function updateConversationOrderStage(envelope) {
+  async function updateConversationOrderStage(envelope, eventRoute = routeWorkflowEvent(envelope?.event)) {
     if (!conversationContextStore) return;
     const orderId = String(envelope?.payload?.orderId ?? envelope?.payload?.order_id ?? '').trim();
     if (!orderId) return;
@@ -1280,12 +1272,12 @@ export function createWorkflow({
       // A price-changed event may be manual, stale, or for another amount. Its
       // stage is updated only after processQuotedOrderPriceChanged rereads the
       // authoritative order and verifies the exact confirmed quote total.
-      if (envelope.event === 'order.price.changed') return;
-      if (envelope.event === 'order.created' && typeof conversationContextStore.bindOrder === 'function') {
+      if (eventRoute.kind === EVENT_ROUTE_KIND.ORDER_PRICE_CHANGED) return;
+      if (eventRoute.kind === EVENT_ROUTE_KIND.ORDER_CREATED && typeof conversationContextStore.bindOrder === 'function') {
         await conversationContextStore.bindOrder(envelope.tenantId, payload, orderId, envelope.payload ?? {});
         return;
       }
-      const stage = CONVERSATION_STAGE_BY_ORDER_EVENT[envelope.event];
+      const stage = eventRoute.conversation_stage;
       if (stage && typeof conversationContextStore.setOrderStage === 'function') {
         // A platform price-changed notification can also be emitted for an
         // unrelated/manual adjustment. Never show “waiting for payment” unless

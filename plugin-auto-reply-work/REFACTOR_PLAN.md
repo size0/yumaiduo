@@ -11,6 +11,7 @@ src/
   conversation/    conversation facts and source-time snapshots
   quote/           recognition, showtime resolution and realtime quote orchestration
   orders/          order facts, price-change gates and manual tasks
+  ai/              provider-neutral AI orchestration and future Dify adapter
   agent/           planner, policy, tools and durable runtime
   reply/           the single reply/outbox/deduplication boundary
   storage/         encrypted durable stores
@@ -32,6 +33,8 @@ event -> conversation facts -> Agent/deterministic router -> controlled tool -> 
 - Temporary Wanda probes always cancel and require realtime release evidence.
 - `application.mjs` remains the composition root until the extracted modules have characterization coverage.
 - Do not edit stable UI assets during this refactor.
+- `workflow.mjs` is frozen for new business behavior; changes there are limited to compatibility delegation into extracted modules.
+- Dify is never an authority for price, seats, order state, price change, sending, or manual fulfillment.
 
 ## Sequential waves
 
@@ -41,9 +44,9 @@ event -> conversation facts -> Agent/deterministic router -> controlled tool -> 
 - Isolated Pi worktree dispatcher.
 - Characterization tests for reply deduplication, deterministic failure ownership, Shadow side-effect isolation and temporary-lock failure closure.
 
-### Wave 1 — pure policy extraction
+### Wave 1 — event routing and pure policy extraction
 
-Extract pure classifiers and reply construction from `workflow.mjs` into:
+The first strangler seam is `event-router.mjs`: it classifies message and order lifecycle events while unknown events retain the legacy fallback. Extract remaining pure classifiers and reply construction from `workflow.mjs` into:
 
 - `conversation/message-classifier.mjs`
 - `reply/reply-policy.mjs`
@@ -51,19 +54,35 @@ Extract pure classifiers and reply construction from `workflow.mjs` into:
 
 No store or network dependency is allowed in these modules. Existing exports remain as compatibility delegates.
 
-### Wave 2 — quote conversation flow
+### Wave 2 — unique reply boundary
 
-Create `quote/create-quote-conversation-flow.mjs` owning image receipt, quote draft fusion, recognition, showtime resolution, quote result persistence and quote follow-ups. It receives stores, clients and the single reply port through explicit dependencies.
+Create `reply/reply-orchestrator.mjs` as the only interface allowed to submit buyer replies. It owns action-ID stability, placeholder rejection, human-takeover checks, deduplication and outbox submission. During migration, existing send helpers delegate to this interface without changing action payloads or timing.
 
-### Wave 3 — order lifecycle
+### Wave 3 — quote orchestration
 
-Create `orders/create-order-lifecycle.mjs` owning created/paid/price-changed transitions and deterministic price-change gates. It cannot send directly; it returns reply intents to the reply port.
+Create `quote/quote-orchestrator.mjs` owning image receipt, quote draft fusion, recognition, showtime resolution, quote result persistence and quote follow-ups. It receives stores, clients and the single reply port through explicit dependencies. Wanda pricing and lock rules remain in V3.
 
-### Wave 4 — Agent conversation flow
+### Wave 4 — order orchestration
 
-Move Agent scheduling/active execution glue from `workflow.mjs` into `agent/create-conversation-agent-flow.mjs`. Tool implementations remain typed and cannot import bootstrap or admin code.
+Create `orders/order-orchestrator.mjs` owning created/paid/price-changed transitions and deterministic price-change gates. It cannot send directly; it returns typed reply intents to `reply-orchestrator.mjs`.
 
-### Wave 5 — application decomposition
+### Wave 5 — provider-neutral AI boundary
+
+Create `ai/ai-orchestrator.mjs` around the existing Agent implementation before introducing another provider. It accepts bounded source-time snapshots and returns only typed low-risk decisions or reply drafts. It cannot send messages or invoke transaction tools.
+
+After that seam is stable, add Dify only as a Shadow provider:
+
+- `ai/dify-client.mjs`
+- `ai/dify-response-validator.mjs`
+- a Dify provider registered with `ai/ai-orchestrator.mjs`
+
+Use Dify's published Workflow service API in blocking mode for stateless FAQ, intent, draft, and handoff classification. Do not use Dify `conversation_id` as authoritative memory; local source-time conversation snapshots remain authoritative. App API keys stay server-side, request/response payloads are bounded and redacted, and timeout/invalid schema produces no buyer message. Dify outputs may contain only `intent`, `confidence`, `reply_draft`, `handoff_recommended`, bounded `reason_code`, and bounded `missing_fields`.
+
+Do not expose Wanda tools to a Dify Workflow. Dify may not quote, lock, cancel, change price, send, create fulfillment tasks, or invent transaction facts. Promotion remains Shadow -> automatic safety audit -> optional human comparison -> low-risk Canary -> low-risk Active, with the existing unique execution-owner gates.
+
+Dify's repository uses a modified Apache 2.0 license with additional multi-tenant and frontend branding conditions. Initial deployment must use one internal workspace without rebranding; any future multi-workspace SaaS use requires license review.
+
+### Wave 6 — application decomposition
 
 Extract from `application.mjs`:
 
@@ -96,4 +115,4 @@ git diff --check
 manual review of event outcomes/action IDs/reply ownership
 ```
 
-Every wave is one reviewable commit with an independent rollback point. Agent ownership changes are explicitly excluded until decomposition is complete.
+Every wave is one reviewable commit with an independent rollback point. Agent ownership changes are explicitly excluded until decomposition is complete. Dify integration starts only after the event, reply, quote/order, and provider-neutral AI seams have passed the full characterization suite.
