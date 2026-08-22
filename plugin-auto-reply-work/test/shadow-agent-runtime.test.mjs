@@ -463,6 +463,58 @@ test('Active price-change requests remain hard-disabled before any tool executio
   assert.equal(writes, 0);
 });
 
+test('Active W+ seat lookup uses the read-only realtime endpoint with a system-parsed row', async () => {
+  const seatEnvelope = { ...envelope, payload: { ...envelope.payload, content: '8排还有W+位置吗', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-seat-lookup-')), 'runs.json'));
+  await store.initialize();
+  const calls = []; const queued = [];
+  const recognition = { cinema: '测试万达影城', movie: '测试电影', date: '2026-08-22', showtime: '19:30' };
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: seatEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: { quote_draft: { recognition_artifact: { status: 'recognized', tenant_id: 'tenant-1', recognition } } }, messages: [] }; } },
+    planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '查询W+座位', action: 'show_available_wplus_seats', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家询问8排' }; } },
+    getSettings: async () => ({ quote_enabled: true }),
+    quotePreviewClient: {
+      async availableSeats(input) { calls.push(input); return { row: 8, seats: ['8排10座', '8排11座'], available_count: 2, wplus_offer_available: true, matched_cinema_name: '测试万达影城' }; },
+      async quote() { throw new Error('seat lookup must not start a temporary price probe'); },
+    },
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(seatEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.deepEqual(calls, [{ recognition, row: 8 }]);
+  assert.equal(queued.length, 1);
+  assert.match(queued[0].text, /8排10座、8排11座/u);
+  const run = await store.get('active:tenant-1:event-1');
+  assert.deepEqual(run.observations[0].facts, {
+    requested_row: 8, available_count: 2, seat_numbers: ['8排10座', '8排11座'],
+    wplus_offer_available: true, cinema: '测试万达影城',
+  });
+});
+
+test('Active W+ seat lookup fails closed without a row and never calls realtime seats', async () => {
+  const seatEnvelope = { ...envelope, payload: { ...envelope.payload, content: '还有W+位置吗', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-seat-row-missing-')), 'runs.json'));
+  await store.initialize();
+  let calls = 0;
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: seatEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: { quote_draft: { recognition_artifact: { status: 'recognized', tenant_id: 'tenant-1', recognition: { cinema: '测试万达' } } } }, messages: [] }; } },
+    planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '查询W+座位', action: 'show_available_wplus_seats', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '座位咨询' }; } },
+    getSettings: async () => ({ quote_enabled: true }),
+    quotePreviewClient: { async availableSeats() { calls += 1; return {}; } },
+    replyOutboxStore: { async enqueue() { return { created: true }; } },
+  });
+  await runtime.schedule(seatEnvelope, { mode: 'active' });
+  await runtime.tick();
+  const run = await store.get('active:tenant-1:event-1');
+  assert.equal(calls, 0);
+  assert.equal(run.result.reason, 'seat_row_required');
+});
+
 test('durable active image turn invokes real recognition, read-only resolution, and realtime quote tools in order', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-real-quote-')), 'runs.json'));
   await store.initialize();

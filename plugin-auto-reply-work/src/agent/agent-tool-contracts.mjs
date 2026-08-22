@@ -50,7 +50,8 @@ export const AGENT_TOOL_CONTRACTS = Object.freeze({
     next: ['respond', 'handoff'], authoritativeReply: true,
   }),
   list_available_wplus_seats: contract({
-    facts: SOURCE_RESULT, next: ['respond', 'handoff'], authoritativeReply: true,
+    facts: [...SOURCE_RESULT, 'requested_row', 'available_count', 'seat_numbers', 'wplus_offer_available', 'cinema'],
+    next: ['respond', 'handoff'], authoritativeReply: true,
   }),
   record_seat_preference: contract({
     effect: 'write', facts: ['preference_recorded', 'circled_delivery_instruction_recorded'], next: ['respond', 'handoff'], authoritativeReply: true,

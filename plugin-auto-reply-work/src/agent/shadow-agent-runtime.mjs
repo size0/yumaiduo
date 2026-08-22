@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v25-price-change-request-contract';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v26-readonly-wplus-seats';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -172,7 +172,38 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       };
     },
     async recognize_and_quote() { return sourceObservation(source, 'recognize_and_quote'); },
-    async list_available_wplus_seats() { return sourceObservation(source, 'list_available_wplus_seats'); },
+    async list_available_wplus_seats() {
+      if (mode !== 'active') return sourceObservation(source, 'list_available_wplus_seats');
+      const message = text(source?.envelope?.payload?.content ?? source?.envelope?.payload?.text, 1_000);
+      const row = Number(message.match(/(?:^|\D)([1-9]\d?)\s*排/u)?.[1]);
+      if (!Number.isInteger(row) || row < 1 || row > 99) {
+        return { status: 'error', tool: 'list_available_wplus_seats', summary: '缺少需要查询的明确排数', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_row_required' };
+      }
+      const recognition = quoteInput?.recognition;
+      if (!recognition || typeof recognition !== 'object' || Array.isArray(recognition)) {
+        return { status: 'error', tool: 'list_available_wplus_seats', summary: '缺少已识别的影院场次事实', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_lookup_artifact_missing' };
+      }
+      if (typeof quotePreviewClient?.availableSeats !== 'function') {
+        return { status: 'error', tool: 'list_available_wplus_seats', summary: '只读实时座位工具不可用', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_reader_unavailable' };
+      }
+      const result = await quotePreviewClient.availableSeats({ recognition, row });
+      const seats = Array.isArray(result?.seats)
+        ? result.seats.map((seat) => text(seat, 80)).filter((seat) => new RegExp(`^${row}排\\d{1,3}座$`, 'u').test(seat)).slice(0, 30)
+        : [];
+      const availableCount = Number.isSafeInteger(result?.available_count) && result.available_count >= seats.length
+        ? result.available_count
+        : seats.length;
+      const offerAvailable = result?.wplus_offer_available === true;
+      const cinema = text(result?.matched_cinema_name ?? recognition.cinema, 160);
+      const authoritativeReply = offerAvailable && seats.length
+        ? `当前万达实时座位图中，${row}排可选W+座位：${seats.join('、')}。座位状态可能变化，请以提交订单时页面为准。`
+        : `当前万达实时座位图中，${row}排暂未确认到可选W+优惠座位。`;
+      return {
+        status: 'success', tool: 'list_available_wplus_seats', summary: '已完成只读实时W+座位查询',
+        facts: { requested_row: row, available_count: availableCount, seat_numbers: seats, wplus_offer_available: offerAvailable, ...(cinema ? { cinema } : {}) },
+        authoritative_reply: authoritativeReply, next_actions: ['respond'],
+      };
+    },
     async record_seat_preference() {
       const snapshot = source?.result?.agent_reply_snapshot;
       const authoritativeReply = mode !== 'active' && snapshot?.kind === 'conversation_follow_up' ? text(snapshot.text, 1_000) : '';
