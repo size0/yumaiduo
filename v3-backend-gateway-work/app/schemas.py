@@ -425,6 +425,7 @@ AgentAction = Literal[
     "read_active_quote",
     "request_price_change",
     "create_manual_task",
+    "get_manual_task_status",
     "show_available_wplus_seats",
     "record_seat_preference",
     "confirm_quote",
@@ -535,7 +536,10 @@ class AgentPlan(BaseModel):
 
         if contains_forbidden(self.arguments):
             raise ValueError("agent arguments contain transaction authority")
-        tool_actions = {"start_quote", "recognize_image", "resolve_showtime", "quote_realtime", "read_active_quote", "request_price_change", "create_manual_task", "show_available_wplus_seats", "record_seat_preference", "confirm_quote", "get_order_status", "read_linked_order", "inspect_ticket_request"}
+        parameterless_actions = {"request_price_change", "confirm_quote", "get_manual_task_status", "show_available_wplus_seats"}
+        if self.action in parameterless_actions and self.arguments:
+            raise ValueError("agent action accepts no model arguments")
+        tool_actions = {"start_quote", "recognize_image", "resolve_showtime", "quote_realtime", "read_active_quote", "request_price_change", "create_manual_task", "get_manual_task_status", "show_available_wplus_seats", "record_seat_preference", "confirm_quote", "get_order_status", "read_linked_order", "inspect_ticket_request"}
         if self.action in tool_actions and self.reply.strip():
             raise ValueError("agent tool actions must wait for authoritative observations before replying")
         return self

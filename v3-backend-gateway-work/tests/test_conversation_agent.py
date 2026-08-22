@@ -59,6 +59,7 @@ def test_agent_scene_classification_is_deterministic_and_prefers_transaction_sta
         ({"latest_message": "我发选座截图，两张多少钱", "has_image": True}, "intake"),
         ({"latest_message": "这个报价还能优惠吗", "state": {"stage": "quoted", "facts": {"quote_total_cents": 10000}}}, "quote_followup"),
         ({"latest_message": "订单改好价格了吗", "state": {"stage": "waiting_payment", "facts": {"has_linked_order": True}}}, "order"),
+        ({"latest_message": "人工处理进度怎么样了"}, "order"),
         ({"latest_message": "什么时候出票", "state": {"stage": "paid_manual_delivery", "facts": {"paid": True}}}, "fulfillment"),
         ({"latest_message": "我要申请退款售后"}, "aftersale"),
     ]
@@ -169,6 +170,26 @@ def test_agent_plan_accepts_bounded_inspection_and_authoritative_order_read_acti
         })
         assert plan.action == action
         assert plan.reply == ""
+
+
+def test_agent_plan_accepts_bounded_manual_status_and_readonly_seat_actions_without_arguments() -> None:
+    for action in ("get_manual_task_status", "show_available_wplus_seats"):
+        plan = AgentPlan.model_validate({
+            "intent": "订单进度" if action == "get_manual_task_status" else "选座核价",
+            "confidence": 0.96, "goal": "读取权威事实", "action": action, "arguments": {},
+            "missing_fields": [], "reply": "", "needs_human": False, "reason": "需要只读工具事实",
+        })
+        assert plan.action == action
+    for action in ("request_price_change", "confirm_quote", "get_manual_task_status", "show_available_wplus_seats"):
+        try:
+            AgentPlan.model_validate({
+                "intent": "订单进度", "confidence": 0.96, "goal": "请求工具", "action": action,
+                "arguments": {"row": 8}, "missing_fields": [], "reply": "", "needs_human": False, "reason": "参数由系统注入",
+            })
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{action} must reject all model arguments")
 
 
 def test_agent_plan_accepts_only_low_risk_generalized_conversation_experience() -> None:
