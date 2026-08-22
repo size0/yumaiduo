@@ -36,6 +36,7 @@ import {
   paymentSafeOrderInstruction,
   quoteSupersessionPreview,
 } from './quote/quote-followup-policy.mjs';
+import { createQuoteOrchestrator } from './quote/quote-orchestrator.mjs';
 
 export { paymentSafeOrderInstruction };
 
@@ -63,6 +64,7 @@ export function createWorkflow({
 }) {
   const executor = createActionExecutor({ coreFor, messageRegistry: eventStore, imageLoader, ...(sleep ? { sleep } : {}) });
   const replyOrchestrator = createReplyOrchestrator({ actionExecutor: executor });
+  const quoteOrchestrator = createQuoteOrchestrator({ quotePreviewClient, conversationContextStore });
   const executeAction = (action) => isBuyerReplyAction(action)
     ? replyOrchestrator.deliver(action)
     : executor.execute(action);
@@ -351,25 +353,13 @@ export function createWorkflow({
     }
     const orderLinked = quotePreviewClient ? await isOrderLinkedChat(envelope) : false;
     const quoteEnvelope = quotePreviewClient && !orderLinked ? await enrichImageWithLatestBuyerText(envelope) : envelope;
-    const canUseTwoStageQuote = quotePreviewClient
-      && !orderLinked
-      && runtimeSettings.recognition_enabled
-      && typeof quotePreviewClient.recognize === 'function'
-      && typeof quotePreviewClient.quote === 'function';
-    // Vision is independent of the first-contact platform send. Starting it
-    // first removes one network round trip from a new buyer's quote latency,
-    // while the final quote still waits for the notice result and all gates.
-    const reusedRecognition = canUseTwoStageQuote ? countOnlyRecognitionArtifact(quoteContext, envelope) : null;
-    const recognitionStartedAt = canUseTwoStageQuote ? Date.now() : 0;
-    let recognitionFinishedAt = 0;
-    const prefetchedRecognition = canUseTwoStageQuote
-      ? reusedRecognition
-        ? Promise.resolve({ status: 'fulfilled', value: reusedRecognition })
-        : settle(quotePreviewClient.recognize(quoteEnvelope)).then((result) => {
-          recognitionFinishedAt = Date.now();
-          return result;
-        })
-      : null;
+    // Recognition starts during prepare so it remains parallel with the first
+    // contact platform send. Quote execution and draft claiming stay behind a
+    // provider-neutral orchestration boundary with no reply capability.
+    const preparedQuote = quoteOrchestrator.prepare({
+      envelope, quoteEnvelope, quoteContext, runtimeSettings, orderLinked,
+    });
+    const canUseTwoStageQuote = preparedQuote.canUseTwoStageQuote;
     const firstContactClaimed = !orderLinked
       && autoReplyEnabled
       && runtimeSettings.ai_reply_enabled
@@ -420,60 +410,14 @@ export function createWorkflow({
       progressDelayMs - (Date.now() - processingStartedAt),
       sendQuoteProcessingNotice,
     );
-    // A text supplement may reuse the immediately preceding image for one
-    // combined recognition-and-price refresh.
-    let recognitionDurationMs = 0;
-    let quoteDurationMs = 0;
-    let quoteResult;
-    let quoteAttemptDeduplicated = false;
-    let recognitionReuseReason = '';
-    let circledDeliveryInstructionImage = '';
-
-    // Vision identifies bounded facts first; the buyer receives one combined
-    // identity-and-price message only after the realtime quote finishes.
-    if (canUseTwoStageQuote) {
-      const recognitionResult = await awaitQuoteStage(prefetchedRecognition);
-      const recognized = recognitionResult.status === 'fulfilled' ? recognitionResult.value : null;
-      recognitionReuseReason = reusedRecognition ? 'count_only_quote_draft' : String(recognized?.recognition_reused ?? '').slice(0, 80);
-      recognitionDurationMs = recognitionReuseReason ? 0 : (recognitionFinishedAt || Date.now()) - recognitionStartedAt;
-      // The final debounced message can be “我已拍下”; preserve a preceding
-      // explicit buyer count in the same short quote round. This is buyer text,
-      // never an inferred hand-drawn-circle count.
-      const contextTicketCount = recentExplicitTicketCount(quoteContext?.messages);
-      const recognizedForQuote = recognized?.status === 'recognized' && !positiveCents(recognized.ticket_count) && contextTicketCount
-        ? { ...recognized, ticket_count: contextTicketCount }
-        : recognized;
-      if (recognizedForQuote?.recognition?.hand_drawn_circle?.exists === true) {
-        circledDeliveryInstructionImage = firstImageUrl(quoteEnvelope.payload) ?? '';
-      }
-      quoteAttemptDeduplicated = recognizedForQuote?.status === 'quote_deduplicated';
-      if (recognizedForQuote?.status === 'recognized' && typeof conversationContextStore?.recordQuoteDraft === 'function') {
-        await conversationContextStore.recordQuoteDraft(envelope.tenantId, quoteEnvelope.payload ?? {}, {
-          recognition: recognizedForQuote.recognition,
-          ticketCount: recognizedForQuote.ticket_count,
-          imageUrl: firstImageUrl(quoteEnvelope.payload),
-          fieldSources: recognizedForQuote.field_sources,
-          recognitionArtifact: recognizedForQuote,
-        });
-        quoteAttemptDeduplicated = typeof conversationContextStore?.claimQuoteDraftAttempt === 'function'
-          ? !(await conversationContextStore.claimQuoteDraftAttempt(envelope.tenantId, quoteEnvelope.payload ?? {}))
-          : false;
-      }
-      const quoteStartedAt = Date.now();
-      const quoteOperation = quoteAttemptDeduplicated
-        ? Promise.resolve({ status: 'fulfilled', value: { status: 'quote_deduplicated' } })
-        : recognizedForQuote?.status === 'recognized' && runtimeSettings.quote_enabled
-        ? settle(quotePreviewClient.quote(recognizedForQuote))
-        : recognitionResult.status === 'rejected'
-        ? Promise.resolve(recognitionResult)
-        : Promise.resolve({ status: 'fulfilled', value: runtimeSettings.quote_enabled ? recognizedForQuote : { status: 'quote_disabled' } });
-      quoteResult = await awaitQuoteStage(quoteOperation);
-      quoteDurationMs = Date.now() - quoteStartedAt;
-    } else {
-      const quoteStartedAt = Date.now();
-      quoteResult = await awaitQuoteStage(settle(quotePreviewClient && !orderLinked && runtimeSettings.recognition_enabled && runtimeSettings.quote_enabled && typeof quotePreviewClient.capture === 'function' ? quotePreviewClient.capture(quoteEnvelope) : null));
-      quoteDurationMs = Date.now() - quoteStartedAt;
-    }
+    const {
+      quoteResult,
+      quoteAttemptDeduplicated,
+      recognitionReuseReason,
+      circledDeliveryInstructionImage,
+      recognitionDurationMs,
+      quoteDurationMs,
+    } = await preparedQuote.complete({ awaitStage: awaitQuoteStage });
 
     const preview = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
     const hasVerifiedQuoteReply = typeof preview?.reply_text === 'string' && preview.reply_text.trim().length > 0;
@@ -1770,18 +1714,6 @@ function isImageMessageText(value) {
 function firstImageUrl(payload = {}) {
   const urls = Array.isArray(payload.imageUrls) ? payload.imageUrls : [];
   return urls.find((value) => typeof value === 'string' && value.trim()) ?? null;
-}
-
-function countOnlyRecognitionArtifact(quoteContext, envelope, now = Date.now()) {
-  if (firstImageUrl(envelope?.payload)) return null;
-  const content = String(envelope?.payload?.content ?? envelope?.payload?.text ?? '').replace(/\s+/gu, '').trim();
-  if (!/^(?:要|需要|一共|共|买)?(?:[1-9]|1\d|20|[一二两三四五六七八九十]{1,3})(?:张|个(?:座位|位置)?)[。！!？?]*$/u.test(content)) return null;
-  const count = requestedTicketCount(content);
-  const draft = quoteContext?.facts?.quote_draft;
-  const artifact = draft?.recognition_artifact;
-  if (!Number.isInteger(count) || count < 1 || count > 20 || Number(draft?.expires_at ?? 0) <= now
-    || artifact?.status !== 'recognized' || !artifact.recognition || typeof artifact.recognition !== 'object') return null;
-  return { ...structuredClone(artifact), ticket_count: count };
 }
 
 function activeQuoteDraftText(value, now = Date.now()) {
