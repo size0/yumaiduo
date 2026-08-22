@@ -32,8 +32,8 @@
 - [ ] 在受限环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，不得复用账号Token
 - [ ] 执行 `cd v3-backend-gateway-work && python scripts/validate_direct_gateway_env.py --require-enabled`
 - [ ] 确认账号池权限为服务账号可读、不可组写、其他用户无权限，并确认预检至少发现1个可用W+账号
-- [ ] 在干净目录重新执行 `npm ci --ignore-scripts && npm test`、插件494项测试和V3 177项测试，记录提交SHA
-- [ ] 使用可实现npm安全审计API的官方registry重新执行生产依赖审计；镜像源的`NOT_IMPLEMENTED`不能视为通过
+- [x] 已在源码提交 `65a702b` 后执行官方registry `npm ci --ignore-scripts`、插件494项测试和V3 177项测试；代码未发生变化
+- [ ] 使用可实现npm安全审计API的官方registry重新执行生产依赖审计；本轮官方registry在TLS连接建立前断开，未形成审计结果，不能视为通过
 - [ ] 创建独立、不可变、可回滚的V3和插件release目录；不得覆盖当前生产release
 - [ ] 部署后验证 `/health`、插件 `/healthz`、systemd `active`、`NRestarts=0`、WorkingDirectory和错误日志
 - [ ] 使用只读官方座位请求进行smoke；临时试价只能使用预先批准的受控场次，并必须确认取消和座位恢复
