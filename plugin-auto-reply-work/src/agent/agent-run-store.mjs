@@ -48,6 +48,24 @@ function external(record) {
   });
 }
 
+function evaluationIndexEntry(record) {
+  const actions = Array.isArray(record.result?.trace) ? record.result.trace.map((item) => bounded(item?.action, 64)) : [];
+  const tools = Object.values(record.toolCalls ?? {}).map((item) => bounded(item?.tool, 64));
+  const hasImage = record.result?.source_snapshot?.has_image === true
+    || tools.includes('recognize_image')
+    || actions.some((action) => ['recognize_image', 'start_quote'].includes(action));
+  return Object.freeze({
+    run_id: record.runId,
+    event_key: record.eventKey,
+    tenant_id: record.tenantId,
+    mode: record.mode,
+    status: record.status,
+    runtime_version: bounded(record.result?.runtime_version, 120),
+    has_image: hasImage,
+    updated_at: record.updatedAt,
+  });
+}
+
 export class AgentRunStore {
   #file; #now; #state = null; #chain = Promise.resolve();
   constructor(file, { now = () => Date.now() } = {}) { this.#file = file; this.#now = now; }
@@ -175,6 +193,7 @@ export class AgentRunStore {
 
   async get(runId) { const state = await this.#read(); return state.runs[String(runId)] ? external(state.runs[String(runId)]) : null; }
   async list({ tenantId, limit = 100 } = {}) { const state = await this.#read(); return Object.values(state.runs).filter((run) => !tenantId || run.tenantId === String(tenantId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, Math.max(1, Math.min(500, Number(limit)))).map(external); }
+  async listEvaluationIndex({ tenantId } = {}) { const state = await this.#read(); return Object.values(state.runs).filter((run) => !tenantId || run.tenantId === String(tenantId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(evaluationIndexEntry); }
   async health() { const state = await this.#read(); const counts = {}; for (const run of Object.values(state.runs)) counts[run.status] = (counts[run.status] ?? 0) + 1; return { revision: state.revision, runCounts: counts }; }
 
   async #finish(runId, leaseId, update, { release = true } = {}) {

@@ -32,21 +32,42 @@ export function createLifecycleController({
   let workerPool = null;
   let agentWorkerPool = null;
   let agentOutboxWorkerPool = null;
+  const unavailableHistoricalEventKeys = new Set();
 
   async function scheduleHistoricalEvaluations() {
     if (!shadowAgentRuntime || historicalEvaluationRunning) return;
     historicalEvaluationRunning = true;
     try {
-      const runs = await storage.agentRunStore.list({ limit: 500 });
-      const eventKeys = historicalEvaluationCandidatesFrom(runs, { runtimeVersion });
+      const runs = typeof storage.agentRunStore.listEvaluationIndex === 'function'
+        ? await storage.agentRunStore.listEvaluationIndex()
+        : await storage.agentRunStore.list({ limit: 500 });
+      const eventKeys = historicalEvaluationCandidatesFrom(runs, {
+        runtimeVersion,
+        batchSize: 1,
+        candidateWindowSize: 20,
+        excludedEventKeys: unavailableHistoricalEventKeys,
+      });
       if (!eventKeys.length) return;
       const events = typeof storage.eventStore.getMany === 'function' ? await storage.eventStore.getMany(eventKeys) : [];
-      for (const event of events) {
-        if (event?.status === 'completed' && event.envelope?.event === 'im.message.received') {
-          await shadowAgentRuntime.schedule(event.envelope, { mode: 'evaluation' });
+      const eventsByKey = new Map(events.map((event) => [
+        String(event?.key ?? `${event?.envelope?.tenantId ?? ''}:${event?.envelope?.id ?? ''}`),
+        event,
+      ]));
+      let scheduled = false;
+      for (const key of eventKeys) {
+        const event = eventsByKey.get(key);
+        if (event?.status !== 'completed' || event.envelope?.event !== 'im.message.received') {
+          unavailableHistoricalEventKeys.add(key);
+          continue;
         }
+        await shadowAgentRuntime.schedule(event.envelope, { mode: 'evaluation' });
+        scheduled = true;
+        break;
       }
-      agentWorkerPool?.poll();
+      while (unavailableHistoricalEventKeys.size > 5_000) {
+        unavailableHistoricalEventKeys.delete(unavailableHistoricalEventKeys.values().next().value);
+      }
+      if (scheduled) agentWorkerPool?.poll();
     } catch (error) {
       logger.warn?.('[agent-evaluation] historical replay scheduling failed', { error: String(error?.message ?? error) });
     } finally {
@@ -167,30 +188,63 @@ export function runConcurrentTicks(workflow, concurrency = 4) {
   }));
 }
 
-export function historicalEvaluationCandidatesFrom(runs, { runtimeVersion, target = 100, batchSize = 1 } = {}) {
+export function historicalEvaluationCandidatesFrom(runs, {
+  runtimeVersion,
+  target = null,
+  imageTarget = 100,
+  textTarget = 100,
+  batchSize = 1,
+  candidateWindowSize = null,
+  excludedEventKeys = null,
+} = {}) {
   const version = String(runtimeVersion ?? '').trim();
-  const maximum = Number.isSafeInteger(Number(target)) ? Math.max(1, Math.min(100, Number(target))) : 100;
-  const batch = Number.isSafeInteger(Number(batchSize)) ? Math.max(1, Math.min(20, Number(batchSize))) : 10;
   if (!version) return [];
+  const legacyTarget = Number.isSafeInteger(Number(target)) ? Number(target) : null;
+  const boundedTarget = (value) => Math.max(1, Math.min(100, Number(value)));
+  const maximumImage = boundedTarget(legacyTarget ?? (Number.isSafeInteger(Number(imageTarget)) ? imageTarget : 100));
+  const maximumText = boundedTarget(legacyTarget ?? (Number.isSafeInteger(Number(textTarget)) ? textTarget : 100));
+  const batch = Number.isSafeInteger(Number(batchSize)) ? Math.max(1, Math.min(20, Number(batchSize))) : 10;
   const values = Array.isArray(runs) ? runs : [];
   const evaluationPrefix = `evaluation:${version}:`;
-  const current = values.filter((run) => run?.result?.runtime_version === version || String(run?.run_id ?? '').startsWith(evaluationPrefix));
+  const runtimeVersionFor = (run) => String(run?.runtime_version ?? run?.result?.runtime_version ?? '');
+  const isImage = (run) => {
+    if (run?.has_image === true || run?.result?.source_snapshot?.has_image === true) return true;
+    const tools = Array.isArray(run?.tool_calls) ? run.tool_calls.map((call) => String(call?.tool ?? '')) : [];
+    const actions = Array.isArray(run?.result?.trace) ? run.result.trace.map((item) => String(item?.action ?? '')) : [];
+    return tools.includes('recognize_image') || actions.some((action) => ['recognize_image', 'start_quote'].includes(action));
+  };
+  const sourceKinds = new Map(values
+    .filter((run) => run?.mode === 'shadow' && run?.event_key)
+    .map((run) => [String(run.event_key), isImage(run) ? 'image' : 'text']));
+  const kindFor = (run) => isImage(run) || sourceKinds.get(String(run?.event_key ?? '')) === 'image' ? 'image' : 'text';
+  const current = values.filter((run) => runtimeVersionFor(run) === version || String(run?.run_id ?? '').startsWith(evaluationPrefix));
   const currentEventKeys = new Set(current.map((run) => String(run?.event_key ?? '')).filter(Boolean));
   const evaluationRuns = current.filter((run) => run?.mode === 'evaluation');
   const inFlight = evaluationRuns.filter((run) => ['queued', 'processing', 'retry'].includes(run?.status)).length;
-  const remaining = maximum - evaluationRuns.length;
-  const slots = Math.max(0, Math.min(batch - inFlight, remaining));
-  if (!slots) return [];
-  const score = (run) => {
-    const tools = Array.isArray(run?.tool_calls) ? run.tool_calls.map((call) => String(call?.tool ?? '')) : [];
-    const actions = Array.isArray(run?.result?.trace) ? run.result.trace.map((item) => String(item?.action ?? '')) : [];
-    return tools.includes('recognize_image') || actions.some((action) => ['recognize_image', 'start_quote'].includes(action)) ? 1 : 0;
-  };
+  const slots = Math.max(0, batch - inFlight);
+  const requestedWindow = Number(candidateWindowSize);
+  const selectionLimit = Number.isSafeInteger(requestedWindow)
+    ? Math.max(slots, Math.min(20, Math.max(1, requestedWindow)))
+    : slots;
+  let imageRemaining = Math.max(0, maximumImage - evaluationRuns.filter((run) => kindFor(run) === 'image').length);
+  let textRemaining = Math.max(0, maximumText - evaluationRuns.filter((run) => kindFor(run) === 'text').length);
+  if (!slots || (!imageRemaining && !textRemaining)) return [];
+  const excluded = excludedEventKeys instanceof Set ? excludedEventKeys : new Set();
+  const candidates = values
+    .filter((run) => run?.mode === 'shadow' && run?.event_key && !currentEventKeys.has(String(run.event_key)) && !excluded.has(String(run.event_key)))
+    .sort((left, right) => Number(isImage(right)) - Number(isImage(left)) || String(right.updated_at ?? '').localeCompare(String(left.updated_at ?? '')));
   const seen = new Set();
-  return values
-    .filter((run) => run?.mode === 'shadow' && run?.event_key && !currentEventKeys.has(String(run.event_key)))
-    .sort((left, right) => score(right) - score(left) || String(right.updated_at ?? '').localeCompare(String(left.updated_at ?? '')))
-    .map((run) => String(run.event_key))
-    .filter((key) => key && !seen.has(key) && seen.add(key))
-    .slice(0, slots);
+  const selected = [];
+  for (const run of candidates) {
+    const key = String(run.event_key);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const kind = kindFor(run);
+    if ((kind === 'image' && imageRemaining <= 0) || (kind === 'text' && textRemaining <= 0)) continue;
+    selected.push(key);
+    if (kind === 'image') imageRemaining -= 1;
+    else textRemaining -= 1;
+    if (selected.length >= selectionLimit) break;
+  }
+  return selected;
 }

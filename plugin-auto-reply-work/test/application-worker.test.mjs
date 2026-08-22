@@ -18,8 +18,34 @@ test('historical replay scheduler prioritizes image-like sources and keeps only 
     { run_id: `evaluation:${version}:existing`, event_key: 'tenant:old', mode: 'evaluation', status: 'processing', result: null, tool_calls: [] },
   ];
   assert.deepEqual(historicalEvaluationCandidatesFrom(runs, { runtimeVersion: version, target: 100, batchSize: 2 }), ['tenant:image']);
+  assert.deepEqual(historicalEvaluationCandidatesFrom(runs, {
+    runtimeVersion: version, target: 100, batchSize: 1, candidateWindowSize: 20,
+  }), [], 'a larger scan window must not create a second in-flight evaluation');
   runs.push({ run_id: `evaluation:${version}:image`, event_key: 'tenant:image', mode: 'evaluation', status: 'completed', result: { runtime_version: version }, tool_calls: [] });
-  assert.deepEqual(historicalEvaluationCandidatesFrom(runs, { runtimeVersion: version, target: 2, batchSize: 10 }), []);
+  assert.deepEqual(historicalEvaluationCandidatesFrom(runs, { runtimeVersion: version, target: 2, batchSize: 10 }), ['tenant:text']);
+});
+
+test('historical replay keeps independent 100-run image and text quotas', () => {
+  const version = 'runtime-v4';
+  const imageEvaluations = Array.from({ length: 100 }, (_, index) => ({
+    run_id: `evaluation:${version}:image-${index}`, event_key: `tenant:image-done-${index}`,
+    mode: 'evaluation', status: 'completed', runtime_version: version, has_image: true,
+  }));
+  const candidates = [
+    { run_id: 'shadow:image-new', event_key: 'tenant:image-new', mode: 'shadow', status: 'completed', has_image: true, updated_at: '2026-01-02' },
+    { run_id: 'shadow:text-new', event_key: 'tenant:text-new', mode: 'shadow', status: 'completed', has_image: false, updated_at: '2026-01-01' },
+  ];
+  assert.deepEqual(historicalEvaluationCandidatesFrom([...imageEvaluations, ...candidates], {
+    runtimeVersion: version, imageTarget: 100, textTarget: 100, batchSize: 10,
+  }), ['tenant:text-new']);
+
+  const textEvaluations = Array.from({ length: 100 }, (_, index) => ({
+    run_id: `evaluation:${version}:text-${index}`, event_key: `tenant:text-done-${index}`,
+    mode: 'evaluation', status: 'completed', runtime_version: version, has_image: false,
+  }));
+  assert.deepEqual(historicalEvaluationCandidatesFrom([...textEvaluations, ...candidates], {
+    runtimeVersion: version, imageTarget: 100, textTarget: 100, batchSize: 10,
+  }), ['tenant:image-new']);
 });
 
 test('agent audit samples deduplicate one source event and prefer current live runs over historical replay', () => {

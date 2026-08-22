@@ -44,6 +44,30 @@ test('historical evaluation runs enqueue in one idempotent bounded batch', async
   await assert.rejects(() => store.enqueueMany(Array.from({ length: 501 }, () => batch[0])), /invalid agent run batch/u);
 });
 
+test('evaluation scheduling index scans every persisted run without exposing trace payloads', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-index-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  const inputs = Array.from({ length: 601 }, (_, index) => ({
+    runId: `shadow:index-${index}`, eventKey: `tenant-1:event-${index}`, tenantId: 'tenant-1', mode: 'shadow',
+  }));
+  await store.enqueueMany(inputs.slice(0, 500));
+  await store.enqueueMany(inputs.slice(500));
+  assert.equal((await store.list({ limit: 1_000 })).length, 500, 'operator list remains bounded');
+  assert.equal((await store.listEvaluationIndex()).length, 601, 'scheduler index must scan the complete durable set');
+
+  const claimed = await store.claimDue();
+  await store.complete(claimed.run_id, claimed.lease_id, {
+    runtime_version: 'v1', trace: [{ action: 'recognize_image' }], source_snapshot: { has_image: true },
+  });
+  const image = (await store.listEvaluationIndex()).find((item) => item.run_id === claimed.run_id);
+  assert.equal(image.has_image, true);
+  assert.equal(image.runtime_version, 'v1');
+  assert.equal('result' in image, false);
+  assert.equal('trace' in image, false);
+  assert.equal('tool_calls' in image, false);
+});
+
 test('agent run deadline prevents stale queued work and supports an explicit in-flight timeout', async () => {
   let now = 10_000;
   const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-deadline-')), 'runs.json');

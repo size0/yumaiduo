@@ -123,6 +123,41 @@ test('does not create an Agent worker when no planner runtime exists', async () 
   assert.equal(state.controller.status().agent_worker, 'stopped');
 });
 
+test('historical scheduler prefers the complete durable evaluation index', async () => {
+  let indexReads = 0;
+  let boundedReads = 0;
+  const scheduled = [];
+  const controller = createLifecycleController({
+    storage: {
+      initialize: async () => {},
+      agentRunStore: {
+        listEvaluationIndex: async () => { indexReads += 1; return [
+          { run_id: 'shadow:missing-image', event_key: 'tenant:missing-image', mode: 'shadow', status: 'completed', has_image: true },
+          { run_id: 'shadow:old-text', event_key: 'tenant:old-text', mode: 'shadow', status: 'completed', has_image: false },
+        ]; },
+        list: async () => { boundedReads += 1; return []; },
+      },
+      eventStore: { getMany: async () => [{ status: 'completed', envelope: { id: 'old-text', tenantId: 'tenant', event: 'im.message.received', payload: {} } }] },
+    },
+    workflow: { tick: async () => null },
+    shadowAgentRuntime: { tick: async () => null, schedule: async (event) => scheduled.push(event.id), stop() {} },
+    agentReplyOutboxDispatcher: { tick: async () => null },
+    agentHumanComparisonScanner: { tick: async () => null },
+    workerIntervalMs: 250,
+    runtimeVersion: 'runtime-v1',
+    logger: { warn() {}, error() {} },
+    createWorkerPool: () => ({ poll() {}, async stop() {} }),
+    setIntervalFn: (callback, milliseconds) => ({ callback, milliseconds, unref() {} }),
+    clearIntervalFn() {},
+  });
+  await controller.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(indexReads, 1);
+  assert.equal(boundedReads, 0);
+  assert.deepEqual(scheduled, ['old-text']);
+  await controller.stop();
+});
+
 test('contains historical and human comparison background failures', async () => {
   const warnings = [];
   const intervals = [];
