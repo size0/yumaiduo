@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 插件测试 494 项、V3 后端测试 177 项通过；V3 测试无弃用警告
+- [x] 插件测试 494 项、V3 后端测试 178 项通过；V3 测试无弃用警告
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -32,10 +32,10 @@
 - [ ] 在受限环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，不得复用账号Token
 - [ ] 执行 `cd v3-backend-gateway-work && python scripts/validate_direct_gateway_env.py --require-enabled`
 - [ ] 确认账号池权限为服务账号可读、不可组写、其他用户无权限，并确认预检至少发现1个可用W+账号
-- [x] 已在源码提交 `65a702b` 后执行官方registry `npm ci --ignore-scripts`、插件494项测试和V3 177项测试；代码未发生变化
+- [x] 已在源码提交 `987e372` 使用官方registry干净安装的依赖执行插件494项测试和V3 178项测试；代码未发生变化
 - [ ] 使用可实现npm安全审计API的官方registry重新执行生产依赖审计；本轮官方registry在TLS连接建立前断开，未形成审计结果，不能视为通过
 - [ ] 创建独立、不可变、可回滚的V3和插件release目录；不得覆盖当前生产release
-- [ ] 部署后验证 `/health`、插件 `/healthz`、systemd `active`、`NRestarts=0`、WorkingDirectory和错误日志
+- [ ] 部署后验证V3 `/health.runtime_contract=wanda-v3-v11-pricing-account-evidence`、插件 `/healthz.application.agent_runtime_version=wanda-agent-runtime-v28-pricing-evidence-gate`、systemd `active`、`NRestarts=0`、WorkingDirectory和错误日志
 - [ ] 使用只读官方座位请求进行smoke；临时试价只能使用预先批准的受控场次，并必须确认取消和座位恢复
 - [ ] 确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、Active 0%、Canary关闭且kill switch开启
 - [ ] 为当前V28 Runtime重新采集至少100轮自动安全审计和100轮图片样本；旧版本样本不得补门槛
