@@ -1,6 +1,8 @@
 import { agentCanaryReadinessFrom, automatedAgentSafetyReviewFrom } from './agent-evaluation-store.mjs';
 import { createStorageBundle } from './bootstrap/create-storage-bundle.mjs';
 import { createAgentRuntimeBundle } from './bootstrap/create-agent-runtime-bundle.mjs';
+import { createLifecycleController } from './bootstrap/create-lifecycle-controller.mjs';
+export { createWorkerPool, historicalEvaluationCandidatesFrom } from './bootstrap/create-lifecycle-controller.mjs';
 import { createImageLoader } from './image-loader.mjs';
 import { createUiHandler } from './ui-handler.mjs';
 import { createQuotePreviewClient } from './quote-preview-client.mjs';
@@ -60,93 +62,41 @@ export async function createApplication({ config, platformRuntime, backendClient
     autoReplyEnabled: config.replyAutoSendEnabled,
     logger,
   });
-  let timer = null;
-  let agentTimer = null;
-  let agentOutboxTimer = null;
-  let humanComparisonTimer = null;
-  let historicalEvaluationTimer = null;
-  let humanComparisonRunning = false;
-  let historicalEvaluationRunning = false;
-  let workerPool = null;
-  let agentWorkerPool = null;
-  let agentOutboxWorkerPool = null;
+  const lifecycle = createLifecycleController({
+    storage,
+    workflow,
+    shadowAgentRuntime,
+    agentReplyOutboxDispatcher,
+    agentHumanComparisonScanner,
+    workerIntervalMs: config.workerIntervalMs,
+    runtimeVersion: AGENT_RUNTIME_VERSION,
+    logger,
+  });
   const orderDisplayCache = new Map();
   const shopDisplayCache = new Map();
 
   async function start() {
-    await storage.initialize();
-    workerPool = createWorkerPool(workflow, { concurrency: 4, logger });
-    timer = setInterval(() => workerPool?.poll(), config.workerIntervalMs);
-    timer.unref();
-    workerPool.poll();
-    if (shadowAgentRuntime) {
-      agentWorkerPool = createWorkerPool(shadowAgentRuntime, { concurrency: 1, logger });
-      agentTimer = setInterval(() => agentWorkerPool?.poll(), Math.max(500, config.workerIntervalMs));
-      agentTimer.unref();
-      agentWorkerPool.poll();
-    }
-    agentOutboxWorkerPool = createWorkerPool(agentReplyOutboxDispatcher, { concurrency: 1, logger });
-    agentOutboxTimer = setInterval(() => agentOutboxWorkerPool?.poll(), Math.max(500, config.workerIntervalMs));
-    agentOutboxTimer.unref();
-    agentOutboxWorkerPool.poll();
-    const scheduleHistoricalEvaluations = async () => {
-      if (!shadowAgentRuntime || historicalEvaluationRunning) return;
-      historicalEvaluationRunning = true;
-      try {
-        const runs = await agentRunStore.list({ limit: 500 });
-        const eventKeys = historicalEvaluationCandidatesFrom(runs, { runtimeVersion: AGENT_RUNTIME_VERSION });
-        if (!eventKeys.length) return;
-        const events = typeof eventStore.getMany === 'function' ? await eventStore.getMany(eventKeys) : [];
-        for (const event of events) {
-          if (event?.status === 'completed' && event.envelope?.event === 'im.message.received') {
-            await shadowAgentRuntime.schedule(event.envelope, { mode: 'evaluation' });
-          }
-        }
-        agentWorkerPool?.poll();
-      } catch (error) {
-        logger.warn?.('[agent-evaluation] historical replay scheduling failed', { error: String(error?.message ?? error) });
-      } finally { historicalEvaluationRunning = false; }
-    };
-    historicalEvaluationTimer = setInterval(scheduleHistoricalEvaluations, 15_000);
-    historicalEvaluationTimer.unref();
-    void scheduleHistoricalEvaluations();
-    const scanHumanComparisons = async () => {
-      if (humanComparisonRunning) return;
-      humanComparisonRunning = true;
-      try { await agentHumanComparisonScanner.tick(); }
-      catch (error) { logger.warn?.('[human-comparison] background scan failed', { error: String(error?.message ?? error) }); }
-      finally { humanComparisonRunning = false; }
-    };
-    humanComparisonTimer = setInterval(scanHumanComparisons, 30_000);
-    humanComparisonTimer.unref();
+    await lifecycle.start();
   }
 
   async function stop() {
-    if (timer) clearInterval(timer);
-    if (agentTimer) clearInterval(agentTimer);
-    if (agentOutboxTimer) clearInterval(agentOutboxTimer);
-    if (humanComparisonTimer) clearInterval(humanComparisonTimer);
-    if (historicalEvaluationTimer) clearInterval(historicalEvaluationTimer);
-    timer = null; agentTimer = null; agentOutboxTimer = null; humanComparisonTimer = null; historicalEvaluationTimer = null;
-    shadowAgentRuntime?.stop?.();
-    const pool = workerPool; const agentPool = agentWorkerPool; const outboxPool = agentOutboxWorkerPool;
-    workerPool = null; agentWorkerPool = null; agentOutboxWorkerPool = null;
-    await Promise.all([pool?.stop(), agentPool?.stop(), outboxPool?.stop()]);
+    await lifecycle.stop();
   }
 
   async function health() {
     const [queue, agentQueue, agentOutbox, manualTasks, humanComparisons] = await Promise.all([eventStore.health(), agentRunStore.health(), agentReplyOutboxStore.health(), agentManualTaskStore.health(), agentHumanComparisonStore.health()]);
+    const workerStatus = lifecycle.status();
     return {
       ok: true,
-      worker: timer ? 'running' : 'stopped',
-      agent_worker: agentTimer ? 'running' : 'stopped',
-      agent_outbox_worker: agentOutboxTimer ? 'running' : 'stopped',
+      worker: workerStatus.worker,
+      agent_worker: workerStatus.agent_worker,
+      agent_outbox_worker: workerStatus.agent_outbox_worker,
       queue,
       agent_queue: agentQueue,
       agent_outbox: agentOutbox,
       manual_tasks: manualTasks,
-      historical_evaluation_worker: historicalEvaluationTimer ? 'running' : 'stopped',
-      human_comparison_worker: humanComparisonTimer ? 'running' : 'stopped',
+      historical_evaluation_worker: workerStatus.historical_evaluation_worker,
+      human_comparison_worker: workerStatus.human_comparison_worker,
       human_comparisons: humanComparisons,
     };
   }
@@ -608,73 +558,6 @@ export function uniqueAgentEvaluationRuns(runs, { runtimeVersion = AGENT_RUNTIME
     if (!byEvent.has(run.event_key)) byEvent.set(run.event_key, run);
     return byEvent;
   }, new Map()).values()];
-}
-
-export function createWorkerPool(workflow, { concurrency = 4, logger = console } = {}) {
-  const limit = Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 16 ? concurrency : 4;
-  const active = new Set();
-  let running = true;
-
-  function poll() {
-    if (!running) return;
-    while (active.size < limit) {
-      let task;
-      let completedWork = false;
-      task = Promise.resolve()
-        .then(() => workflow.tick())
-        .then((result) => {
-          completedWork = result != null;
-          return result;
-        })
-        .catch((error) => {
-          logger.error?.('workflow tick failed', { error });
-          return null;
-        })
-        .finally(() => {
-          active.delete(task);
-          // Refill immediately after real work. Empty polls wait for the normal
-          // timer, preventing a busy loop while still allowing later timer
-          // ticks to use free slots alongside an older slow quote.
-          if (running && completedWork) queueMicrotask(poll);
-        });
-      active.add(task);
-    }
-  }
-
-  async function stop() {
-    running = false;
-    await Promise.allSettled([...active]);
-  }
-
-  return Object.freeze({ poll, stop });
-}
-
-export function historicalEvaluationCandidatesFrom(runs, { runtimeVersion, target = 100, batchSize = 1 } = {}) {
-  const version = String(runtimeVersion ?? '').trim();
-  const maximum = Number.isSafeInteger(Number(target)) ? Math.max(1, Math.min(100, Number(target))) : 100;
-  const batch = Number.isSafeInteger(Number(batchSize)) ? Math.max(1, Math.min(20, Number(batchSize))) : 10;
-  if (!version) return [];
-  const values = Array.isArray(runs) ? runs : [];
-  const evaluationPrefix = `evaluation:${version}:`;
-  const current = values.filter((run) => run?.result?.runtime_version === version || String(run?.run_id ?? '').startsWith(evaluationPrefix));
-  const currentEventKeys = new Set(current.map((run) => String(run?.event_key ?? '')).filter(Boolean));
-  const evaluationRuns = current.filter((run) => run?.mode === 'evaluation');
-  const inFlight = evaluationRuns.filter((run) => ['queued', 'processing', 'retry'].includes(run?.status)).length;
-  const remaining = maximum - evaluationRuns.length;
-  const slots = Math.max(0, Math.min(batch - inFlight, remaining));
-  if (!slots) return [];
-  const score = (run) => {
-    const tools = Array.isArray(run?.tool_calls) ? run.tool_calls.map((call) => String(call?.tool ?? '')) : [];
-    const actions = Array.isArray(run?.result?.trace) ? run.result.trace.map((item) => String(item?.action ?? '')) : [];
-    return tools.includes('recognize_image') || actions.some((action) => ['recognize_image', 'start_quote'].includes(action)) ? 1 : 0;
-  };
-  const seen = new Set();
-  return values
-    .filter((run) => run?.mode === 'shadow' && run?.event_key && !currentEventKeys.has(String(run.event_key)))
-    .sort((left, right) => score(right) - score(left) || String(right.updated_at ?? '').localeCompare(String(left.updated_at ?? '')))
-    .map((run) => String(run.event_key))
-    .filter((key) => key && !seen.has(key) && seen.add(key))
-    .slice(0, slots);
 }
 
 export function runConcurrentTicks(workflow, concurrency = 4) {
