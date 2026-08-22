@@ -38,3 +38,12 @@ python -m pytest
 ## 配置与数据
 
 运行时配置、密钥、Cookie、买家数据、日志、依赖目录和构建产物都被 `.gitignore` 排除。仅提交示例配置，真实凭据应通过受限环境变量或部署平台配置。
+
+启用万达官方直连的发布必须先执行无敏感信息的环境预检：
+
+```bash
+cd v3-backend-gateway-work
+python scripts/validate_direct_gateway_env.py --require-enabled
+```
+
+预检验证直连开关、独立 `WANDA_PRICING_ACCOUNT_REF_KEY`、账号池文件权限和可用W+账号数量；输出不包含密钥、Token、手机号、账号标识或账号池路径。
