@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v20-immediate-receipt-city';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v21-active-quote-reference';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -144,6 +144,22 @@ function runtimeTools(source, state, mode, manualTaskStore, coreFor, quotePrevie
         status: 'success', tool: 'quote_realtime', summary: '实时核价已完成', authoritative_reply: authoritativeReply,
         facts: { quote_succeeded: true, unit_quote_cents: delivery.unit_quote_cents, total_quote_cents: delivery.total_quote_cents, ticket_count: delivery.ticket_count, pricing_rule_version: delivery.pricing_rule_version, _quote_delivery: delivery },
         next_actions: ['respond'],
+      };
+    },
+    async read_active_quote() {
+      const total = safePositiveInteger(state?.facts?.quote_total_cents ?? state?.facts?.total_quote_cents);
+      const count = safePositiveInteger(state?.facts?.quote_ticket_count ?? state?.facts?.ticket_count);
+      const explicitUnit = safePositiveInteger(state?.facts?.quote_unit_cents ?? state?.facts?.unit_quote_cents);
+      const unit = explicitUnit ?? (total && count && total % count === 0 ? total / count : null);
+      if (!total || !count || !unit) {
+        return { status: 'error', tool: 'read_active_quote', summary: '当前报价已失效或证据不完整', facts: {}, next_actions: ['respond'], stop_reason: 'active_quote_missing_or_expired' };
+      }
+      const snapshot = source?.result?.agent_reply_snapshot;
+      const snapshotReply = ['quote', 'conversation_follow_up'].includes(String(snapshot?.kind)) ? text(snapshot.text, 1_000) : '';
+      const authoritativeReply = snapshotReply || `当前有效报价是${(unit / 100).toFixed(2)}元/张，${count}张合计${(total / 100).toFixed(2)}元。接受本次报价请回复“确认”，提交订单后请先不要付款，等待系统确认改价成功后再付款。`;
+      return {
+        status: 'success', tool: 'read_active_quote', summary: '已读取当前有效权威报价', authoritative_reply: authoritativeReply,
+        facts: { unit_quote_cents: unit, total_quote_cents: total, ticket_count: count }, next_actions: ['respond'],
       };
     },
     async recognize_and_quote() { return sourceObservation(source, 'recognize_and_quote'); },

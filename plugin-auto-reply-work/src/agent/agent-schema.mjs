@@ -7,6 +7,7 @@ const ACTIONS = new Set([
   'recognize_image',
   'resolve_showtime',
   'quote_realtime',
+  'read_active_quote',
   'request_price_change',
   'create_manual_task',
   'show_available_wplus_seats',

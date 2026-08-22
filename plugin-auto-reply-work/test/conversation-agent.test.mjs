@@ -19,7 +19,7 @@ test('agent plan accepts only the bounded customer-service action space', () => 
     intent: '选座核价', confidence: 0.93, goal: '查询实时价格', action: 'start_quote',
     arguments: { use_current_message: true }, missing_fields: [], reply: '', needs_human: false, reason: '信息完整',
   });
-  for (const action of ['inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_linked_order', 'request_price_change', 'create_manual_task']) {
+  for (const action of ['inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'read_linked_order', 'request_price_change', 'create_manual_task']) {
     assert.equal(normalizeAgentPlan({ intent: '选座核价', confidence: 0.9, goal: '推进', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '受控工具' }).action, action);
   }
   assert.throws(() => normalizeAgentPlan({
@@ -67,6 +67,9 @@ test('deterministic guards correct unsafe or context-blind model routing', () =>
   assert.equal(guardAgentPlan(plan, { ...baseContext, latest_message: '确认', now: 1_000, state: { facts: { quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: 2_000 } } }).action, 'confirm_quote');
   assert.equal(guardAgentPlan(plan, { ...baseContext, latest_message: '想要11排18和19座', state: { facts: { quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: 2_000 } }, now: 1_000 }).action, 'record_seat_preference');
   assert.equal(guardAgentPlan(plan, { ...baseContext, latest_message: '改好了吗', state: { facts: { order_id: 'internal', stage: 'waiting_payment' } } }).action, 'get_order_status');
+  for (const latestMessage of ['不是53？', '这个呢']) {
+    assert.equal(guardAgentPlan(plan, { ...baseContext, latest_message: latestMessage, now: 1_000, state: { facts: { quote_unit_cents: 5900, quote_total_cents: 5900, quote_ticket_count: 1, quote_expires_at: 2_000 } } }).action, 'read_active_quote');
+  }
   const repeat = normalizeAgentPlan({ ...plan, action: 'start_quote', reply: '' });
   assert.equal(guardAgentPlan(repeat, { ...baseContext, latest_message: '我等等考虑一下', now: 1_000, state: { facts: { quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: 2_000 } } }).action, 'wait');
   assert.equal(guardAgentPlan(repeat, { ...baseContext, latest_message: '红点标出来两位置能买吗' }).action, 'record_seat_preference');
@@ -84,6 +87,14 @@ test('deterministic guards correct unsafe or context-blind model routing', () =>
   assert.equal(guardAgentPlan(wrongTextVision, { ...baseContext, latest_message: '宁波奉化万达多少', has_image: false, state: { facts: { quote_draft: { recognition_artifact: { status: 'recognized', recognition: {} } } } } }).action, 'resolve_showtime');
   const prematureQuote = normalizeAgentPlan({ ...plan, action: 'quote_realtime', reply: '' });
   assert.equal(guardAgentPlan(prematureQuote, { ...baseContext, latest_message: '多少钱', has_image: false, state: { facts: { quote_draft: { fields: {} } } } }).action, 'inspect_ticket_request');
+});
+
+test('policy authorizes active quote follow-ups only through the authoritative quote reader', () => {
+  const result = authorizeAgentPlan(normalizeAgentPlan({
+    intent: '票价咨询', confidence: 0.95, goal: '读取当前报价', action: 'read_active_quote',
+    arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家追问当前报价',
+  }), { ...baseContext, now: 1_000, state: { facts: { quote_total_cents: 5900, quote_ticket_count: 1, quote_expires_at: 2_000 } } });
+  assert.deepEqual(result, { status: 'allowed', tool: 'read_active_quote', reason: 'active_quote_available' });
 });
 
 test('policy maps legacy and current order actions to the authoritative linked-order reader', () => {

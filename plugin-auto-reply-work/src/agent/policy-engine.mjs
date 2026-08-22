@@ -62,6 +62,7 @@ export function guardAgentPlan(plan, context = {}) {
   const hasReusableRecognition = Boolean(stateFacts.quote_draft?.recognition_artifact || stateFacts.recognition_draft || stateFacts.quote_draft_recognition);
   const hasValidActiveQuote = activeQuote(stateFacts, now);
   const confirmation = /^(?:确认|确定|可以|行|好|好的|ok|OK|就这个|就这样)$/u.test(message);
+  const activeQuoteFollowUp = /^(?:这个呢|(?:不是|不是说|怎么不是)\d+(?:\.\d{1,2})?(?:元|块)?(?:吗|嘛)?[？?]?|(?:你这|这个|这边)?(?:多少钱|多少|什么价)[？?]?)$/u.test(message);
   const fulfillmentQuestion = /(?:什么时候|多久|何时).{0,8}(?:出票|发货)|(?:出票|发货).{0,8}(?:了吗|没有|进度|状态)|^(?:你)?已发货$/u.test(message);
   const seatPreference = /\d{1,2}排.{0,24}\d{1,2}(?:座|号)?/u.test(message)
     || /(?:红点|绿点|圈出|圈的|画的|标出).{0,16}(?:位置|座位|两个|两位置)/u.test(message)
@@ -72,6 +73,7 @@ export function guardAgentPlan(plan, context = {}) {
   } else if (context.has_image === true && !imageObserved && !quoteObserved) action = 'recognize_image';
   else if (context.has_image === true && ticketImageObserved && !showtimeObserved && !quoteObserved && action !== 'quote_realtime') action = 'resolve_showtime';
   else if (context.has_image === true && ticketImageObserved && showtimeObserved && !quoteObserved) action = 'quote_realtime';
+  else if (hasValidActiveQuote && activeQuoteFollowUp) action = 'read_active_quote';
   else if (hasValidActiveQuote && confirmation) action = 'confirm_quote';
   else if (seatPreference) action = 'record_seat_preference';
   else if (hasLinkedOrder && !orderObserved && /(?:订单|拍下|付款|支付|改价|改好|进度|状态|出票|发货)/u.test(message)) action = 'get_order_status';
@@ -120,6 +122,10 @@ export function authorizeAgentPlan(plan, context = {}) {
     if (context.settings?.quote_enabled !== true) return denied('quote_feature_disabled');
     const resolved = Array.isArray(context.observations) && context.observations.some((item) => item?.tool === 'resolve_showtime' && item?.status === 'success');
     return resolved ? allowed('quote_realtime', 'realtime_quote_requested') : denied('showtime_resolution_required');
+  }
+  if (plan.action === 'read_active_quote') {
+    const now = Number(context.now ?? Date.now());
+    return activeQuote(stateFacts, now) ? allowed('read_active_quote', 'active_quote_available') : denied('active_quote_missing_or_expired');
   }
   if (plan.action === 'request_price_change') return denied('agent_price_change_not_enabled');
   if (plan.action === 'show_available_wplus_seats') {

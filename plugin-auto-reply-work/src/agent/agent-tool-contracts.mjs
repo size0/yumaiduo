@@ -1,6 +1,6 @@
 const ACTIONS = Object.freeze([
   'respond', 'ask_for_image', 'ask_for_city', 'ask_for_missing_information',
-  'inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime',
+  'inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote',
   'create_manual_task', 'record_seat_preference', 'confirm_quote', 'handoff', 'wait',
 ]);
 
@@ -37,6 +37,9 @@ export const AGENT_TOOL_CONTRACTS = Object.freeze({
     effect: 'external_temporary_write',
     facts: [...SOURCE_RESULT, 'unit_quote_cents', 'total_quote_cents', 'ticket_count', 'pricing_rule_version', '_quote_delivery'],
     next: ['respond', 'create_manual_task', 'handoff'], authoritativeReply: true,
+  }),
+  read_active_quote: contract({
+    facts: ['unit_quote_cents', 'total_quote_cents', 'ticket_count'], next: ['respond'], authoritativeReply: true,
   }),
   recognize_and_quote: contract({
     effect: 'external_temporary_write',

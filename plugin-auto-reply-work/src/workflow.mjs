@@ -1651,7 +1651,8 @@ function isBareAcknowledgement(value) {
 
 function isCurrentQuoteQuestion(value) {
   const content = String(value ?? '').replace(/\s+/gu, '').trim();
-  return /^(?:(?:你这|这个|这边|那这个)?(?:多少钱|多少|什么价)|现在多少钱|价格(?:呢|多少)?|会员价(?:可以)?优惠吗|[WwＷｗ][+＋](?:价格|优惠)?(?:呢|吗)?)[？?]?$/u.test(content)
+  return /^(?:(?:你这|这个|这边|那这个)?(?:多少钱|多少|什么价)|这个呢|现在多少钱|价格(?:呢|多少)?|会员价(?:可以)?优惠吗|[WwＷｗ][+＋](?:价格|优惠)?(?:呢|吗)?)[？?]?$/u.test(content)
+    || /^(?:不是|不是说|怎么不是)\d+(?:\.\d{1,2})?(?:元|块)?(?:吗|嘛)?[？?]?$/u.test(content)
     || /^(?:那我|我)?(?:就是)?直接.{0,20}(?:拍下|下单)(?:是吧|对吧|吗|么)?[？?]?$/u.test(content);
 }
 

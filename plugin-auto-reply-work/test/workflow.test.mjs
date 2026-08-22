@@ -1212,7 +1212,7 @@ test('typed seat preferences after an active quote do not query seats or recheck
 });
 
 test('price and purchase questions reuse the delivered active quote without recognition or another temporary probe', async () => {
-  for (const [index, content] of ['多少钱', '你这多少', '会员价可以优惠吗', '那我就是直接62.70一张拍下是吧'].entries()) {
+  for (const [index, content] of ['多少钱', '你这多少', '会员价可以优惠吗', '那我就是直接62.70一张拍下是吧', '不是53？', '这个呢'].entries()) {
     const { workflow, calls } = harness({
       quotePreviewClient: { async recognize() { throw new Error('must not re-recognize an active quote'); }, async quote() { throw new Error('must not re-quote an active quote'); } },
       conversationContextStore: { async get() { return { facts: { quote_unit_cents: 6270, quote_total_cents: 12540, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000, stage: 'quoted' }, messages: [] }; } },
