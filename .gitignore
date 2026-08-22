@@ -7,6 +7,8 @@
 **/runtime/
 **/logs/
 **/*.log
+.pi/
+.playwright-cli/
 
 # Dependencies and generated caches.
 **/node_modules/
@@ -18,12 +20,27 @@
 # Local inspection, release packages, and other generated artifacts.
 .tmp/
 .tmp-*/
+/.tmp-*
+/tmp-*
+/nul
 .v3-deploy-candidate/
 output/
 dist/
 *.tar.gz
 *.tgz
 *.zip
+**/*.tmp
+**/.coverage
+**/htmlcov/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.tox/
+
+# Historical local source trees intentionally excluded from the V3 baseline.
+/backend/
+/frontend/
+/ticket-system-v3-gateway-work/
+/wd-main/
 
 # OS/editor files.
 .DS_Store
