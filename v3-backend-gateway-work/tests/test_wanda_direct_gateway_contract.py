@@ -322,11 +322,17 @@ def test_account_lease_is_bounded_fenced_and_cannot_be_released_by_an_expired_ho
     assert first is not None
     assert 0 < first.expires_at - clock.monotonic() <= 10.0
     assert leases.try_acquire("eligible") is None
+    clock.advance(9.0)
+    renewed = leases.renew(first, min_ttl_seconds=40.0)
+    assert renewed is not None
+    assert renewed.expires_at - clock.monotonic() >= 40.0
+    assert leases.try_acquire("eligible") is None
 
-    clock.advance(10.0)
+    clock.advance(40.0)
     second = leases.try_acquire("eligible")
     assert second is not None
     assert second.lease_id != first.lease_id
+    assert leases.renew(first, min_ttl_seconds=40.0) is None
     assert leases.release(first) is False
     assert leases.try_acquire("eligible") is None
     assert leases.release(second) is True
@@ -572,7 +578,7 @@ def test_background_release_recheck_is_bounded_and_never_changes_failed_quote_re
         )
         gateway, clock, logger, _factory = build_gateway(
             contract, [account("eligible")], {"eligible": client},
-            lease_ttl_seconds=180.0,
+            lease_ttl_seconds=10.0,
         )
 
         with pytest.raises(contract.DirectGatewayError) as raised:

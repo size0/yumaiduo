@@ -61,6 +61,23 @@ class AccountLeaseRegistry:
             self._leases[account] = lease
             return lease
 
+    def renew(self, lease: AccountLease, *, min_ttl_seconds: float = 0.0) -> AccountLease | None:
+        requested_ttl = float(min_ttl_seconds)
+        if requested_ttl < 0 or requested_ttl > 300:
+            raise ValueError("min_ttl_seconds must be between 0 and 300")
+        now = float(self._clock.monotonic())
+        with self._lock:
+            current = self._leases.get(lease.account_id)
+            if current is None or current.lease_id != lease.lease_id or current.expires_at <= now:
+                return None
+            renewed = AccountLease(
+                current.account_id,
+                current.lease_id,
+                now + max(self._ttl_seconds, requested_ttl),
+            )
+            self._leases[lease.account_id] = renewed
+            return renewed
+
     def release(self, lease: AccountLease) -> bool:
         with self._lock:
             current = self._leases.get(lease.account_id)
@@ -290,6 +307,11 @@ class WandaDirectGateway:
         attempts = 0
         try:
             for delay in self._delayed_release_recheck_delays:
+                renewed = self._leases.renew(lease, min_ttl_seconds=delay + 5.0)
+                if renewed is None:
+                    outcome = "release_recheck_lease_lost"
+                    break
+                lease = renewed
                 await self._clock.sleep(delay)
                 attempts += 1
                 try:
