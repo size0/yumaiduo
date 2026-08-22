@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.main import _buyer_app_has_lower_price, _preview_failure_code, _quote_reply_text, _recognition_needs_seat_or_count_confirmation, _validate_quote_reply_template, create_app
+from app.main import _buyer_app_has_lower_price, _preview_failure_code, _quote_reply_text, _recognition_needs_seat_or_count_confirmation, _validate_quote_reply_template, create_app, lifespan
 from app.local_catalog import CatalogResolution
 from app.wanda_quote import _quote_failure_code, _quote_failure_message, _round_quote_cents_to_tenth, _unit_quote_cents
 from app.plugin_bridge_store import DEFAULT_REPLY_TEMPLATES, PluginBridgeStore
@@ -23,6 +23,52 @@ from app.reply_preview import SYSTEM_PROMPT as REPLY_SYSTEM_PROMPT, ReplyPreview
 from app.wanda_quote import LocalTicketGateway, RealtimeQuoteService, SeatFact, TicketGateway, _gateway_auth_headers, _requested_zone, _seat_facts, _select_seats, _showtime_start, _wplus_probe_candidates
 from app.wanda_quote_store import WandaQuoteSettingsStore
 from app.quote_preview_store import QuotePreviewStore, empty_pending_record
+
+
+def test_quote_service_waits_for_delayed_release_rechecks_on_close() -> None:
+    class DirectGateway:
+        def __init__(self) -> None:
+            self.waits = 0
+
+        async def wait_for_background_rechecks(self) -> None:
+            self.waits += 1
+
+    direct = DirectGateway()
+    service = RealtimeQuoteService(FakeTicketGateway(), direct_lock_gateway=direct)
+    asyncio.run(service.aclose())
+    assert direct.waits == 1
+
+
+def test_application_lifespan_drains_quote_release_rechecks_before_shutdown() -> None:
+    class QuoteService:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    class StorageService:
+        async def cleanup_expired_images(self, _settings) -> None:
+            return None
+
+    class CosStore:
+        def read(self):
+            return {}
+
+    class State:
+        storage_service = StorageService()
+        cos_store = CosStore()
+        quote_service = QuoteService()
+
+    class App:
+        state = State()
+
+    async def scenario() -> None:
+        async with lifespan(App()):
+            pass
+
+    asyncio.run(scenario())
+    assert App.state.quote_service.closed is True
 
 
 def test_structured_seat_failures_have_precise_defaults_without_false_manual_handoff() -> None:

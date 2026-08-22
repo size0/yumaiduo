@@ -33,6 +33,7 @@ from .wanda_quote_store import WandaQuoteSettingsStore
 
 COS_CLEANUP_INTERVAL_SECONDS = 30 * 60
 PREVIEW_VISION_RETRY_DELAY_SECONDS = 0.35
+QUOTE_SHUTDOWN_TIMEOUT_SECONDS = 65
 SCREENSHOT_PRICE_CONFIDENCE_THRESHOLD = 0.85
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,14 @@ async def lifespan(app: FastAPI):
             await cleanup_task
         except asyncio.CancelledError:
             pass
+        close_quote_service = getattr(app.state.quote_service, "aclose", None)
+        if callable(close_quote_service):
+            try:
+                await asyncio.wait_for(close_quote_service(), timeout=QUOTE_SHUTDOWN_TIMEOUT_SECONDS)
+            except TimeoutError:
+                # The original quote is already failed closed; shutdown must
+                # not hang indefinitely if an external read never returns.
+                pass
 
 
 def create_app(

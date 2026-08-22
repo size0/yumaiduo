@@ -595,6 +595,12 @@ class RealtimeQuoteService:
         self._match_cache: dict[str, tuple[float, Mapping[str, Any]]] = {}
         self._match_inflight: dict[str, asyncio.Task[Mapping[str, Any]]] = {}
 
+    async def aclose(self) -> None:
+        """Drain bounded delayed seat-release checks before service shutdown."""
+        wait_for_rechecks = getattr(self._direct_lock_gateway, "wait_for_background_rechecks", None)
+        if callable(wait_for_rechecks):
+            await wait_for_rechecks()
+
     @staticmethod
     def _has_complete_joint_identity(recognition: Recognition) -> bool:
         return bool(
