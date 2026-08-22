@@ -1,7 +1,5 @@
-import path from 'node:path';
-import { FileEventStore } from './event-store.mjs';
-import { ConversationContextStore } from './conversation-context-store.mjs';
-import { AgentEvaluationStore, agentCanaryReadinessFrom, automatedAgentSafetyReviewFrom } from './agent-evaluation-store.mjs';
+import { agentCanaryReadinessFrom, automatedAgentSafetyReviewFrom } from './agent-evaluation-store.mjs';
+import { createStorageBundle } from './bootstrap/create-storage-bundle.mjs';
 import { createImageLoader } from './image-loader.mjs';
 import { createUiHandler } from './ui-handler.mjs';
 import { createQuotePreviewClient } from './quote-preview-client.mjs';
@@ -9,11 +7,7 @@ import { createReplyPreviewClient } from './reply-preview-client.mjs';
 import { createConversationAgentClient } from './agent/conversation-agent-client.mjs';
 import { createAiOrchestrator } from './ai/ai-orchestrator.mjs';
 import { createDifyClient } from './ai/dify-client.mjs';
-import { AgentRunStore } from './agent/agent-run-store.mjs';
-import { AgentReplyOutboxStore } from './agent/agent-reply-outbox-store.mjs';
-import { AgentManualTaskStore } from './agent/agent-manual-task-store.mjs';
 import { agentTraceReplayFrom } from './agent/agent-trace-replay.mjs';
-import { AgentHumanComparisonStore } from './agent/agent-human-comparison-store.mjs';
 import { createAgentHumanComparisonScanner } from './agent/agent-human-comparison-scanner.mjs';
 import { agentImageOfflineEvaluationFrom } from './agent/agent-offline-evaluator.mjs';
 import { createAgentReplyOutboxDispatcher } from './agent/agent-reply-outbox-dispatcher.mjs';
@@ -31,12 +25,16 @@ const QUOTE_POLICY_FIELDS = Object.freeze([
 ]);
 
 export async function createApplication({ config, platformRuntime, backendClient, logger = console }) {
-  const eventStore = new FileEventStore(path.join(config.dataDir, 'events.json'), {
-    encryptionKey: config.configEncryptionKey,
-    retentionMs: config.eventRetentionDays * 24 * 60 * 60 * 1_000,
-  });
-  const conversationContextStore = new ConversationContextStore(path.join(config.dataDir, 'conversation-context.json'));
-  const agentEvaluationStore = new AgentEvaluationStore(path.join(config.dataDir, 'agent-evaluations.json')); 
+  const storage = createStorageBundle(config);
+  const {
+    eventStore,
+    conversationContextStore,
+    agentEvaluationStore,
+    agentRunStore,
+    agentReplyOutboxStore,
+    agentManualTaskStore,
+    agentHumanComparisonStore,
+  } = storage;
   const imageLoader = createImageLoader({ allowlist: config.imageHostAllowlist });
   const quotePreviewClient = createQuotePreviewClient(config);
   const replyPreviewClient = createReplyPreviewClient(config);
@@ -46,10 +44,6 @@ export async function createApplication({ config, platformRuntime, backendClient
     primaryProvider: conversationAgentProvider,
     shadowProvider: difyShadowProvider,
   });
-  const agentRunStore = new AgentRunStore(path.join(config.dataDir, 'agent-runs.json'));
-  const agentReplyOutboxStore = new AgentReplyOutboxStore(path.join(config.dataDir, 'agent-reply-outbox.json'));
-  const agentManualTaskStore = new AgentManualTaskStore(path.join(config.dataDir, 'agent-manual-tasks.json'));
-  const agentHumanComparisonStore = new AgentHumanComparisonStore(path.join(config.dataDir, 'agent-human-comparisons.json'));
   const agentHumanComparisonScanner = createAgentHumanComparisonScanner({
     conversationContextStore, eventStore, agentRunStore,
     coreFor: (tenantId) => platformRuntime.createClient(tenantId), comparisonStore: agentHumanComparisonStore, logger,
@@ -112,7 +106,7 @@ export async function createApplication({ config, platformRuntime, backendClient
   const shopDisplayCache = new Map();
 
   async function start() {
-    await Promise.all([eventStore.initialize(), agentRunStore.initialize(), agentReplyOutboxStore.initialize(), agentManualTaskStore.initialize()]);
+    await storage.initialize();
     workerPool = createWorkerPool(workflow, { concurrency: 4, logger });
     timer = setInterval(() => workerPool?.poll(), config.workerIntervalMs);
     timer.unref();
