@@ -8,6 +8,8 @@ errors, or logs.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -86,7 +88,11 @@ class _SystemClock:
 
 
 def _account_id(account: Mapping[str, Any]) -> str:
-    return str(account.get("account_id") or account.get("id") or account.get("phone") or "").strip()
+    opaque = str(account.get("account_id") or "").strip()
+    if opaque:
+        return opaque
+    identity = str(account.get("id") or account.get("phone") or account.get("mobile") or account.get("token") or "").strip()
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest() if identity else ""
 
 
 def _eligible_account(account: Mapping[str, Any]) -> bool:
@@ -234,3 +240,21 @@ class WandaDirectGateway:
             raise DirectGatewayError("invalid_direct_lock_request")
         normalized["total_price_cents"] = total
         return normalized
+
+
+def direct_gateway_enabled() -> bool:
+    return os.getenv("WANDA_DIRECT_GATEWAY_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def build_wanda_direct_gateway_from_env() -> WandaDirectGateway | None:
+    """Build the direct official path only after explicit operator opt-in."""
+    if not direct_gateway_enabled():
+        return None
+    from .wanda_official_api import DEFAULT_ACCOUNT_POOL_PATH, JsonWandaAccountSource, WandaOfficialApiClient
+
+    pool_path = os.getenv("WANDA_DIRECT_ACCOUNT_POOL_PATH", "").strip() or str(DEFAULT_ACCOUNT_POOL_PATH)
+    return WandaDirectGateway(
+        account_source=JsonWandaAccountSource(pool_path),
+        client_factory=lambda account: WandaOfficialApiClient(account),
+        lease_registry=AccountLeaseRegistry(ttl_seconds=180.0),
+    )

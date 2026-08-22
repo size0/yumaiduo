@@ -13,7 +13,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from .local_catalog import LocalWandaCatalog
-from .wanda_direct_gateway import DirectGatewayError
+from .wanda_direct_gateway import DirectGatewayError, build_wanda_direct_gateway_from_env
 from .schemas import AvailableWplusSeatsResponse, QuoteRealtimeRequest, QuoteRealtimeResponse, QuoteShowtimeResolveResponse, Recognition, SeatQuote, SeatZoneType
 
 
@@ -586,7 +586,7 @@ class RealtimeQuoteService:
     ) -> None:
         self._gateway = gateway or LocalTicketGateway()
         self._cinema_catalog = cinema_catalog
-        self._direct_lock_gateway = direct_lock_gateway
+        self._direct_lock_gateway = direct_lock_gateway if direct_lock_gateway is not None else build_wanda_direct_gateway_from_env()
         self._allow_friday_member_day = (
             allow_friday_member_day
             if allow_friday_member_day is not None
