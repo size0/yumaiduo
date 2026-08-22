@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v24-manual-task-status';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v25-price-change-request-contract';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -160,6 +160,15 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       return {
         status: 'success', tool: 'read_active_quote', summary: '已读取当前有效权威报价', authoritative_reply: authoritativeReply,
         facts: { unit_quote_cents: unit, total_quote_cents: total, ticket_count: count }, next_actions: ['respond'],
+      };
+    },
+    async request_price_change() {
+      if (mode === 'active') {
+        return { status: 'error', tool: 'request_price_change', summary: 'Agent改价申请执行尚未开放', facts: {}, next_actions: ['handoff'], stop_reason: 'agent_price_change_not_enabled' };
+      }
+      return {
+        status: 'success', tool: 'request_price_change', summary: '影子模式仅评估无参数改价申请，不执行平台改价',
+        facts: { price_change_requested: false }, next_actions: ['respond'],
       };
     },
     async recognize_and_quote() { return sourceObservation(source, 'recognize_and_quote'); },
@@ -412,7 +421,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
       const context = {
         event_id: String(source.envelope.id), tenant_id: String(source.envelope.tenantId),
         latest_message: text(payload.content ?? payload.text) || '[图片或非文本消息]', has_image: hasImage(payload),
-        settings, state: state ?? { facts: {}, messages: [] }, observations: run.observations, trace: run.trace,
+        settings, state: state ?? { facts: {}, messages: [] }, observations: run.observations, trace: run.trace, mode: run.mode,
         now: run.mode === 'evaluation' && Number.isSafeInteger(Number(source?.result?.agent_state_snapshot?.observed_at))
           ? Number(source.result.agent_state_snapshot.observed_at) : now(),
         human_takeover: false, signal: controller.signal,

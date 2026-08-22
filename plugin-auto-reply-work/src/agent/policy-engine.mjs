@@ -93,6 +93,7 @@ export function guardAgentPlan(plan, context = {}) {
 
 export function authorizeAgentPlan(plan, context = {}) {
   const stateFacts = facts(context);
+  const hasLinkedOrder = Boolean(stateFacts.order_id || stateFacts.has_linked_order);
   if (context.human_takeover === true) return stopped('human_takeover');
   if (PAID_STAGES.has(String(stateFacts.stage ?? ''))) return stopped('paid_order');
   // create_manual_task is the durable, bounded realization of a handoff. It
@@ -129,7 +130,14 @@ export function authorizeAgentPlan(plan, context = {}) {
     const now = Number(context.now ?? Date.now());
     return activeQuote(stateFacts, now) ? allowed('read_active_quote', 'active_quote_available') : denied('active_quote_missing_or_expired');
   }
-  if (plan.action === 'request_price_change') return denied('agent_price_change_not_enabled');
+  if (plan.action === 'request_price_change') {
+    if (context.mode === 'active') return denied('agent_price_change_not_enabled');
+    const now = Number(context.now ?? Date.now());
+    const requestable = hasLinkedOrder && stateFacts.quote_confirmed === true && activeQuote(stateFacts, now);
+    return requestable
+      ? allowed('request_price_change', 'price_change_request_simulation')
+      : denied('price_change_request_prerequisites_missing');
+  }
   if (plan.action === 'get_manual_task_status') return allowed('get_manual_task_status', 'manual_task_status_requested');
   if (plan.action === 'show_available_wplus_seats') {
     if (context.settings?.quote_enabled !== true) return denied('quote_feature_disabled');

@@ -7,7 +7,7 @@ import {
 
 test('every runtime tool has an explicit risk and observation contract', () => {
   for (const tool of [
-    'inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime',
+    'inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'request_price_change',
     'recognize_and_quote', 'list_available_wplus_seats', 'record_seat_preference',
     'confirm_active_quote', 'create_manual_task', 'get_manual_task_status', 'read_linked_order', 'policy_guard',
   ]) {
@@ -18,6 +18,7 @@ test('every runtime tool has an explicit risk and observation contract', () => {
     assert.ok(Array.isArray(contract.allowed_next_actions));
   }
   assert.equal(AGENT_TOOL_CONTRACTS.create_manual_task.effect, 'write');
+  assert.equal(AGENT_TOOL_CONTRACTS.request_price_change.effect, 'write');
   assert.equal(AGENT_TOOL_CONTRACTS.quote_realtime.effect, 'external_temporary_write');
   assert.equal(AGENT_TOOL_CONTRACTS.read_linked_order.effect, 'read');
   assert.equal(AGENT_TOOL_CONTRACTS.get_manual_task_status.effect, 'read');

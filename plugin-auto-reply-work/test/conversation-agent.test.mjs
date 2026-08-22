@@ -121,6 +121,24 @@ test('policy allows quote tools but never gives the agent transaction authority'
     state: { facts: { quote_total_cents: 10_600, quote_ticket_count: 2, quote_expires_at: 2_000 } },
   });
   assert.deepEqual(confirmed, { status: 'allowed', tool: 'confirm_active_quote', reason: 'active_quote_confirmable' });
+
+  const priceChangePlan = normalizeAgentPlan({
+    intent: '订单进度', confidence: 0.95, goal: '申请改价', action: 'request_price_change', arguments: {},
+    missing_fields: [], reply: '', needs_human: false, reason: '买家已提交订单',
+  });
+  const requestContext = {
+    ...baseContext, mode: 'shadow', now: 1_000,
+    state: { facts: { order_id: 'system-only', quote_confirmed: true, quote_total_cents: 10_600, quote_ticket_count: 2, quote_expires_at: 2_000 } },
+  };
+  assert.deepEqual(authorizeAgentPlan(priceChangePlan, requestContext), {
+    status: 'allowed', tool: 'request_price_change', reason: 'price_change_request_simulation',
+  });
+  assert.deepEqual(authorizeAgentPlan(priceChangePlan, { ...requestContext, mode: 'active' }), {
+    status: 'denied', tool: null, reason: 'agent_price_change_not_enabled',
+  });
+  assert.deepEqual(authorizeAgentPlan(priceChangePlan, { ...requestContext, state: { facts: {} } }), {
+    status: 'denied', tool: null, reason: 'price_change_request_prerequisites_missing',
+  });
 });
 
 test('policy closes the flow when paid, taken over, or quote authorization is stale', () => {

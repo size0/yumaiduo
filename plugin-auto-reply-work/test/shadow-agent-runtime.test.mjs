@@ -417,6 +417,52 @@ test('historical manual task evaluation never reads mutable current task state',
   assert.equal(run.result.reason, 'historical_manual_task_snapshot_unavailable');
 });
 
+test('Shadow can evaluate a parameterless price-change request without executing platform writes', async () => {
+  const requestEnvelope = { ...envelope, payload: { ...envelope.payload, content: '请处理一下', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-shadow-price-request-')), 'runs.json'));
+  await store.initialize();
+  let platformCalls = 0;
+  const plans = [
+    { intent: '订单进度', confidence: 0.99, goal: '申请改价', action: 'request_price_change', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '订单待付款' },
+    { intent: '订单进度', confidence: 0.99, goal: '说明状态', action: 'respond', arguments: {}, missing_fields: [], reply: '已记录您的处理请求。', needs_human: false, reason: '仅评估' },
+  ];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: requestEnvelope, result: {} }; } },
+    conversationContextStore: { async get() { return { facts: { order_id: 'system-only', quote_confirmed: true, quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000 }, messages: [] }; } },
+    planner: { async plan() { return plans.shift(); } }, getSettings: async () => ({}),
+    coreFor() { platformCalls += 1; throw new Error('Shadow must not access platform writes'); },
+  });
+  await runtime.schedule(requestEnvelope, { mode: 'shadow' });
+  await runtime.tick();
+  const run = await store.get('shadow:tenant-1:event-1');
+  assert.deepEqual(run.tool_calls.map((call) => call.tool), ['request_price_change']);
+  assert.deepEqual(run.observations[0].facts, { price_change_requested: false });
+  assert.equal(platformCalls, 0);
+});
+
+test('Active price-change requests remain hard-disabled before any tool execution', async () => {
+  const requestEnvelope = { ...envelope, payload: { ...envelope.payload, content: '请处理一下', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-price-request-disabled-')), 'runs.json'));
+  await store.initialize();
+  let writes = 0;
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: requestEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: { order_id: 'system-only', quote_confirmed: true, quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000 }, messages: [] }; } },
+    planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '申请改价', action: 'request_price_change', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '订单待付款' }; } },
+    getSettings: async () => ({}),
+    replyOutboxStore: { async enqueue() { writes += 1; return { created: true }; } },
+    coreFor() { writes += 1; throw new Error('disabled request must not reach platform'); },
+  });
+  await runtime.schedule(requestEnvelope, { mode: 'active' });
+  await runtime.tick();
+  const run = await store.get('active:tenant-1:event-1');
+  assert.equal(run.result.reason, 'agent_price_change_not_enabled');
+  assert.equal(run.tool_calls.length, 0);
+  assert.equal(writes, 0);
+});
+
 test('durable active image turn invokes real recognition, read-only resolution, and realtime quote tools in order', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-real-quote-')), 'runs.json'));
   await store.initialize();
