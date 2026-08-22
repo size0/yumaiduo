@@ -188,6 +188,13 @@ class WandaDirectGateway:
                     order_id = _order_id(created)
                     if not order_id:
                         raise DirectGatewayError("temporary_lock_state_unknown")
+                    if created.get("create_verified") is False:
+                        cancelled, released = await self._cancel_and_verify(
+                            client, order_id, normalized["showtime_id"], set(normalized["seat_ids"])
+                        )
+                        if not cancelled or not released:
+                            raise DirectGatewayError("temporary_lock_release_unverified")
+                        raise DirectGatewayError("temporary_lock_state_unknown")
                 except DirectGatewayError as error:
                     if error.retryable_before_create:
                         retryable_failure_seen = True

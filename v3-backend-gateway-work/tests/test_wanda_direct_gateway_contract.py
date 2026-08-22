@@ -133,6 +133,7 @@ class FakeOfficialClient:
         release_snapshots: list[bool] | None = None,
         block_create: bool = False,
         offers: Mapping[str, Any] | None = None,
+        create_verified: bool = True,
     ) -> None:
         self.account_id = account_id
         self.create_error = create_error
@@ -140,6 +141,7 @@ class FakeOfficialClient:
         self.cancel_succeeds = cancel_succeeds
         self.release_snapshots = list(release_snapshots or [True])
         self.offers = deepcopy(OFFERS if offers is None else offers)
+        self.create_verified = create_verified
         self.events: list[tuple[str, str]] = []
         self.raw_urls: list[str] = []
         self.create_started = asyncio.Event()
@@ -154,7 +156,7 @@ class FakeOfficialClient:
         await self.allow_create.wait()
         if self.create_error is not None:
             raise self.create_error
-        return {"order_id": f"temporary-{self.account_id}"}
+        return {"order_id": f"temporary-{self.account_id}", "create_verified": self.create_verified}
 
     async def activity_offers(
         self,
@@ -343,6 +345,24 @@ def test_direct_official_client_keeps_one_account_for_create_offers_cancel_and_0
         ("eligible", "realtime_seats"),
     ]
     assert factory.created_for == ["eligible"]
+
+
+def test_unverified_create_with_order_id_is_cancelled_and_not_treated_as_locked() -> None:
+    contract = _contract()
+    client = FakeOfficialClient("uncertain", create_verified=False)
+    gateway, _clock, _logger, factory = build_gateway(
+        contract, [account("uncertain")], {"uncertain": client}
+    )
+
+    try:
+        asyncio.run(probe(gateway))
+    except contract.DirectGatewayError as error:
+        assert_error_code(error, "temporary_lock_state_unknown")
+    else:
+        raise AssertionError("bizCode failure with an order id was accepted")
+
+    assert factory.created_for == ["uncertain"]
+    assert [event[1] for event in client.events] == ["create_order", "cancel_order", "realtime_seats"]
 
 
 def test_missing_wplus_offer_retries_next_account_only_after_release() -> None:

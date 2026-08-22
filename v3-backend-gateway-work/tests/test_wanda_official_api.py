@@ -62,7 +62,7 @@ def test_create_order_uses_verified_android_form_contract_not_ticket_gateway() -
         assert mx["cCode"] == "1_2" and mx["_mi_"] == ACCOUNT["token"]
         body = request.content.decode()
         assert body == "retailerCode=MX&mobile=13800000000&seatId=s-1%2c8000%2c0%2c0&totalPrice=8000&dId=show-1"
-        return httpx.Response(200, json={"code": 0, "data": {"orderId": "order-1"}})
+        return httpx.Response(200, json={"code": 0, "data": {"bizCode": 0, "orderId": "order-1"}})
 
     client = WandaOfficialApiClient(ACCOUNT, transport=httpx.MockTransport(handler), timestamp_factory=lambda: 123)
     result = asyncio.run(client.create_order({
@@ -70,8 +70,25 @@ def test_create_order_uses_verified_android_form_contract_not_ticket_gateway() -
         "total_price_cents": 8000, "cinema_id": "cinema-1", "partition": "a-s-1",
     }))
 
-    assert result == {"order_id": "order-1"}
+    assert result == {"order_id": "order-1", "create_verified": True}
     assert len(requests) == 1
+
+
+def test_create_order_does_not_treat_order_id_as_success_when_biz_code_is_nonzero() -> None:
+    client = WandaOfficialApiClient(
+        ACCOUNT,
+        transport=httpx.MockTransport(lambda _request: httpx.Response(
+            200, json={"code": 0, "data": {"bizCode": 17, "orderId": "order-uncertain"}}
+        )),
+        timestamp_factory=lambda: 123,
+    )
+
+    result = asyncio.run(client.create_order({
+        "showtime_id": "show-1", "seat_ids": ["s-1"], "seat_payloads": ["s-1,8000,0,0"],
+        "total_price_cents": 8000, "cinema_id": "cinema-1", "partition": "a-s-1",
+    }))
+
+    assert result == {"order_id": "order-uncertain", "create_verified": False}
 
 
 def test_definitive_create_auth_rejection_is_retryable_before_any_order_exists() -> None:
@@ -100,7 +117,7 @@ def test_locked_activity_offer_decrypts_official_aes_ecb_response() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/order/order_status.api":
-            return httpx.Response(200, json={"code": 0, "data": {"orderStatus": "20"}})
+            return httpx.Response(200, json={"code": 0, "data": {"orderStatus": "40", "lockSeatTime": 120}})
         assert request.url.host == "mkt-activity-api-prd-mx.wandafilm.com"
         assert request.url.path == "/mkt/activity/secret/list.api"
         query = parse_qs(request.url.query.decode())
@@ -116,6 +133,23 @@ def test_locked_activity_offer_decrypts_official_aes_ecb_response() -> None:
     }]}
 
 
+def test_activity_offer_is_blocked_unless_order_status_is_locked_and_lock_time_is_nonnegative() -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"code": 0, "data": {"orderStatus": "20", "lockSeatTime": -1}})
+
+    client = WandaOfficialApiClient(ACCOUNT, transport=httpx.MockTransport(handler), timestamp_factory=lambda: 123)
+    try:
+        asyncio.run(client.activity_offers(order_id="order-1", cinema_id="cinema-1", showtime_id="show-1", partition="a-s-1"))
+    except DirectGatewayError as error:
+        assert error.code == "temporary_lock_state_unknown"
+    else:
+        raise AssertionError("unconfirmed lock was allowed to query W+ offers")
+    assert paths == ["/order/order_status.api"] * 3
+
+
 def test_cancel_status_and_realtime_seats_use_only_reviewed_official_paths() -> None:
     paths: list[str] = []
 
@@ -124,7 +158,7 @@ def test_cancel_status_and_realtime_seats_use_only_reviewed_official_paths() -> 
         if request.url.path == "/order/cancel.api":
             return httpx.Response(200, json={"code": 0, "success": True})
         if request.url.path == "/order/order_status.api":
-            return httpx.Response(200, json={"code": 0, "data": {"orderStatus": "60"}})
+            return httpx.Response(200, json={"code": 0, "data": {"orderStatus": "60", "lockSeatTime": -1}})
         if request.url.path == "/order/real_time_seat.api":
             return httpx.Response(200, json={"code": 0, "data": {"area": [{"seat": [{"seatId": "s-1", "status": 1}]}]}})
         raise AssertionError(request.url)
@@ -135,6 +169,16 @@ def test_cancel_status_and_realtime_seats_use_only_reviewed_official_paths() -> 
     assert seats["available_seat_ids"] == ["s-1"]
     assert paths == ["/order/cancel.api", "/order/order_status.api", "/order/real_time_seat.api"]
     assert all("/api/order" not in path for path in paths)
+
+
+def test_cancel_is_not_verified_when_lock_time_has_not_cleared() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/order/cancel.api":
+            return httpx.Response(200, json={"code": 0, "success": True})
+        return httpx.Response(200, json={"code": 0, "data": {"orderStatus": "60", "lockSeatTime": 0}})
+
+    client = WandaOfficialApiClient(ACCOUNT, transport=httpx.MockTransport(handler), timestamp_factory=lambda: 123)
+    assert asyncio.run(client.cancel_order("order-1")) is False
 
 
 def test_direct_gateway_builder_is_default_off_and_requires_explicit_opt_in(monkeypatch, tmp_path: Path) -> None:

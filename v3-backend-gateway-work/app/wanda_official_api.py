@@ -269,19 +269,28 @@ class WandaOfficialApiClient:
         order_id = data.get("orderId") or response.get("orderId")
         if not order_id:
             raise DirectGatewayError("temporary_lock_state_unknown")
-        return {"order_id": str(order_id)}
+        create_verified = response.get("code") in (0, "0") and data.get("bizCode") in (0, "0")
+        return {"order_id": str(order_id), "create_verified": create_verified}
 
     async def order_status(self, order_id: str) -> Mapping[str, Any]:
         return await self._send("POST", self._front, "/order/order_status.api", pairs=[("json", "true"), ("orderId", order_id)])
 
     async def activity_offers(self, *, order_id: str, cinema_id: str, showtime_id: str, partition: str) -> Mapping[str, Any]:
+        locked = False
         for attempt in range(3):
             status = await self.order_status(order_id)
             data = status.get("data") if isinstance(status.get("data"), Mapping) else {}
-            if str(data.get("orderStatus") or "") != "10":
+            try:
+                lock_seat_time = int(data.get("lockSeatTime"))
+            except (TypeError, ValueError):
+                lock_seat_time = -1
+            locked = str(data.get("orderStatus") or "") == "40" and lock_seat_time >= 0
+            if locked:
                 break
             if attempt < 2:
                 await asyncio.sleep(1.0)
+        if not locked:
+            raise DirectGatewayError("temporary_lock_state_unknown")
         response = await self._send("GET", self._marketing, "/mkt/activity/secret/list.api", pairs=[
             ("partition", partition), ("orderId", order_id), ("did", showtime_id),
         ])
@@ -298,7 +307,11 @@ class WandaOfficialApiClient:
         status = await self.order_status(order_id)
         data = status.get("data") if isinstance(status.get("data"), Mapping) else {}
         value = str(data.get("orderStatus") or data.get("status") or "").strip().lower()
-        return value in {"60", "cancelled", "canceled", "closed", "已取消", "已关闭"}
+        try:
+            lock_seat_time = int(data.get("lockSeatTime"))
+        except (TypeError, ValueError):
+            return False
+        return value == "60" and lock_seat_time == -1
 
     async def realtime_seats(self, showtime_id: str) -> Mapping[str, Any]:
         response = await self._send("GET", self._front, "/order/real_time_seat.api", pairs=[("dId", showtime_id)])
