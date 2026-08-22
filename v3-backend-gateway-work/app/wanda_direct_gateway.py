@@ -135,12 +135,21 @@ class WandaDirectGateway:
         self._clock = clock or _SystemClock()
         self._logger = logger
         self._release_recheck_delays = delays
+        self._selection_lock = Lock()
+        self._selection_cursor = 0
+
+    def _rotate_accounts(self, accounts: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        with self._selection_lock:
+            start = self._selection_cursor % len(accounts)
+            self._selection_cursor = (start + 1) % len(accounts)
+        return accounts[start:] + accounts[:start]
 
     async def probe_activity_offers(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         normalized = self._validate_request(request)
         accounts = [item for item in await self._account_source.list_accounts() if isinstance(item, Mapping) and _eligible_account(item)]
         if not accounts:
             raise DirectGatewayError("wplus_account_unavailable")
+        accounts = self._rotate_accounts(accounts)
 
         lease_seen = False
         retryable_failure_seen = False

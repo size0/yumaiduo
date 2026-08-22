@@ -343,6 +343,21 @@ def test_direct_official_client_keeps_one_account_for_create_offers_cancel_and_0
     assert factory.created_for == ["eligible"]
 
 
+def test_sequential_probes_rotate_across_the_available_account_pool() -> None:
+    contract = _contract()
+    first = FakeOfficialClient("first", release_snapshots=[True, True])
+    second = FakeOfficialClient("second", release_snapshots=[True, True])
+    gateway, _clock, _logger, factory = build_gateway(
+        contract,
+        [account("first"), account("second")],
+        {"first": first, "second": second},
+    )
+
+    assert asyncio.run(probe(gateway))["account_id"] == "first"
+    assert asyncio.run(probe(gateway))["account_id"] == "second"
+    assert factory.created_for == ["first", "second"]
+
+
 def test_create_failure_may_try_next_account_before_any_order_exists() -> None:
     contract = _contract()
     first_secret = "contract-secret-first"
