@@ -56,7 +56,7 @@ No store or network dependency is allowed in these modules. Existing exports rem
 
 ### Wave 2 — unique reply boundary
 
-Create `reply/reply-orchestrator.mjs` as the only interface allowed to submit buyer replies. It owns action-ID stability, placeholder rejection, human-takeover checks, deduplication and outbox submission. During migration, existing send helpers delegate to this interface without changing action payloads or timing.
+Create `reply/reply-orchestrator.mjs` as the only interface allowed to submit buyer replies. It owns placeholder rejection and delegates platform addressing, action-ID deduplication, human-takeover checks and sent-message persistence to the existing action executor while those internals are migrated. Both the deterministic workflow and durable Agent outbox must use this boundary. During migration, existing action builders delegate without changing action payloads or timing.
 
 ### Wave 3 — quote orchestration
 

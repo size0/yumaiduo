@@ -17,6 +17,7 @@ import { agentImageOfflineEvaluationFrom } from './agent/agent-offline-evaluator
 import { createAgentReplyOutboxDispatcher } from './agent/agent-reply-outbox-dispatcher.mjs';
 import { AGENT_RUNTIME_VERSION, createShadowAgentRuntime } from './agent/shadow-agent-runtime.mjs';
 import { createActionExecutor } from './action-executor.mjs';
+import { createReplyOrchestrator } from './reply/reply-orchestrator.mjs';
 import { createWorkflow } from './workflow.mjs';
 import { hasUnresolvedReplyPlaceholder } from './agent/response-composer.mjs';
 
@@ -50,9 +51,10 @@ export async function createApplication({ config, platformRuntime, backendClient
     coreFor: (tenantId) => platformRuntime.createClient(tenantId),
     messageRegistry: eventStore,
   });
+  const agentOutboxReplyOrchestrator = createReplyOrchestrator({ actionExecutor: agentOutboxExecutor });
   const agentReplyOutboxDispatcher = createAgentReplyOutboxDispatcher({
     store: agentReplyOutboxStore,
-    executeReply: (action) => agentOutboxExecutor.execute(action),
+    executeReply: (action) => agentOutboxReplyOrchestrator.deliver(action),
     commitDelivery: async (entry) => {
       const quote = entry.delivery;
       if (quote?.type !== 'quote' || !entry.platform_message_id) throw new TypeError('invalid quote delivery commit');

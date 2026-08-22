@@ -10,6 +10,7 @@ import { agentCanaryDecision } from './agent/agent-canary-router.mjs';
 import { AGENT_RUNTIME_VERSION } from './agent/shadow-agent-runtime.mjs';
 import { hasUnresolvedReplyPlaceholder } from './agent/response-composer.mjs';
 import { EVENT_ROUTE_KIND, routeWorkflowEvent } from './event-router.mjs';
+import { createReplyOrchestrator, isBuyerReplyAction } from './reply/reply-orchestrator.mjs';
 
 // Buyers commonly send the screenshot, city, seats, and quantity as separate
 // messages. Process only the final event after this quiet window.
@@ -34,6 +35,10 @@ export function createWorkflow({
   logger = console,
 }) {
   const executor = createActionExecutor({ coreFor, messageRegistry: eventStore, imageLoader, ...(sleep ? { sleep } : {}) });
+  const replyOrchestrator = createReplyOrchestrator({ actionExecutor: executor });
+  const executeAction = (action) => isBuyerReplyAction(action)
+    ? replyOrchestrator.deliver(action)
+    : executor.execute(action);
 
   async function enqueueEvent(envelope) {
     let queuedEnvelope = envelope;
@@ -130,7 +135,7 @@ export function createWorkflow({
       const actions = bridgeActions(envelope, bridgeResult, upsert, settings);
       const results = [];
       for (const action of actions) {
-        const result = await executor.execute(action);
+        const result = await executeAction(action);
         results.push({ action_id: action.action_id, ...result });
         await markAiReplySentIfNeeded(action, result);
       }
@@ -179,7 +184,7 @@ export function createWorkflow({
     );
     if (!action) return null;
     try {
-      const result = await executor.execute({
+      const result = await executeAction({
         ...action,
         allow_plugin_followup: true,
         reply_origin: 'quote_processing',
@@ -256,7 +261,7 @@ export function createWorkflow({
       ? autoQuoteReplyAction(envelope, completedUnitQuote, autoReplyEnabled, true, runtimeSettings)
       : null;
     if (completedUnitQuoteAction) {
-      const result = await executor.execute(completedUnitQuoteAction);
+      const result = await executeAction(completedUnitQuoteAction);
       const completedActions = [{ action_id: completedUnitQuoteAction.action_id, ...result }];
       if (result.status === 'succeeded' && completedUnitQuote.unit_replay !== true && conversationContextStore?.markQuoted) {
         await conversationContextStore.markQuoted(envelope.tenantId, envelope.payload ?? {}, {
@@ -285,7 +290,7 @@ export function createWorkflow({
       const followUpActions = [...actions];
       let deliveredFollowUpText = '';
       for (const planned of plannedFollowUps) {
-        const result = await executor.execute(planned);
+        const result = await executeAction(planned);
         followUpActions.push({ action_id: planned.action_id, ...result });
         if (result.status === 'succeeded' && typeof planned?.text === 'string' && planned.text.trim() && !hasUnresolvedReplyPlaceholder(planned.text)) {
           deliveredFollowUpText = planned.text.trim().slice(0, 1_000);
@@ -356,7 +361,7 @@ export function createWorkflow({
       if (notice) {
         let result;
         try {
-          result = await executor.execute(notice);
+          result = await executeAction(notice);
         } catch (error) {
           await conversationContextStore.releaseFirstContactNotice?.(envelope.tenantId, envelope.payload ?? {}).catch?.(() => false);
           throw error;
@@ -379,7 +384,7 @@ export function createWorkflow({
         'quote-processing-notice',
       );
       if (!notice) return;
-      const result = await executor.execute({ ...notice, allow_plugin_followup: true });
+      const result = await executeAction({ ...notice, allow_plugin_followup: true });
       actions.push({ action_id: notice.action_id, ...result });
       quoteProcessingNoticeSent = result.status === 'succeeded';
     };
@@ -531,7 +536,7 @@ export function createWorkflow({
     let quoteReplyDelivered = false;
     let authoritativeReplyDelivered = false;
     if (replyAction) {
-      const result = await executor.execute(replyAction);
+      const result = await executeAction(replyAction);
       actions.push({ action_id: replyAction.action_id, ...result });
       quoteReplyDelivered = replyAction.action_id === quoteReply?.action_id && result.status === 'succeeded';
       const deterministicFollowUp = [deterministicIdentityFollowUp, safeImageFailureReply, duplicateQuoteClosure]
@@ -747,7 +752,7 @@ export function createWorkflow({
         { ...record.envelope, payload: { ...(record.envelope.payload ?? {}), ...contextPayload } },
         `当前订单关联的报价只核验了${facts.quote_ticket_count}张，但已收到您需要${conflictingCount}张。请先不要付款，并发送官方已选好${conflictingCount}个座位的截图，已转人工处理。`,
       );
-      const warningResult = warning ? await executor.execute(warning) : { status: 'skipped', reason: 'reply_address_missing' };
+      const warningResult = warning ? await executeAction(warning) : { status: 'skipped', reason: 'reply_address_missing' };
       await eventStore.complete(record.key, record.leaseId, {
         mode: 'quote_preview_only', order_price_change: { status: 'blocked', reason: 'ticket_count_conflict' },
         actions: warning ? [{ action_id: warning.action_id, ...warningResult }] : [],
@@ -776,7 +781,7 @@ export function createWorkflow({
       gates: { feature_enabled: true, unique_showtime: true, quantity_confirmed: true, selection_confirmed: true, quote_valid: true, order_linked: true, human_takeover: false, max_amount_cents: 200_000 },
     };
     try {
-      const result = await executor.execute(action);
+      const result = await executeAction(action);
       if (result.status === 'skipped' && result.reason === 'price_change_gate_failed') {
         const failure = Array.isArray(result.failures) && result.failures.length ? String(result.failures[0]) : 'unknown';
         await conversationContextStore.markOrderException?.(record.envelope.tenantId, {
@@ -794,7 +799,7 @@ export function createWorkflow({
       const failureAction = quoteFollowUpAction(
         { ...record.envelope, payload: { ...(record.envelope.payload ?? {}), accountUnb: session.accountUnb, chatId: session.chatId, peerUnb: session.peerUnb } }, message,
       );
-      const failureResult = failureAction ? await executor.execute(failureAction) : { status: 'skipped', reason: 'reply_address_missing' };
+      const failureResult = failureAction ? await executeAction(failureAction) : { status: 'skipped', reason: 'reply_address_missing' };
       await conversationContextStore.markOrderException?.(record.envelope.tenantId, {
         accountUnb: session.accountUnb, chatId: session.chatId, peerUnb: session.peerUnb,
       }, failure.code, orderId);
@@ -844,13 +849,13 @@ export function createWorkflow({
       const action = withConfiguredReplyImage(quoteFollowUpAction(followUpEnvelope, reason === 'paid_quote_unconfirmed_or_expired'
         ? configuredReply(settings, templateKey, '订单已付款，但未找到有效确认报价；请勿重复下单，联系人工处理。')
         : configuredReply(settings, templateKey, '订单金额与本次核验报价不一致；如已支付，请勿重复下单，联系人工处理。')), settings, templateKey);
-      if (action) actions.push({ action_id: action.action_id, ...(await executor.execute(action)) });
+      if (action) actions.push({ action_id: action.action_id, ...(await executeAction(action)) });
     } else {
       // This is the only path allowed to mark an order ready for manual
       // delivery: a current confirmed quote must equal the authoritative paid amount.
       await conversationContextStore.setOrderStage?.(record.envelope.tenantId, contextPayload, 'paid_manual_delivery', orderId);
       const action = withConfiguredReplyImage(quoteFollowUpAction(followUpEnvelope, configuredReply(settings, 'paid_manual_delivery', '已收到付款，请稍等人工出票。订单已付款，不会重新核价。')), settings, 'paid_manual_delivery');
-      if (action) actions.push({ action_id: action.action_id, ...(await executor.execute(action)) });
+      if (action) actions.push({ action_id: action.action_id, ...(await executeAction(action)) });
     }
     await eventStore.complete(record.key, record.leaseId, { mode: 'quote_preview_only', paid_amount_checked: true, actions });
     return { status: 'completed', mode: 'quote_preview_only', actions };
@@ -886,7 +891,7 @@ export function createWorkflow({
     if (action && String(record.envelope.payload?.operatorId ?? record.envelope.payload?.operator_id ?? '') === 'plugin:wanda-seat-autoquote') {
       action.ignore_platform_price_change_notice = true;
     }
-    const result = action ? await executor.execute(action) : { status: 'skipped', reason: 'reply_address_missing' };
+    const result = action ? await executeAction(action) : { status: 'skipped', reason: 'reply_address_missing' };
     await eventStore.complete(record.key, record.leaseId, { mode: 'quote_preview_only', price_changed_notified: result.status === 'succeeded', verified_amount_cents: actual, actions: action ? [{ action_id: action.action_id, ...result }] : [] });
     return { status: 'completed', mode: 'quote_preview_only', actions: action ? [{ action_id: action.action_id, ...result }] : [] };
   }
