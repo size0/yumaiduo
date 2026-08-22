@@ -1190,6 +1190,46 @@ def test_cross_platform_bottom_card_recognize_to_realtime_quote_releases_tempora
     assert gateway.calls == ["for_quote", "match", "realtime_seats", "lock", "available_offers", "cancel", "realtime_seats"]
 
 
+def test_quote_uses_direct_wanda_probe_without_ticket_order_endpoints() -> None:
+    class DirectProbe:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        async def probe_activity_offers(self, request: dict[str, object]) -> dict[str, object]:
+            self.requests.append(request)
+            return {
+                "account_id": "masked-account-ref",
+                "offers": {"activities": [{
+                    "name": "W+会员专享优惠", "able": True,
+                    "allot_seat": {"totalPayPrice": 6190},
+                }]},
+                "release_verified": True,
+            }
+
+    gateway = FakeTicketGateway()
+    direct = DirectProbe()
+    request = QuoteRealtimeRequest.model_validate({
+        "recognition": {
+            "image_type": "SEAT_MAP",
+            "official_selection": {
+                "is_selected": True,
+                "selected_seat_numbers": ["8排10座"],
+                "selected_count": 1,
+            },
+        },
+    })
+
+    quote = asyncio.run(RealtimeQuoteService(gateway, direct_lock_gateway=direct).quote(request))
+
+    assert quote.member_unit_price_cents == 6190
+    assert gateway.calls == ["for_quote", "match", "realtime_seats"]
+    assert len(direct.requests) == 1
+    assert direct.requests[0]["showtime_id"] == "show-1"
+    assert direct.requests[0]["cinema_id"] == "cinema-1"
+    assert direct.requests[0]["seat_ids"] == ["w-1"]
+    assert direct.requests[0]["seat_payloads"] == ["w-1,8000,0,0"]
+
+
 def test_unselected_wplus_area_probe_applies_backend_price_rules() -> None:
     class LowerPricedWplusGateway(FakeTicketGateway):
         async def realtime_seats(self, showtime_id: str) -> dict[str, object]:

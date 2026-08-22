@@ -347,7 +347,10 @@ def test_create_failure_may_try_next_account_before_any_order_exists() -> None:
     contract = _contract()
     first_secret = "contract-secret-first"
     second_secret = "contract-secret-second"
-    first = FakeOfficialClient("first", create_error=RuntimeError("synthetic pre-create failure"))
+    first = FakeOfficialClient("first")
+    first.create_error = contract.DirectGatewayError(
+        "pre_create_account_unavailable", retryable_before_create=True
+    )
     second = FakeOfficialClient("second")
     gateway, _clock, logger, factory = build_gateway(
         contract,
@@ -369,6 +372,25 @@ def test_create_failure_may_try_next_account_before_any_order_exists() -> None:
         ("second", "realtime_seats"),
     ]
     assert factory.created_for == ["first", "second"]
+
+
+def test_unknown_create_result_never_switches_account_without_proof_no_order_exists() -> None:
+    contract = _contract()
+    first = FakeOfficialClient("first", create_error=RuntimeError("synthetic unknown create result"))
+    second = FakeOfficialClient("second")
+    gateway, _clock, _logger, factory = build_gateway(
+        contract,
+        [account("first"), account("second")],
+        {"first": first, "second": second},
+    )
+
+    with pytest.raises(contract.DirectGatewayError) as raised:
+        asyncio.run(probe(gateway))
+
+    assert_error_code(raised.value, "temporary_lock_state_unknown")
+    assert factory.created_for == ["first"]
+    assert first.events == [("first", "create_order")]
+    assert second.events == []
 
 
 def test_failure_after_create_never_switches_account_and_finally_cancels_same_order() -> None:
@@ -418,8 +440,13 @@ def test_direct_flow_never_uses_legacy_order_or_ticket_system_urls(monkeypatch: 
         attempted_connections.append(address)
         raise AssertionError(f"network access is forbidden in contract tests: {address!r}")
 
-    monkeypatch.setattr(socket.socket, "connect", forbid_socket_connect)
-    result = asyncio.run(probe(gateway))
+    async def scenario() -> Mapping[str, Any]:
+        # Patch after the Windows proactor loop has created its internal
+        # socketpair; only application network attempts are forbidden here.
+        monkeypatch.setattr(socket.socket, "connect", forbid_socket_connect)
+        return await probe(gateway)
+
+    result = asyncio.run(scenario())
 
     assert result["release_verified"] is True
     assert attempted_connections == []

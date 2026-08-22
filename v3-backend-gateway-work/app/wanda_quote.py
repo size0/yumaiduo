@@ -13,6 +13,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from .local_catalog import LocalWandaCatalog
+from .wanda_direct_gateway import DirectGatewayError
 from .schemas import AvailableWplusSeatsResponse, QuoteRealtimeRequest, QuoteRealtimeResponse, QuoteShowtimeResolveResponse, Recognition, SeatQuote, SeatZoneType
 
 
@@ -581,9 +582,11 @@ class RealtimeQuoteService:
         *,
         cinema_catalog: LocalWandaCatalog | None = None,
         allow_friday_member_day: bool | None = None,
+        direct_lock_gateway: Any | None = None,
     ) -> None:
         self._gateway = gateway or LocalTicketGateway()
         self._cinema_catalog = cinema_catalog
+        self._direct_lock_gateway = direct_lock_gateway
         self._allow_friday_member_day = (
             allow_friday_member_day
             if allow_friday_member_day is not None
@@ -795,6 +798,40 @@ class RealtimeQuoteService:
         if not seats:
             raise HTTPException(status_code=422, detail="未找到足够的 W+座位用于临时锁座核价")
         partition = _partition(seats)
+        if self._direct_lock_gateway is not None:
+            direct_started = time.perf_counter()
+            try:
+                result = await self._direct_lock_gateway.probe_activity_offers({
+                    "cinema_id": cinema_id,
+                    "showtime_id": showtime_id,
+                    "seat_ids": [seat.seat_id for seat in seats],
+                    "seat_payloads": [
+                        f"{seat.seat_id},{seat.original_price_cents},{seat.channel_fee_cents},0"
+                        for seat in seats
+                    ],
+                    "partition": partition,
+                    "total_price_cents": sum(seat.original_price_cents for seat in seats),
+                })
+                offers = result.get("offers") if isinstance(result, Mapping) else None
+                if not isinstance(offers, Mapping) or result.get("release_verified") is not True:
+                    raise DirectGatewayError("temporary_lock_release_unverified")
+                member_unit = _locked_offer_unit_cents(
+                    offers,
+                    quantity=len(seats),
+                    allow_friday=self._allow_friday_member_day,
+                )
+                if stage_timings is not None:
+                    stage_timings["temporary_lock"] = round((time.perf_counter() - direct_started) * 1000)
+                    stage_timings["available_offers"] = 0
+                    stage_timings["cancel"] = 0
+                    stage_timings["release_recheck"] = 0
+                return member_unit
+            except DirectGatewayError as error:
+                if error.code == "temporary_lock_release_unverified":
+                    raise HTTPException(status_code=502, detail="临时锁座未确认释放，已停止报价") from error
+                if error.code in {"wplus_account_unavailable", "account_lease_unavailable"}:
+                    raise HTTPException(status_code=422, detail="线上账号池没有可用的 W+ 会员账号") from error
+                raise HTTPException(status_code=502, detail="万达临时锁座核价失败") from error
         order_id = ""
         quote_error: BaseException | None = None
         member_unit: int | None = None
