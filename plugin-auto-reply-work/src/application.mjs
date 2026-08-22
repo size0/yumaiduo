@@ -7,6 +7,7 @@ import { createUiHandler } from './ui-handler.mjs';
 import { createQuotePreviewClient } from './quote-preview-client.mjs';
 import { createReplyPreviewClient } from './reply-preview-client.mjs';
 import { createConversationAgentClient } from './agent/conversation-agent-client.mjs';
+import { createAiOrchestrator } from './ai/ai-orchestrator.mjs';
 import { AgentRunStore } from './agent/agent-run-store.mjs';
 import { AgentReplyOutboxStore } from './agent/agent-reply-outbox-store.mjs';
 import { AgentManualTaskStore } from './agent/agent-manual-task-store.mjs';
@@ -38,7 +39,8 @@ export async function createApplication({ config, platformRuntime, backendClient
   const imageLoader = createImageLoader({ allowlist: config.imageHostAllowlist });
   const quotePreviewClient = createQuotePreviewClient(config);
   const replyPreviewClient = createReplyPreviewClient(config);
-  const conversationAgentPlanner = createConversationAgentClient(config);
+  const conversationAgentProvider = createConversationAgentClient(config);
+  const conversationAgentPlanner = createAiOrchestrator({ primaryProvider: conversationAgentProvider });
   const agentRunStore = new AgentRunStore(path.join(config.dataDir, 'agent-runs.json'));
   const agentReplyOutboxStore = new AgentReplyOutboxStore(path.join(config.dataDir, 'agent-reply-outbox.json'));
   const agentManualTaskStore = new AgentManualTaskStore(path.join(config.dataDir, 'agent-manual-tasks.json'));
