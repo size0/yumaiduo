@@ -270,7 +270,7 @@ def create_app(
     def bridge_account_unb(value: str | None) -> str:
         account_unb = str(value or "").strip()
         if not account_unb or len(account_unb) > 128:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid account_unb")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid account_unb")
         return account_unb
 
     def patch_runtime_settings(payload: dict[str, object]) -> dict[str, object]:
@@ -300,58 +300,58 @@ def create_app(
             value = payload[field]
             if field == "conversation_agent_mode":
                 if value not in {"off", "shadow", "active"}:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid conversation_agent_mode")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid conversation_agent_mode")
                 if value == "active":
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="conversation_agent_active_not_ready")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="conversation_agent_active_not_ready")
                 patch[field] = value
             elif field == "low_confidence_threshold":
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid {field}")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
                 patch[field] = float(value)
             elif field == "reply_templates":
                 if not isinstance(value, dict) or set(value) != set(DEFAULT_REPLY_TEMPLATES):
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid reply_templates")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid reply_templates")
                 patch[field] = {key: _validate_quote_reply_template(template) for key, template in value.items()}
             elif field == "reply_template_images":
                 if not isinstance(value, dict) or set(value) != set(DEFAULT_REPLY_TEMPLATE_IMAGES):
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid reply_template_images")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid reply_template_images")
                 normalized_images: dict[str, str] = {}
                 for key, image_url in value.items():
                     if not isinstance(image_url, str) or len(image_url.strip()) > 2_000:
-                        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid reply template image URL")
+                        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid reply template image URL")
                     image_url = image_url.strip()
                     if image_url:
                         parsed = urlsplit(image_url)
                         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
-                            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid reply template image URL")
+                            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid reply template image URL")
                     normalized_images[key] = image_url
                 patch[field] = normalized_images
             elif field == "ai_reply_system_prompt":
                 if not isinstance(value, str) or not (1 <= len(value.strip()) <= 8_000):
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid ai_reply_system_prompt")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid ai_reply_system_prompt")
                 patch[field] = value.strip()
             elif field in {"ai_reply_shop_background", "ai_reply_precautions", "ai_reply_style"}:
                 if not isinstance(value, str) or len(value.strip()) > 4_000:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid {field}")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
                 patch[field] = value.strip()
             elif field == "ai_reply_memory_hours":
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 24:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid ai_reply_memory_hours")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid ai_reply_memory_hours")
                 patch[field] = value
             elif field == "ai_reply_memory_depth":
                 if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 50:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid ai_reply_memory_depth")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid ai_reply_memory_depth")
                 patch[field] = value
             elif field == "ai_reply_delay_seconds":
                 if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 60:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid {field}")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
                 patch[field] = value
             elif field == "ai_reply_manual_takeover_seconds":
                 if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 60:
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid {field}")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
                 patch[field] = value
             elif not isinstance(value, bool):
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid {field}")
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
             else:
                 patch[field] = value
         if patch:
@@ -363,13 +363,13 @@ def create_app(
             base_url = str(payload.get("ai_reply_base_url", current["base_url"])).strip()
             model_name = str(payload.get("ai_reply_model", current["model"])).strip()
             if not base_url or not model_name:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="ai_reply_base_url and ai_reply_model are required")
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="ai_reply_base_url and ai_reply_model are required")
             clear_api_key = payload.get("ai_reply_clear_api_key") is True
             api_key: str | None = None
             if "ai_reply_api_key" in payload and not clear_api_key:
                 candidate = payload["ai_reply_api_key"]
                 if not isinstance(candidate, str) or not candidate.strip():
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid ai_reply_api_key")
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid ai_reply_api_key")
                 api_key = candidate.strip()
             update = ModelSettingsUpdate.model_validate({
                 "base_url": base_url,
@@ -386,7 +386,7 @@ def create_app(
     def bridge_tenant_id(tenant_id: str | None) -> str:
         normalized = str(tenant_id or "").strip()
         if not normalized or len(normalized) > 128:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid tenant_id")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid tenant_id")
         return normalized
 
     @app.get("/api/xianyu-plugin/bridge/runtime-settings")
@@ -408,7 +408,7 @@ def create_app(
         account_unb = bridge_account_unb(payload.get("account_unb") if isinstance(payload.get("account_unb"), str) else None)
         enabled = payload.get("automation_enabled")
         if not isinstance(enabled, bool):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid automation_enabled")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid automation_enabled")
         app.state.plugin_bridge_store.update_shop_enabled(account_unb, enabled)
         return {"settings": bridge_runtime_settings(account_unb)}
 
@@ -436,19 +436,19 @@ def create_app(
             })
             return {"settings": bridge_runtime_settings()}
         if action != "approve":
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid agent canary approval action")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid agent canary approval action")
         runtime_version = payload.get("runtime_version")
         percentage = payload.get("percentage")
         if not isinstance(runtime_version, str) or not 8 <= len(runtime_version.strip()) <= 100:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid agent canary runtime version")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid agent canary runtime version")
         if isinstance(percentage, bool) or not isinstance(percentage, int) or not 1 <= percentage <= 5:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid agent canary percentage")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid agent canary percentage")
         evidence_fields = (
             "canary_readiness_ready", "image_offline_evaluation_ready",
             "execution_owner_proven", "rollback_verified",
         )
         if any(payload.get(field) is not True for field in evidence_fields):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="agent_canary_approval_evidence_incomplete")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="agent_canary_approval_evidence_incomplete")
         app.state.plugin_bridge_store.update_runtime({
             "agent_canary_enabled": True,
             "agent_canary_kill_switch": False,
@@ -480,10 +480,10 @@ def create_app(
                 continue
             value = payload[field]
             if isinstance(value, bool) or not isinstance(value, int):
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"invalid {field}")
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
             patch[field] = value
         if not patch:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="quote policy patch is empty")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="quote policy patch is empty")
         return {"policy": app.state.plugin_bridge_store.update_quote_policy(tenant_id, patch)}
 
     @app.post("/api/xianyu-plugin/bridge/shops/sync")
@@ -494,7 +494,7 @@ def create_app(
         bridge_tenant_id(payload.get("tenant_id") if isinstance(payload.get("tenant_id"), str) else None)
         shops = payload.get("shops")
         if not isinstance(shops, list):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid shops")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid shops")
         return {"synced": len(shops)}
 
     @app.get("/api/xianyu-plugin/bridge/knowledge-base")
@@ -601,7 +601,7 @@ def create_app(
         if not x_wanda_preview_key or not hmac.compare_digest(x_wanda_preview_key, os.getenv("WANDA_PREVIEW_INGEST_KEY", "")):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
         if request.image_url is None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="image_required")
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="image_required")
         try:
             recognition = await _recognize_preview_image(app, VisionRecognizeRequest(image_url=request.image_url, message_text=request.message_text))
         except VisionFailure as error:

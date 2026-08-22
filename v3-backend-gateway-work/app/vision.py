@@ -266,10 +266,10 @@ async def _resolve_public_image_url(client: httpx.AsyncClient, image_url: str) -
                 return current_url
             location = response.headers.get("location")
             if not location or redirect_count == MAX_IMAGE_REDIRECTS:
-                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_redirect_invalid")
+                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_redirect_invalid")
             redirected_url = str(response.url.join(location))
             if not _is_public_image_url(redirected_url):
-                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_redirect_not_public")
+                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_redirect_not_public")
             current_url = redirected_url
         finally:
             await response.aclose()
@@ -284,7 +284,7 @@ class VisionService:
     async def recognize(self, request: VisionRecognizeRequest, model_settings: Mapping[str, object], knowledge_rules: list[str] | None = None) -> Recognition:
         image_url = str(request.image_url)
         if not _is_public_image_url(image_url):
-            raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_url_invalid")
+            raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_url_invalid")
         if not model_settings["model"] or not model_settings["api_key"]:
             raise VisionFailure(status.HTTP_503_SERVICE_UNAVAILABLE, "ai_vision_not_configured")
 
@@ -490,14 +490,14 @@ class VisionService:
                         if response.status_code in {301, 302, 303, 307, 308}:
                             location = response.headers.get("location")
                             if not location or redirect_count == MAX_IMAGE_REDIRECTS:
-                                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_redirect_invalid")
+                                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_redirect_invalid")
                             redirected_url = str(response.url.join(location))
                             if not _is_public_image_url(redirected_url):
-                                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_redirect_not_public")
+                                raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_redirect_not_public")
                             current_url = redirected_url
                             continue
                         if response.status_code != status.HTTP_200_OK:
-                            raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_fetch_failed")
+                            raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_fetch_failed")
                         content_type = response.headers.get("content-type", "").split(";", maxsplit=1)[0].lower()
                         signature = IMAGE_SIGNATURES.get(content_type)
                         if signature is None:
@@ -511,7 +511,7 @@ class VisionService:
                             chunks.append(chunk)
                         content = b"".join(chunks)
                         if not content:
-                            raise VisionFailure(status.HTTP_422_UNPROCESSABLE_ENTITY, "image_empty")
+                            raise VisionFailure(status.HTTP_422_UNPROCESSABLE_CONTENT, "image_empty")
                         _, is_expected_type = signature
                         if not is_expected_type(content):
                             raise VisionFailure(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "image_content_mismatch")
