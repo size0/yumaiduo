@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import stat
 import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -55,3 +57,64 @@ def build_component_archive(
             mode = 0o755 if source.stat().st_mode & 0o111 else 0o644
             archive.writestr(_zip_info(archive_name, mode), source.read_bytes())
     return hashlib.sha256(output_path.read_bytes()).hexdigest()
+
+
+def _verification_report(ready: bool, code: str, file_count: int = 0) -> dict[str, object]:
+    return {"ready": ready, "code": code, "file_count": file_count}
+
+
+def verify_component_archive(
+    archive_path: Path,
+    *,
+    expected_sha256: str,
+    expected_component: str,
+    expected_source_commit: str,
+    expected_runtime_contract: str,
+) -> dict[str, object]:
+    """Verify archive integrity, identity, manifest completeness, and extraction safety."""
+    try:
+        actual_digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    except OSError:
+        return _verification_report(False, "archive_unavailable")
+    if not hmac.compare_digest(actual_digest, str(expected_sha256).lower()):
+        return _verification_report(False, "archive_hash_mismatch")
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)) or "RELEASE-MANIFEST.json" not in names:
+                return _verification_report(False, "archive_entries_invalid")
+            for info in infos:
+                name = PurePosixPath(info.filename)
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if (
+                    name.is_absolute()
+                    or ".." in name.parts
+                    or "\\" in info.filename
+                    or stat.S_IFMT(mode) == stat.S_IFLNK
+                ):
+                    return _verification_report(False, "archive_path_unsafe")
+            manifest_bytes = archive.read("RELEASE-MANIFEST.json")
+            if len(manifest_bytes) > 1024 * 1024:
+                return _verification_report(False, "archive_manifest_invalid")
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, KeyError, zipfile.BadZipFile):
+        return _verification_report(False, "archive_invalid")
+    if not isinstance(manifest, dict):
+        return _verification_report(False, "archive_manifest_invalid")
+    packaged_files = sorted(name for name in names if name != "RELEASE-MANIFEST.json")
+    declared_files = manifest.get("files")
+    identity_matches = (
+        manifest.get("component") == expected_component
+        and manifest.get("source_commit") == expected_source_commit
+        and manifest.get("runtime_contract") == expected_runtime_contract
+    )
+    if not identity_matches:
+        return _verification_report(False, "archive_identity_mismatch")
+    if (
+        not isinstance(declared_files, list)
+        or sorted(map(str, declared_files)) != packaged_files
+        or manifest.get("file_count") != len(packaged_files)
+    ):
+        return _verification_report(False, "archive_manifest_mismatch")
+    return _verification_report(True, "ready", len(packaged_files))

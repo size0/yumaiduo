@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app.release_bundle import build_component_archive
+from app.release_bundle import build_component_archive, verify_component_archive
 
 
 def test_release_archive_is_deterministic_and_contains_only_declared_files(tmp_path: Path) -> None:
@@ -31,6 +31,25 @@ def test_release_archive_is_deterministic_and_contains_only_declared_files(tmp_p
         assert stored_manifest["file_count"] == 1
         assert "config.env" not in archive.namelist()
 
+    verified = verify_component_archive(
+        output_one,
+        expected_sha256=first,
+        expected_component="test",
+        expected_source_commit="a" * 40,
+        expected_runtime_contract="contract-v1",
+    )
+    assert verified == {"ready": True, "code": "ready", "file_count": 1}
+
+    output_one.write_bytes(output_one.read_bytes() + b"tampered")
+    tampered = verify_component_archive(
+        output_one,
+        expected_sha256=first,
+        expected_component="test",
+        expected_source_commit="a" * 40,
+        expected_runtime_contract="contract-v1",
+    )
+    assert tampered == {"ready": False, "code": "archive_hash_mismatch", "file_count": 0}
+
 
 def test_release_archive_rejects_paths_outside_the_component(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
@@ -48,3 +67,23 @@ def test_release_archive_rejects_paths_outside_the_component(tmp_path: Path) -> 
         assert "outside component" in str(error)
     else:
         raise AssertionError("outside path was packaged")
+
+
+def test_release_verifier_rejects_archive_path_traversal(tmp_path: Path) -> None:
+    archive_path = tmp_path / "unsafe.zip"
+    manifest = {
+        "component": "test", "source_commit": "c" * 40, "runtime_contract": "contract-v1",
+        "file_count": 1, "files": ["../outside.txt"],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("RELEASE-MANIFEST.json", json.dumps(manifest))
+        archive.writestr("../outside.txt", "unsafe")
+    digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    report = verify_component_archive(
+        archive_path,
+        expected_sha256=digest,
+        expected_component="test",
+        expected_source_commit="c" * 40,
+        expected_runtime_contract="contract-v1",
+    )
+    assert report == {"ready": False, "code": "archive_path_unsafe", "file_count": 0}
