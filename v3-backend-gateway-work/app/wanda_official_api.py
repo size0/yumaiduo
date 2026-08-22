@@ -47,6 +47,10 @@ def _lowercase_quote(value: str) -> str:
 
 def _eligible_account(account: Mapping[str, Any]) -> bool:
     risk = str(account.get("risk_status") or "").strip().lower()
+    remaining = account.get("remaining")
+    quota_available = remaining is None or (
+        isinstance(remaining, int) and not isinstance(remaining, bool) and remaining > 0
+    )
     account_type = str(account.get("account_type") or "").strip().lower()
     return bool(
         str(account.get("status") or "").strip().lower() == "online"
@@ -55,6 +59,7 @@ def _eligible_account(account: Mapping[str, Any]) -> bool:
         and isinstance(account.get("token"), str)
         and str(account.get("token")).strip()
         and str(account.get("phone") or account.get("mobile") or "").strip()
+        and quota_available
     )
 
 

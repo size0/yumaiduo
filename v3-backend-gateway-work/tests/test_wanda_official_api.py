@@ -39,6 +39,8 @@ def test_account_source_reads_only_eligible_wplus_accounts_without_mutating_file
         {**ACCOUNT, "phone": "3", "is_wplus": False},
         {**ACCOUNT, "phone": "4", "token": ""},
         {**ACCOUNT, "phone": "5", "risk_status": "blocked"},
+        {**ACCOUNT, "phone": "6", "remaining": 0},
+        {**ACCOUNT, "phone": "7", "remaining": "1"},
     ]
     path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
 

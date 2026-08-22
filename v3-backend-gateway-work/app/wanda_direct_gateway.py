@@ -121,11 +121,18 @@ def _pricing_account_ref(account: Mapping[str, Any], reference_key: bytes) -> st
     return hmac.new(reference_key, f"wanda-pricing:{account_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
 
+def _known_quota_available(account: Mapping[str, Any]) -> bool:
+    if "remaining" not in account or account.get("remaining") is None:
+        return True
+    remaining = account.get("remaining")
+    return isinstance(remaining, int) and not isinstance(remaining, bool) and remaining > 0
+
+
 def _eligible_account(account: Mapping[str, Any]) -> bool:
     online = account.get("online") is True or str(account.get("status") or "").lower() == "online"
     risk = str(account.get("risk_status") or "normal").strip().lower()
     risk_ok = risk in {"", "normal", "ok", "safe", "passed"}
-    return bool(_account_id(account) and online and risk_ok and account.get("is_wplus") is True and account.get("token"))
+    return bool(_account_id(account) and online and risk_ok and account.get("is_wplus") is True and account.get("token") and _known_quota_available(account))
 
 
 def _order_id(payload: Mapping[str, Any]) -> str:

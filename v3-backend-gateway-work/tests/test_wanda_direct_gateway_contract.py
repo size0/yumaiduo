@@ -212,6 +212,7 @@ def account(
     risk_status: str = "normal",
     is_wplus: bool = True,
     token: str | None = None,
+    remaining: object = None,
 ) -> dict[str, Any]:
     return {
         "account_id": account_id,
@@ -220,6 +221,7 @@ def account(
         "risk_status": risk_status,
         "is_wplus": is_wplus,
         "token": token if token is not None else f"contract-secret-{account_id}",
+        "remaining": remaining,
     }
 
 
@@ -272,6 +274,8 @@ def test_selects_only_online_normal_risk_wplus_account_with_token_and_redacts_to
         account("risk-blocked", risk_status="blocked"),
         account("not-wplus", is_wplus=False),
         account("missing-token", token=""),
+        account("exhausted", remaining=0),
+        account("malformed-quota", remaining="1"),
         account("eligible", token=secret),
     ]
     client = FakeOfficialClient("eligible")
