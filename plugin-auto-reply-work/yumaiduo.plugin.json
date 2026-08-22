@@ -1,0 +1,58 @@
+{
+  "id": "wanda-seat-autoquote",
+  "name": "万达会员座自动报价出票",
+  "version": "0.6.0",
+  "type": "plugin",
+  "vendor": "xdl",
+  "engines": {
+    "yumaiduoCore": ">=0.1.0"
+  },
+  "entrypoint": {
+    "server": "index.mjs",
+    "web": "/ui",
+    "crossOriginUi": true,
+    "webhookPath": "/__plugin__/webhook"
+  },
+  "runtime": {
+    "port": 4003,
+    "baseUrl": "http://127.0.0.1:4003"
+  },
+  "entitlement": {
+    "feature": "plugin.wanda-seat-autoquote",
+    "trialEligible": true
+  },
+  "permissions": [
+    "order.read",
+    "order.write.price_change",
+    "account.read",
+    "im.session.read",
+    "im.message.read",
+    "im.message.send"
+  ],
+  "extensionPoints": {
+    "menu": [
+      {
+        "section": "plugins",
+        "label": "万达自动报价",
+        "title": "万达自动报价",
+        "to": "/console/plugins/wanda-seat-autoquote/dashboard",
+        "icon": "ticket"
+      }
+    ],
+    "routes": [
+      {
+        "path": "/console/plugins/wanda-seat-autoquote/dashboard",
+        "title": "万达自动报价",
+        "component": "/ui",
+        "entry": "/ui"
+      }
+    ],
+    "subscribes": [
+      "im.message.received",
+      "order.created",
+      "order.price.changed",
+      "order.paid",
+      "order.closed"
+    ]
+  }
+}

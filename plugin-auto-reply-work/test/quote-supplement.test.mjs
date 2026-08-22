@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { cinemaHintFromSupplement, cityHintFromSupplement, isLocationQuoteSupplement } from '../src/quote-supplement.mjs';
+
+test('short city supplements are bounded quote facts while casual acknowledgements are not', () => {
+  assert.equal(cityHintFromSupplement('广州'), '广州');
+  assert.equal(cityHintFromSupplement('德州万达'), '德州');
+  assert.equal(cityHintFromSupplement('常州'), '常州');
+  assert.equal(cityHintFromSupplement('莆田'), '莆田');
+  assert.equal(isLocationQuoteSupplement({ content: '莆田' }), true);
+  assert.equal(cityHintFromSupplement('城市：佛山市'), '佛山');
+  assert.equal(cityHintFromSupplement('山东德州'), '德州');
+  assert.equal(cinemaHintFromSupplement('德州万达'), '德州万达');
+  assert.equal(cityHintFromSupplement('内蒙古自治区巴彦淖尔市临河区'), '巴彦淖尔');
+  assert.equal(cinemaHintFromSupplement('万达影城 PRIME（摩尔城店）'), '万达影城 PRIME（摩尔城店）');
+  assert.equal(cinemaHintFromSupplement('万达摩尔城店'), '万达摩尔城店');
+  assert.equal(cinemaHintFromSupplement('浦东陆悦天地'), '浦东陆悦天地');
+  assert.equal(cityHintFromSupplement('宁波奉化万达多少'), '宁波');
+  assert.equal(cinemaHintFromSupplement('宁波奉化万达多少'), '宁波奉化万达');
+  assert.equal(isLocationQuoteSupplement({ content: '宁波奉化万达多少' }), true);
+  assert.equal(cityHintFromSupplement('厦门SM的'), '厦门');
+  assert.equal(isLocationQuoteSupplement({ content: '厦门SM的' }), true);
+  assert.equal(isLocationQuoteSupplement({ content: '广州' }), true);
+  assert.equal(isLocationQuoteSupplement({ content: '海上世界店' }), true);
+  assert.equal(isLocationQuoteSupplement({ content: '万达影城厦门寰映影城' }), true);
+  const ziboRequest = '你好，问一下山东省淄博市张店区富力万达的万达影城，今天晚上7点的奥德赛，位置7排15，16和8排16的价格';
+  assert.equal(cityHintFromSupplement(ziboRequest), '淄博');
+  assert.equal(cinemaHintFromSupplement(ziboRequest), '富力万达');
+  assert.equal(cityHintFromSupplement('上海陆悦天地店 周日下午四点的 58一张 对吗'), '上海');
+  assert.equal(isLocationQuoteSupplement({ content: '上海陆悦天地店 周日下午四点的 58一张 对吗' }), true);
+  for (const text of ['好的', '在吗', '谢谢', '这个']) assert.equal(isLocationQuoteSupplement({ content: text }), false);
+});

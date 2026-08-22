@@ -1,0 +1,112 @@
+import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { AgentRunStore } from '../src/agent/agent-run-store.mjs';
+
+test('agent runs are idempotent, leased independently, and resume from durable checkpoints', async () => {
+  let now = 1_000;
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-runs-')), 'runs.json');
+  const store = new AgentRunStore(file, { now: () => now });
+  await store.initialize();
+  const input = { runId: 'shadow:event-1', eventKey: 'tenant-1:event-1', tenantId: 'tenant-1', mode: 'shadow', deadlineMs: 600_000 };
+  assert.equal((await store.enqueue(input)).created, true);
+  assert.equal((await store.enqueue(input)).created, false);
+
+  const first = await store.claimDue({ leaseMs: 300_000 });
+  assert.equal(first.status, 'processing');
+  await store.checkpoint(first.run_id, first.lease_id, {
+    trace: [{ step: 1, action: 'start_quote', intent: '选座核价', confidence: 0.95 }],
+    observations: [{ status: 'success', tool: 'recognize_and_quote', summary: '权威流程已完成', facts: { status: 'preview_ready' }, next_actions: ['respond'] }],
+  }, { leaseMs: 300_000 });
+
+  now += 300_001;
+  const reclaimed = await store.claimDue({ leaseMs: 300_000 });
+  assert.equal(reclaimed.run_id, first.run_id);
+  assert.equal(reclaimed.attempts, 2);
+  assert.equal(reclaimed.trace.length, 1);
+  assert.equal(reclaimed.observations.length, 1);
+  await store.complete(reclaimed.run_id, reclaimed.lease_id, { status: 'reply', reason: 'agent_response' });
+  assert.equal((await store.get(first.run_id)).status, 'completed');
+});
+
+test('historical evaluation runs enqueue in one idempotent bounded batch', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-batch-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  const batch = [1, 2].map((index) => ({ runId: `evaluation:v3:${index}`, eventKey: `tenant-1:event-${index}`, tenantId: 'tenant-1', mode: 'evaluation' }));
+  assert.deepEqual(await store.enqueueMany(batch), { created: 2, existing: 0 });
+  assert.deepEqual(await store.enqueueMany(batch), { created: 0, existing: 2 });
+  assert.equal((await store.list({ tenantId: 'tenant-1' })).filter((run) => run.mode === 'evaluation').length, 2);
+  await store.enqueue({ runId: 'shadow:live', eventKey: 'tenant-1:live', tenantId: 'tenant-1', mode: 'shadow' });
+  assert.equal((await store.claimDue()).run_id, 'shadow:live');
+  await assert.rejects(() => store.enqueueMany(Array.from({ length: 501 }, () => batch[0])), /invalid agent run batch/u);
+});
+
+test('agent run deadline prevents stale queued work and supports an explicit in-flight timeout', async () => {
+  let now = 10_000;
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-deadline-')), 'runs.json');
+  const store = new AgentRunStore(file, { now: () => now });
+  await store.initialize();
+  await store.enqueue({ runId: 'shadow:expired', eventKey: 'tenant-1:expired', tenantId: 'tenant-1', mode: 'shadow', deadlineMs: 30_000 });
+  now += 30_001;
+  assert.equal(await store.claimDue(), null);
+  assert.equal((await store.get('shadow:expired')).status, 'timed_out');
+
+  await store.enqueue({ runId: 'shadow:running', eventKey: 'tenant-1:running', tenantId: 'tenant-1', mode: 'shadow', deadlineMs: 60_000 });
+  const running = await store.claimDue();
+  await store.timeout(running.run_id, running.lease_id, { status: 'handoff', reason: 'agent_deadline_exceeded' });
+  const timedOut = await store.get(running.run_id);
+  assert.equal(timedOut.status, 'timed_out');
+  assert.equal(timedOut.result.reason, 'agent_deadline_exceeded');
+});
+
+test('agent tool journal replays completed observations and fails closed on an unknown pending result', async () => {
+  let now = 50_000;
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-tools-')), 'runs.json');
+  const store = new AgentRunStore(file, { now: () => now });
+  await store.initialize();
+  await store.enqueue({ runId: 'shadow:tools', eventKey: 'tenant-1:tools', tenantId: 'tenant-1', mode: 'shadow', deadlineMs: 600_000 });
+  const first = await store.claimDue({ leaseMs: 60_000 });
+  const started = await store.beginTool(first.run_id, first.lease_id, {
+    callId: 'shadow:tools:1:recognize_image', step: 1, tool: 'recognize_image',
+    trace: [{ step: 1, action: 'recognize_image', intent: '选座核价', confidence: 0.98 }], observations: [],
+  });
+  assert.equal(started.state, 'started');
+  assert.equal((await store.beginTool(first.run_id, first.lease_id, {
+    callId: 'shadow:tools:1:recognize_image', step: 1, tool: 'recognize_image', trace: [], observations: [],
+  })).state, 'unknown');
+  await store.completeTool(first.run_id, first.lease_id, 'shadow:tools:1:recognize_image', {
+    status: 'success', tool: 'recognize_image', summary: '识图完成', facts: { cinema: '测试影院' }, next_actions: ['resolve_showtime'],
+  });
+  const replay = await store.beginTool(first.run_id, first.lease_id, {
+    callId: 'shadow:tools:1:recognize_image', step: 1, tool: 'recognize_image', trace: [], observations: [],
+  });
+  assert.equal(replay.state, 'replay');
+  assert.equal(replay.observation.facts.cinema, '测试影院');
+  assert.deepEqual((await store.get(first.run_id)).observations.map((item) => item.tool), ['recognize_image']);
+
+  await store.beginTool(first.run_id, first.lease_id, {
+    callId: 'shadow:tools:2:quote_realtime', step: 2, tool: 'quote_realtime', trace: [], observations: [],
+  });
+  now += 60_001;
+  const reclaimed = await store.claimDue({ leaseMs: 60_000 });
+  const unknown = await store.beginTool(reclaimed.run_id, reclaimed.lease_id, {
+    callId: 'shadow:tools:2:quote_realtime', step: 2, tool: 'quote_realtime', trace: [], observations: [],
+  });
+  assert.equal(unknown.state, 'unknown');
+  assert.equal((await store.get(first.run_id)).tool_calls.length, 2);
+});
+
+test('agent run checkpoint rejects stale leases and stores only bounded observation fields', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-runs-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  await store.enqueue({ runId: 'shadow:event-2', eventKey: 'tenant-1:event-2', tenantId: 'tenant-1', mode: 'shadow' });
+  const run = await store.claimDue();
+  await assert.rejects(() => store.checkpoint(run.run_id, 'stale', { trace: [], observations: [] }), /lease mismatch/u);
+  await assert.rejects(() => store.checkpoint(run.run_id, run.lease_id, {
+    trace: [], observations: Array.from({ length: 9 }, () => ({ status: 'success', tool: 'x', summary: '', facts: {}, next_actions: [] })),
+  }), /too many observations/u);
+});

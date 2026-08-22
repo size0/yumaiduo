@@ -1,0 +1,33 @@
+# Runtime settings can contain administrator-supplied keys, tokens, buyer data, and logs.
+.env
+.env.*
+!.env.example
+**/config.json
+**/data/
+**/runtime/
+**/logs/
+**/*.log
+
+# Dependencies and generated caches.
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+*.py[cod]
+
+# Local inspection, release packages, and other generated artifacts.
+.tmp/
+.tmp-*/
+.v3-deploy-candidate/
+output/
+dist/
+*.tar.gz
+*.tgz
+*.zip
+
+# OS/editor files.
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+

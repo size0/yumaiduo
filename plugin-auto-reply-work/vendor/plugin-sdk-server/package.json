@@ -1,0 +1,15 @@
+{
+  "name": "@yumaiduo/plugin-sdk-server",
+  "version": "0.18.0",
+  "description": "鱼麦多插件平台服务端 SDK（随示例插件内置的运行时副本，仅依赖公网可装的 json-bigint，用于大整数安全解析）",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "json-bigint": "^1.0.0"
+  }
+}

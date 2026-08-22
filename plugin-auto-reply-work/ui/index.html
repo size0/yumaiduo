@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>万达电影票 AI 客服</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="ui/styles.css">
+  <script type="module" src="ui/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+  <div class="app-shell" id="app-shell" aria-busy="true">
+    <header class="plugin-header">
+      <div class="brand-group">
+        <div class="brand-mark" aria-hidden="true"><span>W</span><i></i></div>
+        <div>
+          <div class="title-row"><h1>万达电影票 AI 客服</h1></div>
+          <p>自动识别座位截图并按已核验规则报价</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="status-pill status-running" id="plugin-status">正在连接</span>
+        <span class="mode-badge" id="data-mode">平台数据</span>
+        <span class="last-updated" id="last-updated">尚未刷新</span>
+        <button class="button button-secondary" id="refresh-button" type="button">
+          刷新
+        </button>
+      </div>
+    </header>
+
+    <nav class="tab-strip" aria-label="插件功能">
+      <div class="tab-list" role="tablist" aria-orientation="horizontal">
+        <button class="tab-button is-active" id="tab-automation" type="button" role="tab" aria-selected="true" aria-controls="panel-shops" tabindex="0" data-tab="automation">自动化设置</button>
+        <button class="tab-button" id="tab-ai-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-model" tabindex="-1" data-tab="ai-settings">AI 设置</button>
+        <button class="tab-button" id="tab-reply-templates" type="button" role="tab" aria-selected="false" aria-controls="panel-reply-templates" tabindex="-1" data-tab="reply-templates">回复文案</button>
+        <button class="tab-button" id="tab-quote-records" type="button" role="tab" aria-selected="false" aria-controls="panel-quote-records" tabindex="-1" data-tab="quote-records">报价记录</button>
+        <button class="tab-button" id="tab-order-management" type="button" role="tab" aria-selected="false" aria-controls="panel-ticket-orders" tabindex="-1" data-tab="order-management">订单管理</button>
+        <button class="tab-button" id="tab-diagnostics" type="button" role="tab" aria-selected="false" aria-controls="panel-review" tabindex="-1" data-tab="diagnostics">异常记录</button>
+      </div>
+    </nav>
+
+    <div class="notice notice-loading" id="loading-notice" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      正在读取插件状态...
+    </div>
+    <div class="notice notice-error" id="error-notice" role="alert" hidden>
+      <div>
+        <strong>数据加载失败</strong>
+        <span id="error-message">请稍后重试。</span>
+      </div>
+      <button class="button button-secondary" id="retry-button" type="button">重试</button>
+    </div>
+    <div class="notice notice-demo" id="demo-notice" role="status" hidden>
+      <strong>临时独立管理入口</strong>
+      <span>当前通过服务器安全门禁访问；鱼麦多插件上线后将恢复平台签名入口。</span>
+    </div>
+
+    <main id="main-content" class="main-content">
+      <section class="tab-panel reference-page" id="panel-shops" role="tabpanel" aria-labelledby="tab-automation" data-panel="automation" hidden>
+        <div class="page-heading">
+          <div><h2>店铺开关</h2><p>仅显示鱼麦多平台当前租户已授权的店铺；关闭后该店不会执行自动识图、报价或回复。</p></div>
+          <div class="toolbar"><button class="button button-secondary" id="sync-shops" type="button">同步店铺</button></div>
+        </div>
+        <div class="inline-warning" role="status"><strong>真实开关</strong><span>店铺列表来自平台授权范围，开关状态保存到业务后端，并在事件处理前生效。</span></div>
+        <div class="reference-split-workspace">
+          <section class="surface-section reference-table-section" aria-labelledby="shop-list-title">
+            <div class="section-heading"><div><h3 id="shop-list-title">已授权店铺</h3><p>刷新时从平台同步；功能状态显示当前全局策略。</p></div><span class="status-pill status-idle" id="shops-count">暂无数据</span></div>
+            <div class="table-wrap"><table><thead><tr><th>店铺名称 / ID</th><th>截图识别</th><th>自动报价</th><th>AI 回复</th><th>改价</th><th>店铺开关</th></tr></thead><tbody id="shops-body"></tbody></table></div>
+          </section>
+          <aside class="reference-detail-card" aria-label="店铺开关说明"><span class="section-kicker">生效范围</span><h3>按店铺独立控制</h3><p>关闭某个店铺后，插件仍会安全记录必要事件，但不会为该店触发自动识图、报价或回复。重新开启后立即恢复。</p><div class="detail-placeholder-list"><span>店铺来源 <strong>平台授权</strong></span><span>状态存储 <strong>业务后端</strong></span><span>生效节点 <strong>事件处理前</strong></span></div></aside>
+        </div>
+      </section>
+
+      <section class="tab-panel reference-page" id="panel-quote-records" role="tabpanel" aria-labelledby="tab-quote-records" data-panel="quote-records" hidden>
+        <div class="page-heading">
+          <div><h2>报价记录</h2><p>展示已经由实时核价链路形成的报价、状态和后续结果；不保存截图价格或完整聊天内容。</p></div>
+          <span class="status-pill status-idle" id="quote-records-count">正在读取…</span>
+        </div>
+        <div class="inline-warning" role="status"><strong>报价数据采集中（不是AI自动学习）</strong><span>当前只按影院、场次、实时成本、报价金额和成交结果做匿名统计；不训练模型、不自动推导公式，也不自动修改报价。达到样本门槛后，也只能由人工决定是否启动独立的影子价格建议评估。</span></div>
+        <section class="surface-section" aria-labelledby="quote-learning-title">
+          <div class="section-heading"><div><h3 id="quote-learning-title">场次结果统计与当前报价规则</h3><p id="quote-learning-summary">正在汇总权威报价和订单结果。</p></div></div>
+          <p class="formula-summary" id="quote-formula-summary">正在读取当前安全报价公式。</p>
+        </section>
+        <section class="surface-section" aria-labelledby="quote-records-title">
+          <div class="section-heading"><div><h3 id="quote-records-title">历史报价</h3><p>金额来自当轮权威实时核价，不允许在后台直接修改。</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>报价时间</th><th>买家 / 店铺</th><th>影院 / 场次</th><th>报价 / 成本</th><th>该场下单率</th><th>阶段</th><th>会话</th></tr></thead><tbody id="quote-records-body"><tr><td class="table-empty" colspan="7">正在读取报价记录。</td></tr></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="tab-panel reference-page" id="panel-ticket-orders" role="tabpanel" aria-labelledby="tab-order-management" data-panel="order-management" hidden>
+        <div class="page-heading">
+          <div><h2>订单管理</h2><p>直接读取闲鱼订单镜像中的付款、待发货、已发货、关闭等权威状态；不会发送票码、不会调用平台发货，也不会修改订单金额。</p></div>
+          <span class="status-pill status-idle" id="ticket-orders-count">正在读取…</span>
+        </div>
+        <div class="inline-warning" role="status"><strong>按实际人工流程判断出票</strong><span>本店只有完成万达出票后才会在闲鱼点击发货，因此闲鱼显示“已发货、待收货或交易成功”时视为已出票；仍处于待发货时只表示暂不能确认出票。</span></div>
+        <section class="surface-section" aria-labelledby="ticket-list-title">
+          <div class="section-heading"><div><h3 id="ticket-list-title">订单列表</h3><p>闲鱼订单状态刷新页面时读取，最多缓存60秒；插件阶段仅用于解释报价和异常，不再提供人工出票回写按钮。</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>订单号</th><th>买家 / 店铺</th><th>确认报价</th><th>闲鱼订单状态</th><th>出票状态</th><th>更新时间</th><th>会话</th></tr></thead><tbody id="ticket-orders-body"><tr><td class="table-empty" colspan="7">正在读取订单状态。</td></tr></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="panel-pricing" role="tabpanel" aria-labelledby="tab-automation" data-panel="automation" hidden>
+        <div class="page-heading">
+          <div><h2>报价规则</h2><p>配置价格调整值。模型不会估算、补全或生成票价。</p></div>
+        </div>
+        <div class="inline-warning" role="status"><strong>后端租户策略</strong><span>保存后仅影响新建任务；进行中的订单继续使用创建时保存的策略快照。</span></div>
+        <form id="pricing-form" class="settings-layout">
+          <section class="surface-section" aria-labelledby="pricing-core-title">
+            <div class="section-heading"><div><h3 id="pricing-core-title">核心报价</h3><p>调整值以单张票为单位。</p></div></div>
+            <div class="setting-row">
+              <div><label for="wplus-adjustment">W+ 标注座</label><p>万达 W+ 原价加上调整值后报价。</p></div>
+              <div class="input-suffix"><input id="wplus-adjustment" name="wplus_adjustment" type="number" min="-100" max="100" step="0.1" inputmode="decimal" required><span>元</span></div>
+            </div>
+            <div class="setting-row">
+              <div><label for="wplus-member-price-threshold">W+ 高价会员价阈值</label><p>实时 W+ 会员价高于该值时，直接按会员价报价。</p></div>
+              <div class="input-suffix"><input id="wplus-member-price-threshold" name="wplus_member_price_threshold" type="number" min="0" max="1000" step="1" inputmode="decimal" required><span>元</span></div>
+            </div>
+            <div class="setting-row">
+              <div><label for="regular-adjustment">普通已选座</label><p>官方会员价加上调整值后报价。</p></div>
+              <div class="input-suffix"><input id="regular-adjustment" name="regular_adjustment" type="number" min="-100" max="100" step="0.1" inputmode="decimal" required><span>元</span></div>
+            </div>
+            <div class="setting-row">
+              <div><label for="max-auto-order-amount">自动改单笔上限</label><p>bridge 返回金额超过该值时强制停止并进入复核。</p></div>
+              <div class="input-suffix"><input id="max-auto-order-amount" name="max_auto_order_amount" type="number" min="10" max="10000" step="1" inputmode="decimal" required><span>元</span></div>
+            </div>
+          </section>
+          <section class="surface-section" aria-labelledby="pricing-switch-title">
+            <div class="section-heading"><div><h3 id="pricing-switch-title">自动化开关</h3><p>关闭后保留设置但不执行对应动作。</p></div></div>
+            <label class="toggle-row"><span><strong>启用自动化流程</strong><small>接收事件并执行已配置流程</small></span><input id="automation-enabled" type="checkbox" role="switch"><span class="toggle-control" aria-hidden="true"></span></label>
+            <label class="toggle-row"><span><strong>启用自动报价</strong><small>满足座位与数量条件后发送报价</small></span><input id="quote-enabled" type="checkbox" role="switch"><span class="toggle-control" aria-hidden="true"></span></label>
+            <label class="toggle-row"><span><strong>允许自动改价</strong><small>仅在七项安全门禁全部通过后提交</small></span><input id="price-change-enabled" type="checkbox" role="switch"><span class="toggle-control" aria-hidden="true"></span></label>
+          </section>
+          <section class="surface-section pricing-safety-card" aria-labelledby="pricing-safety-title">
+            <div class="section-heading"><div><h3 id="pricing-safety-title">安全边界</h3><p>触发条件不满足时停止自动处理，并在异常记录中提示人工处理。</p></div></div>
+            <ul class="safety-rule-list">
+              <li><span>1</span><div><strong>场次必须唯一</strong><small>影院、影片、日期和场次不能唯一匹配时禁止报价。</small></div></li>
+              <li><span>2</span><div><strong>价格以实时核验为准</strong><small>不使用截图标价推导会员价或最终报价。</small></div></li>
+              <li><span>3</span><div><strong>付款与出票仍由人工处理</strong><small>本插件不会自动发货、自动出票或自动确认售后。</small></div></li>
+            </ul>
+          </section>
+          <div class="form-actions"><span class="save-status" id="pricing-save-status" role="status"></span><button class="button button-primary" type="submit">保存报价设置</button></div>
+        </form>
+      </section>
+
+      <section class="tab-panel reply-template-page" id="panel-reply-templates" role="tabpanel" aria-labelledby="tab-reply-templates" data-panel="reply-templates" hidden>
+        <div class="reply-template-hero">
+          <div><span class="section-kicker">客服内容中心</span><h2>回复文案</h2><p>按业务阶段分类管理文字和配图。金额、座位、库存及订单事实仍由实时安全链路填充。</p></div>
+          <div class="reply-template-summary"><strong>36</strong><span>条受控文案</span></div>
+        </div>
+        <div class="reply-template-toolbar">
+          <label class="reply-template-search"><span class="sr-only">搜索回复文案</span><input id="reply-template-search" type="search" placeholder="搜索文案名称或内容"></label>
+          <span class="table-muted">图片单独上传；文字统一保存</span>
+        </div>
+        <form id="reply-templates-form" class="reply-template-form">
+          <div id="reply-template-fields" class="reply-template-groups"></div>
+          <div class="form-actions reply-template-save-bar"><span id="reply-templates-save-status" class="form-status" aria-live="polite">修改文字后请保存</span><button class="button button-primary" type="submit">保存全部文字文案</button></div>
+        </form>
+      </section>
+
+      <section class="tab-panel" id="panel-model" role="tabpanel" aria-labelledby="tab-ai-settings" data-panel="ai-settings" hidden>
+        <div class="page-heading">
+          <div><h2>AI 客服设置</h2><p>会话智能体负责理解、追问和选择受控工具；实时价格、座位、订单与改价仍由确定性安全引擎裁决。</p></div>
+        </div>
+        <section class="dashboard-summary" aria-labelledby="conversation-learning-title">
+          <div class="section-heading"><div><h3 id="conversation-learning-title">会话观察与经验提炼状态</h3><p id="learning-summary-note">正在读取影子观察和会话经验数据。</p></div></div>
+          <div class="metric-grid">
+            <article class="metric-card"><span>客服 Agent 接管状态</span><strong id="agent-takeover-status">未接管</strong><small>影子评测达标后才允许接管低风险流程</small></article>
+            <article class="metric-card"><span>会话智能体模式</span><strong id="learning-agent-mode">读取中</strong><small id="learning-agent-failures">失败轮次正在读取</small></article>
+            <article class="metric-card"><span>已观察会话轮次</span><strong id="learning-observed-turns">0</strong><small>当前保留事件中的智能体分析</small></article>
+            <article class="metric-card"><span>会话经验草稿</span><strong id="learning-experience-drafts">0</strong><small id="learning-experience-enabled">已审核启用 0 条</small></article>
+          </div>
+        </section>
+        <section class="surface-section" aria-labelledby="agent-evaluation-title">
+          <div class="section-heading"><div><h3 id="agent-evaluation-title">Agent 上线前抽查</h3><p id="agent-evaluation-count">正在读取待评测轮次。</p></div></div>
+          <p class="section-note">目前仍是影子模式，AI建议不会发给买家。准备开放低风险Canary前，至少审计100轮；工具选择正确率需达到95%，且高风险动作、虚假声明、重复追问和权威结果不一致都必须为0。</p>
+          <p id="agent-readiness-status" class="section-note">正在计算低风险Canary门禁。</p>
+          <p id="agent-offline-evaluation-status" class="section-note">正在回放图片工具链并计算完成率、重复调用和延迟。</p>
+          <div class="table-wrap"><table><thead><tr><th>对应买家 / 这一轮</th><th>AI建议下一步<br><small>未执行</small></th><th>确定性系统实际结果</th><th>您认为应该怎么做</th><th>还要追问</th><th>应该转人工</th><th>AI回复是否合适</th><th>是否符合实际结果</th><th>高风险动作</th><th>虚假声明</th><th>重复追问</th><th>原会话</th><th>保存</th></tr></thead><tbody id="agent-evaluation-body"><tr><td class="table-empty" colspan="13">正在读取影子评测记录。</td></tr></tbody></table></div>
+        </section>
+        <section class="surface-section" aria-labelledby="human-comparison-title">
+          <div class="section-heading"><div><h3 id="human-comparison-title">人工介入对照监督</h3><p id="human-comparison-count">正在扫描人工回复并关联影子Agent计划。</p></div></div>
+          <p class="section-note">系统在独立后台扫描中识别非插件卖家回复，将它与上一条买家问题、会话事实、报价/订单状态和影子计划关联。自动标签只供审核，不直接训练模型；审核后只能选择沉淀为知识库、回复模板、业务规则或工具门禁。</p>
+          <div class="table-wrap"><table><thead><tr><th>买家问题 / 会话事实</th><th>Agent计划 / 拟回复</th><th>人工实际回复</th><th>自动比对</th><th>审核标签</th><th>拟沉淀为</th><th>审核说明</th><th>原会话</th><th>保存</th></tr></thead><tbody id="human-comparison-body"><tr><td class="table-empty" colspan="9">正在读取人工对照记录。</td></tr></tbody></table></div>
+        </section>
+        <form id="model-form" class="settings-layout ai-settings-layout">
+          <section class="surface-section ai-settings-primary" aria-labelledby="ai-reply-operations-title">
+            <div class="section-heading"><div><h3 id="ai-reply-operations-title">文字回复模型</h3><p>以下文案设置会保存到后端，并在模型生成客服建议时作为补充指令；关闭不影响实时核价、报价和人工处理。</p></div></div>
+            <label class="toggle-row"><span><strong>启用 AI 回复</strong><small>仅在规则和安全门禁允许时回复</small></span><input id="ai-reply-enabled" type="checkbox" role="switch"><span class="toggle-control" aria-hidden="true"></span></label>
+            <label class="field"><span>会话智能体模式</span><select id="conversation-agent-mode"><option value="off">关闭：使用旧的受限回复</option><option value="shadow">影子：分析真实对话，但不接管回复</option><option value="active" disabled>接管：尚未达到上线门槛</option></select><small>影子会调用智能体分析真实对话并记录意图、置信度和建议动作，但不训练模型、不发送它生成的回复。影子期间的日常自动回复仍来自旧的受限回复模型；订单改价始终由确定性安全链路处理。</small></label>
+            <label class="field ai-reply-policy-field"><span>客服策略</span><textarea id="ai-reply-system-prompt" maxlength="8000" rows="6" required></textarea><small>用于智能体规划和自然回复；固定安全规则始终优先，模型只能请求受控工具。</small></label>
+            <div class="field-grid ai-reply-content-grid">
+              <label class="field field-wide"><span>店铺身份与业务背景</span><textarea id="ai-reply-shop-background" maxlength="4000" rows="3"></textarea><small>会注入文字回复模型提示词；例如服务范围、主营业务。不要写固定折扣、库存或绝对时效。</small></label>
+              <label class="field field-wide"><span>注意事项</span><textarea id="ai-reply-precautions" maxlength="4000" rows="3"></textarea><small>会注入文字回复模型提示词；例如禁止站外交易、退改以平台与订单规则为准。</small></label>
+              <label class="field field-wide"><span>回复风格</span><textarea id="ai-reply-style" maxlength="4000" rows="2"></textarea><small>会注入文字回复模型提示词；例如简短自然、礼貌。安全规则优先于风格。</small></label>
+            </div>
+          </section>
+          <section class="surface-section" aria-labelledby="ai-reply-context-title">
+            <div class="section-heading"><div><h3 id="ai-reply-context-title">消息处理与人工接管</h3><p>记忆设置只影响文字回复模型读取的历史消息；合并等待作用于买家消息事件；人工接管会阻止自动回复和自动改价。</p></div></div>
+            <div class="field-grid ai-reply-timing-grid">
+              <label class="field"><span>记忆时长</span><div class="input-suffix"><input id="ai-reply-memory-hours" type="number" min="1" max="24" step="1" required><span>小时</span></div><small>只提供该时段内的最近对话。</small></label>
+              <label class="field"><span>记忆深度</span><div class="input-suffix"><input id="ai-reply-memory-depth" type="number" min="5" max="50" step="1" required><span>条</span></div><small>会话上下文上限。</small></label>
+              <label class="field"><span>买家消息合并等待</span><div class="input-suffix"><input id="ai-reply-delay-seconds" type="number" min="2" max="60" step="1" required><span>秒</span></div><small>作用于全部买家消息事件，等待补充图片、城市或张数后再处理。</small></label>
+              <label class="field"><span>人工接管保护</span><div class="input-suffix"><input id="ai-reply-manual-takeover-seconds" type="number" min="5" max="60" step="1" required><span>秒</span></div><small>人工回复后，AI 不会自动回复或改价。</small></label>
+            </div>
+          </section>
+          <section class="surface-section" aria-labelledby="model-capability-title">
+            <div class="section-heading"><div><h3 id="model-capability-title">回复模型连接</h3><p>商家 API 密钥和模型仅用于文字回复。截图识别由后端受控视觉链路处理，不能在此页切换或指定模型。</p></div></div>
+            <details class="ai-recognition-advanced" id="ai-recognition-advanced"><summary>高级：回复模型连接与识别复核阈值 <span class="status-pill" id="model-key-status">检查中</span></summary><div class="field-grid">
+              <label class="field"><span>回复模型接口地址</span><input id="ai-base-url" type="url" autocomplete="off" spellcheck="false" required><small>公网地址必须使用 HTTPS。</small></label>
+              <label class="field"><span>回复模型名称</span><input id="ai-model" type="text" maxlength="120" autocomplete="off" spellcheck="false" required><small>仅用于生成客服文字建议。</small></label>
+              <label class="field"><span>商家 API 密钥</span><input id="ai-api-key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" placeholder="留空则不修改"><small>仅用于该租户，服务端加密保存且不会回显。</small></label>
+              <label class="field"><span>自动识别置信度</span><div class="input-suffix"><input id="minimum-confidence" type="number" min="50" max="100" step="1" inputmode="numeric" required><span>%</span></div><small>低于阈值的结果进入人工复核。</small></label>
+              <div class="field field-static"><span>提示词版本</span><strong>wanda-seat-classifier-v1</strong><small>固定要求模型禁止报价。</small></div>
+            </div><label class="clear-secret-row"><input id="clear-ai-api-key" type="checkbox"><span>清除当前已保存的 API 密钥</span></label></details>
+          </section>
+          <div class="form-actions"><span class="save-status" id="model-save-status" role="status">保存成功后仍会回读后端逐字段复核</span><button class="button button-primary" type="submit">保存 AI 设置</button></div>
+        </form>
+      </section>
+
+      <section class="tab-panel" id="panel-knowledge-base" role="tabpanel" aria-labelledby="tab-ai-settings" data-panel="ai-settings" hidden>
+        <div class="page-heading"><div><h2>知识库</h2><p>仅“已审核 + 已启用”的条目会提供给 AI。每条只写一条可验证业务规则，避免互相矛盾；价格、库存和订单状态仍以实时接口为准。</p></div></div>
+        <form id="knowledge-base-form" class="settings-layout">
+          <section class="surface-section" aria-labelledby="knowledge-editor-title">
+            <div class="section-heading"><div><h3 id="knowledge-editor-title">新增知识条目</h3><p>保存后默认为草稿和停用，需在列表中审核并启用。</p></div></div>
+            <div class="field-grid"><label class="field"><span>分类</span><select id="knowledge-category" required><option value="reply">客服回复</option><option value="quote">报价规则</option><option value="vision">图片识别</option></select></label><label class="field"><span>标题</span><input id="knowledge-title" maxlength="100" required></label><label class="field"><span>排序</span><input id="knowledge-sort-order" type="number" value="0" step="1" required></label><label class="field field-wide"><span>内容</span><textarea id="knowledge-content" maxlength="2000" rows="6" required></textarea></label></div>
+            <div class="form-actions"><span class="save-status" id="knowledge-save-status" role="status"></span><button class="button button-primary" type="submit">保存为草稿</button></div>
+          </section>
+        </form>
+        <div class="inline-warning" role="status"><strong>会话经验草稿</strong><span>影子智能体只从非本插件卖家回复后、买家明确理解或继续提供资料的低风险对话中提炼经验；该回复可能来自人工或其他已接管工具。经验会脱敏、去重并保持停用，必须人工审核并启用后才会提供给AI。</span></div>
+        <section class="surface-section" aria-labelledby="knowledge-list-title"><div class="section-heading"><div><h3 id="knowledge-list-title">已有条目</h3><p id="knowledge-count">正在读取…</p></div></div><div id="knowledge-list" class="knowledge-list"></div></section>
+      </section>
+
+      <section class="tab-panel" id="panel-review" role="tabpanel" aria-labelledby="tab-diagnostics" data-panel="diagnostics" hidden>
+        <div class="page-heading split-heading">
+          <div><h2>异常复核</h2><p>用于定位识别、核价、改价和消息发送失败。有关联会话时可以打开原会话；订单类后台事件没有会话时只展示诊断，不再显示不可点击按钮。</p></div>
+          <div class="toolbar">
+            <label class="compact-field"><span class="sr-only">筛选异常</span><select id="review-filter"><option value="all">全部异常</option><option value="failed">执行失败</option><option value="unknown">结果未知</option></select></label>
+            <label class="compact-field"><span class="sr-only">搜索异常</span><input id="review-search" type="search" placeholder="搜索摘要或单号"></label>
+          </div>
+        </div>
+        <section class="surface-section" aria-labelledby="review-table-title">
+          <div class="section-heading"><div><h3 id="review-table-title">待复核记录</h3><p id="review-count">0 条记录</p></div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">更新时间</th><th scope="col">问题</th><th scope="col">关联信息</th><th scope="col">状态</th><th scope="col" class="action-column">操作</th></tr></thead>
+              <tbody id="review-records-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-diagnostics" data-panel="diagnostics" hidden>
+        <div class="page-heading split-heading">
+          <div><h2>最近自动化结果</h2><p>直接展示核价失败步骤、改价前后金额、上游拒绝原因和人工接管；不包含买家完整消息或任何密钥。</p></div>
+          <div class="toolbar">
+            <label class="compact-field"><span class="sr-only">筛选日志状态</span><select id="log-filter"><option value="all">全部状态</option><option value="completed">已完成</option><option value="waiting_input">待买家补充</option><option value="business_blocked">安全停止</option><option value="skipped">已跳过</option><option value="retry">重试中</option><option value="failed">执行失败</option><option value="unknown">结果未知</option></select></label>
+            <label class="compact-field"><span class="sr-only">搜索日志</span><input id="log-search" type="search" placeholder="搜索事件或错误"></label>
+            <button class="button button-secondary" id="clear-log-filter" type="button">清除筛选</button>
+          </div>
+        </div>
+        <div class="agent-log-help" role="note"><strong>AI观察记录怎么读？</strong><span>“识别为”是AI对买家意图的判断，“建议”是AI假设接管时会选择的动作。当前处于影子模式，这些动作均未执行；“已完成”只表示该消息事件已经处理完毕。</span></div>
+        <section class="surface-section" aria-labelledby="log-table-title">
+          <div class="section-heading"><div><h3 id="log-table-title">事件日志</h3><p id="log-count">0 条记录</p></div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">时间</th><th scope="col">事件</th><th scope="col">尝试次数</th><th scope="col">结果</th><th scope="col">可操作诊断</th></tr></thead>
+              <tbody id="logs-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

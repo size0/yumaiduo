@@ -1,0 +1,30 @@
+[Unit]
+Description=Wanda V3 shadow recognition and quotation service
+After=network-online.target ticket-backend.service
+Wants=network-online.target ticket-backend.service
+
+[Service]
+Type=simple
+User=ticket-system
+Group=ticket-system
+WorkingDirectory=/opt/wanda-v3-shadow/current/backend
+Environment=TZ=Asia/Shanghai
+Environment=WANDA_QUOTE_GATEWAY_URL=http://127.0.0.1:8000
+Environment=WANDA_SETTINGS_PATH=/var/lib/ticket-system/wanda-v3-shadow/model_config.json
+Environment=WANDA_COS_SETTINGS_PATH=/var/lib/ticket-system/wanda-v3-shadow/cos_config.json
+Environment=WANDA_QUOTE_SETTINGS_PATH=/var/lib/ticket-system/wanda-v3-shadow/wanda_quote_config.json
+Environment=WANDA_QUOTE_PREVIEW_STORE_PATH=/var/lib/ticket-system/wanda-v3-shadow/quote_preview_queue.json
+Environment=WANDA_REPLY_PREVIEW_STORE_PATH=/var/lib/ticket-system/wanda-v3-shadow/reply_preview_queue.json
+ExecStart=/opt/wanda-v3-shadow/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ticket-system/wanda-v3-shadow
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
