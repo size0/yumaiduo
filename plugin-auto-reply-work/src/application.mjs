@@ -1,19 +1,13 @@
 import { agentCanaryReadinessFrom, automatedAgentSafetyReviewFrom } from './agent-evaluation-store.mjs';
 import { createStorageBundle } from './bootstrap/create-storage-bundle.mjs';
+import { createAgentRuntimeBundle } from './bootstrap/create-agent-runtime-bundle.mjs';
 import { createImageLoader } from './image-loader.mjs';
 import { createUiHandler } from './ui-handler.mjs';
 import { createQuotePreviewClient } from './quote-preview-client.mjs';
 import { createReplyPreviewClient } from './reply-preview-client.mjs';
-import { createConversationAgentClient } from './agent/conversation-agent-client.mjs';
-import { createAiOrchestrator } from './ai/ai-orchestrator.mjs';
-import { createDifyClient } from './ai/dify-client.mjs';
 import { agentTraceReplayFrom } from './agent/agent-trace-replay.mjs';
-import { createAgentHumanComparisonScanner } from './agent/agent-human-comparison-scanner.mjs';
 import { agentImageOfflineEvaluationFrom } from './agent/agent-offline-evaluator.mjs';
-import { createAgentReplyOutboxDispatcher } from './agent/agent-reply-outbox-dispatcher.mjs';
-import { AGENT_RUNTIME_VERSION, createShadowAgentRuntime } from './agent/shadow-agent-runtime.mjs';
-import { createActionExecutor } from './action-executor.mjs';
-import { createReplyOrchestrator } from './reply/reply-orchestrator.mjs';
+import { AGENT_RUNTIME_VERSION } from './agent/shadow-agent-runtime.mjs';
 import { createWorkflow } from './workflow.mjs';
 import { hasUnresolvedReplyPlaceholder } from './agent/response-composer.mjs';
 
@@ -38,46 +32,20 @@ export async function createApplication({ config, platformRuntime, backendClient
   const imageLoader = createImageLoader({ allowlist: config.imageHostAllowlist });
   const quotePreviewClient = createQuotePreviewClient(config);
   const replyPreviewClient = createReplyPreviewClient(config);
-  const conversationAgentProvider = createConversationAgentClient(config);
-  const difyShadowProvider = createDifyClient(config);
-  const conversationAgentPlanner = createAiOrchestrator({
-    primaryProvider: conversationAgentProvider,
-    shadowProvider: difyShadowProvider,
-  });
-  const agentHumanComparisonScanner = createAgentHumanComparisonScanner({
-    conversationContextStore, eventStore, agentRunStore,
-    coreFor: (tenantId) => platformRuntime.createClient(tenantId), comparisonStore: agentHumanComparisonStore, logger,
-  });
-  const agentOutboxExecutor = createActionExecutor({
-    coreFor: (tenantId) => platformRuntime.createClient(tenantId),
-    messageRegistry: eventStore,
-  });
-  const agentOutboxReplyOrchestrator = createReplyOrchestrator({ actionExecutor: agentOutboxExecutor });
-  const agentReplyOutboxDispatcher = createAgentReplyOutboxDispatcher({
-    store: agentReplyOutboxStore,
-    executeReply: (action) => agentOutboxReplyOrchestrator.deliver(action),
-    commitDelivery: async (entry) => {
-      const quote = entry.delivery;
-      if (quote?.type !== 'quote' || !entry.platform_message_id) throw new TypeError('invalid quote delivery commit');
-      await conversationContextStore.markQuoted(entry.tenant_id, {
-        accountUnb: entry.account_unb, chatId: entry.chat_id, peerUnb: entry.peer_unb,
-      }, {
-        unitQuoteCents: quote.unit_quote_cents, totalQuoteCents: quote.total_quote_cents, ticketCount: quote.ticket_count,
-        cinema: quote.cinema, movie: quote.movie, date: quote.date, showtime: quote.showtime, hall: quote.hall,
-        quoteScope: quote.quote_scope, memberCostTotalCents: quote.member_cost_total_cents,
-        originalPriceTotalCents: quote.original_price_total_cents, channelFeeTotalCents: quote.channel_fee_total_cents, pricingSource: quote.pricing_source,
-        pricingRuleVersion: quote.pricing_rule_version, replyDelivered: true,
-        deliveryActionId: entry.action_id, platformMessageId: entry.platform_message_id,
-        circledDeliveryImageUrl: quote.circled_delivery_image_url,
-      });
-    },
+  const agentRuntime = createAgentRuntimeBundle({
+    config,
+    platformRuntime,
+    storage,
+    quotePreviewClient,
+    getSettings,
     logger,
   });
-  const shadowAgentRuntime = conversationAgentPlanner ? createShadowAgentRuntime({
-    runStore: agentRunStore, eventStore, conversationContextStore, planner: conversationAgentPlanner, getSettings,
-    replyOutboxStore: agentReplyOutboxStore, manualTaskStore: agentManualTaskStore,
-    coreFor: (tenantId) => platformRuntime.createClient(tenantId), quotePreviewClient, logger,
-  }) : null;
+  const {
+    conversationAgentPlanner,
+    agentHumanComparisonScanner,
+    agentReplyOutboxDispatcher,
+    shadowAgentRuntime,
+  } = agentRuntime;
   const workflow = createWorkflow({
     backend: backendClient,
     coreFor: (tenantId) => platformRuntime.createClient(tenantId),

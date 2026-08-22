@@ -77,12 +77,12 @@ test('requires an existing action executor', () => {
 });
 
 test('workflow and durable Agent outbox both delegate buyer delivery to reply orchestrator', async () => {
-  const [workflow, application] = await Promise.all([
+  const [workflow, runtimeBundle] = await Promise.all([
     readFile(new URL('../src/workflow.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../src/application.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/bootstrap/create-agent-runtime-bundle.mjs', import.meta.url), 'utf8'),
   ]);
 
   assert.match(workflow, /replyOrchestrator\.deliver\(action\)/u);
-  assert.match(application, /agentOutboxReplyOrchestrator\.deliver\(action\)/u);
-  assert.doesNotMatch(application, /executeReply:\s*\(action\)\s*=>\s*agentOutboxExecutor\.execute/u);
+  assert.match(runtimeBundle, /outboxReplyOrchestrator\.deliver\(action\)/u);
+  assert.doesNotMatch(runtimeBundle, /executeReply:\s*\(action\)\s*=>\s*outboxExecutor\.execute/u);
 });
