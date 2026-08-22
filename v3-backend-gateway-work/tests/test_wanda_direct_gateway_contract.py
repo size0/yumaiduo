@@ -132,12 +132,14 @@ class FakeOfficialClient:
         cancel_succeeds: bool = True,
         release_snapshots: list[bool] | None = None,
         block_create: bool = False,
+        offers: Mapping[str, Any] | None = None,
     ) -> None:
         self.account_id = account_id
         self.create_error = create_error
         self.offers_error = offers_error
         self.cancel_succeeds = cancel_succeeds
         self.release_snapshots = list(release_snapshots or [True])
+        self.offers = deepcopy(OFFERS if offers is None else offers)
         self.events: list[tuple[str, str]] = []
         self.raw_urls: list[str] = []
         self.create_started = asyncio.Event()
@@ -171,7 +173,7 @@ class FakeOfficialClient:
         )
         if self.offers_error is not None:
             raise self.offers_error
-        return deepcopy(OFFERS)
+        return deepcopy(self.offers)
 
     async def cancel_order(self, order_id: str) -> bool:
         self.events.append((self.account_id, "cancel_order"))
@@ -341,6 +343,24 @@ def test_direct_official_client_keeps_one_account_for_create_offers_cancel_and_0
         ("eligible", "realtime_seats"),
     ]
     assert factory.created_for == ["eligible"]
+
+
+def test_missing_wplus_offer_retries_next_account_only_after_release() -> None:
+    contract = _contract()
+    first = FakeOfficialClient("first", offers={"activities": []})
+    second = FakeOfficialClient("second")
+    gateway, _clock, _logger, factory = build_gateway(
+        contract,
+        [account("first"), account("second")],
+        {"first": first, "second": second},
+    )
+
+    result = asyncio.run(probe(gateway))
+
+    assert result["account_id"] == "second"
+    assert factory.created_for == ["first", "second"]
+    assert [event[1] for event in first.events] == ["create_order", "activity_offers", "cancel_order", "realtime_seats"]
+    assert [event[1] for event in second.events] == ["create_order", "activity_offers", "cancel_order", "realtime_seats"]
 
 
 def test_sequential_probes_rotate_across_the_available_account_pool() -> None:

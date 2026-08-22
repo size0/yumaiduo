@@ -108,6 +108,19 @@ def _order_id(payload: Mapping[str, Any]) -> str:
     return str(value or "").strip()
 
 
+def _has_usable_wplus_offer(payload: Mapping[str, Any]) -> bool:
+    activities = payload.get("activities")
+    if not isinstance(activities, Sequence) or isinstance(activities, (str, bytes)):
+        return False
+    for item in activities:
+        if not isinstance(item, Mapping) or item.get("able") is not True or "W+会员专享" not in str(item.get("name") or ""):
+            continue
+        allot = item.get("allot_seat") or item.get("allotSeat")
+        if isinstance(allot, Mapping) and isinstance(allot.get("totalPayPrice"), int) and allot["totalPayPrice"] > 0:
+            return True
+    return False
+
+
 def _seat_ids_released(payload: Mapping[str, Any], expected: set[str]) -> bool:
     available = payload.get("available_seat_ids")
     if not isinstance(available, Sequence) or isinstance(available, (str, bytes)):
@@ -125,6 +138,7 @@ class WandaDirectGateway:
         clock: _Clock | None = None,
         logger: Any = None,
         release_recheck_delays: Sequence[float] = (0.0, 2.0, 5.0),
+        max_account_attempts: int = 3,
     ) -> None:
         delays = tuple(float(value) for value in release_recheck_delays)
         if not delays or delays[0] != 0.0 or any(value < 0 for value in delays):
@@ -134,7 +148,10 @@ class WandaDirectGateway:
         self._leases = lease_registry
         self._clock = clock or _SystemClock()
         self._logger = logger
+        if not isinstance(max_account_attempts, int) or isinstance(max_account_attempts, bool) or not 1 <= max_account_attempts <= 5:
+            raise ValueError("max_account_attempts must be between 1 and 5")
         self._release_recheck_delays = delays
+        self._max_account_attempts = max_account_attempts
         self._selection_lock = Lock()
         self._selection_cursor = 0
 
@@ -149,9 +166,10 @@ class WandaDirectGateway:
         accounts = [item for item in await self._account_source.list_accounts() if isinstance(item, Mapping) and _eligible_account(item)]
         if not accounts:
             raise DirectGatewayError("wplus_account_unavailable")
-        accounts = self._rotate_accounts(accounts)
+        accounts = self._rotate_accounts(accounts)[:self._max_account_attempts]
 
         lease_seen = False
+        last_released_result: Mapping[str, Any] | None = None
         retryable_failure_seen = False
         for raw_account in accounts:
             account = dict(raw_account)
@@ -201,14 +219,20 @@ class WandaDirectGateway:
                     raise DirectGatewayError("temporary_lock_release_unverified")
                 if offer_error is not None:
                     raise offer_error
-                return {
-                    "account_id": account_id,
-                    "offers": offers,
-                    "release_verified": True,
-                }
+                result = {"account_id": account_id, "offers": offers, "release_verified": True}
+                if isinstance(offers, Mapping) and _has_usable_wplus_offer(offers):
+                    return result
+                # This account has no usable standard W+ offer. Its temporary
+                # order is already cancelled and released, so a bounded next
+                # account attempt is safe. Keep the final released result so
+                # the quote layer can preserve the precise unavailable code.
+                last_released_result = result
+                continue
             finally:
                 self._leases.release(lease)
 
+        if last_released_result is not None:
+            return last_released_result
         if lease_seen and not retryable_failure_seen:
             raise DirectGatewayError("account_lease_unavailable")
         raise DirectGatewayError("temporary_lock_failed")
