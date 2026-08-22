@@ -33,7 +33,7 @@
 - [ ] 执行 `cd v3-backend-gateway-work && python scripts/validate_direct_gateway_env.py --require-enabled`
 - [ ] 确认账号池权限为服务账号可读、不可组写、其他用户无权限，并确认预检至少发现1个可用W+账号
 - [x] 已在源码提交 `7b809e9` 使用官方registry干净安装的依赖执行插件494项测试和V3 184项测试；代码未发生变化
-- [ ] 使用可实现npm安全审计API的官方registry重新执行生产依赖审计；本轮官方registry在TLS连接建立前断开，未形成审计结果，不能视为通过
+- [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
 - [x] 已为源码提交 `7b809e91d850b76a0c40207ec1d5b2ba81701a1d` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/7b809e91d850`，尚未上传或部署
 - [ ] 在服务器创建独立、不可变、可回滚的V3和插件release目录；不得覆盖当前生产release
 - [ ] 部署后执行 `python deploy/verify_runtime_contracts.py --v3-health-url http://127.0.0.1:8011/health --plugin-health-url http://127.0.0.1:<插件端口>/healthz`，并验证systemd `active`、`NRestarts=0`、WorkingDirectory和错误日志
