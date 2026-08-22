@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app.release_bundle import build_component_archive, verify_component_archive
+from app.release_bundle import build_component_archive, require_release_files, verify_component_archive
 
 
 def test_release_archive_is_deterministic_and_contains_only_declared_files(tmp_path: Path) -> None:
@@ -49,6 +49,16 @@ def test_release_archive_is_deterministic_and_contains_only_declared_files(tmp_p
         expected_runtime_contract="contract-v1",
     )
     assert tampered == {"ready": False, "code": "archive_hash_mismatch", "file_count": 0}
+
+
+def test_release_builder_requires_runtime_dependency_entrypoints() -> None:
+    require_release_files(["component/index.mjs", "component/vendor/dist/index.js"], ["component/vendor/dist/index.js"])
+    try:
+        require_release_files(["component/index.mjs"], ["component/vendor/dist/index.js"])
+    except ValueError as error:
+        assert "component/vendor/dist/index.js" in str(error)
+    else:
+        raise AssertionError("missing runtime dependency entrypoint was accepted")
 
 
 def test_release_archive_rejects_paths_outside_the_component(tmp_path: Path) -> None:

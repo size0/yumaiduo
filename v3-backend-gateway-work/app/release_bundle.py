@@ -20,6 +20,13 @@ def _zip_info(name: str, mode: int = 0o644) -> zipfile.ZipInfo:
     return info
 
 
+def require_release_files(tracked_files: Sequence[str], required_files: Sequence[str]) -> None:
+    available = set(map(str, tracked_files))
+    missing = sorted(set(map(str, required_files)) - available)
+    if missing:
+        raise ValueError(f"required release files are missing: {', '.join(missing)}")
+
+
 def build_component_archive(
     repository_root: Path,
     component_name: str,

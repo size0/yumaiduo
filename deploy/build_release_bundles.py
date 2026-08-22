@@ -10,7 +10,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY / "v3-backend-gateway-work"))
 
-from app.release_bundle import build_component_archive
+from app.release_bundle import build_component_archive, require_release_files
 
 EXPECTED_V3_CONTRACT = "wanda-v3-v11-pricing-account-evidence"
 EXPECTED_AGENT_RUNTIME = "wanda-agent-runtime-v28-pricing-evidence-gate"
@@ -51,13 +51,23 @@ def main() -> int:
         "v3": ("v3-backend-gateway-work", EXPECTED_V3_CONTRACT),
         "plugin": ("plugin-auto-reply-work", EXPECTED_AGENT_RUNTIME),
     }
+    required_files = {
+        "v3": ["v3-backend-gateway-work/app/main.py", "v3-backend-gateway-work/requirements.txt"],
+        "plugin": [
+            "plugin-auto-reply-work/index.mjs",
+            "plugin-auto-reply-work/package-lock.json",
+            "plugin-auto-reply-work/vendor/plugin-sdk-server/dist/index.js",
+        ],
+    }
     artifacts: dict[str, dict[str, object]] = {}
     for label, (component, runtime_contract) in components.items():
         output = output_dir / f"{label}-{commit[:12]}.zip"
+        tracked_files = _tracked_files(component)
+        require_release_files(tracked_files, required_files[label])
         digest = build_component_archive(
             REPOSITORY,
             component,
-            _tracked_files(component),
+            tracked_files,
             output,
             {
                 "component": label,

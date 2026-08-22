@@ -26,6 +26,8 @@
 .v3-deploy-candidate/
 output/
 dist/
+!plugin-auto-reply-work/vendor/plugin-sdk-server/dist/
+!plugin-auto-reply-work/vendor/plugin-sdk-server/dist/**
 *.tar.gz
 *.tgz
 *.zip
