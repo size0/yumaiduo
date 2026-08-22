@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { hasRequiredPricingAccountEvidence } from './quote/quote-evidence-policy.mjs';
 
 const MAX_MESSAGES = 50;
 const MEMORY_MS = 24 * 60 * 60 * 1_000;
@@ -136,6 +137,8 @@ export class ConversationContextStore {
       if (safeScope) snapshot.quote_scope = safeScope;
       const pricingVersion = String(pricingRuleVersion ?? '').trim().slice(0, 80);
       if (pricingVersion) snapshot.pricing_rule_version = pricingVersion;
+      const safePricingSource = String(pricingSource ?? '').replace(/\s+/gu, ' ').trim().slice(0, 80);
+      if (safePricingSource) snapshot.pricing_source = safePricingSource;
       const safePricingAccountRef = String(pricingAccountRef ?? '').trim();
       if (/^[a-f0-9]{32}$/u.test(safePricingAccountRef)) snapshot.pricing_account_ref = safePricingAccountRef;
       if (replyDelivered === true) snapshot.quote_reply_delivered = true;
@@ -190,7 +193,8 @@ export class ConversationContextStore {
         && Number.isSafeInteger(facts.quote_total_cents) && facts.quote_total_cents > 0
         && Number.isSafeInteger(facts.quote_ticket_count) && facts.quote_ticket_count > 0
         && Boolean(String(facts.pricing_rule_version ?? '').trim())
-        && facts.quote_reply_delivered === true;
+        && facts.quote_reply_delivered === true
+        && hasRequiredPricingAccountEvidence(facts);
       if (!confirmable) return false;
       current.facts = updateLatestQuoteRecord(
         { ...current.facts, stage: 'quote_confirmed', quote_confirmed: true },

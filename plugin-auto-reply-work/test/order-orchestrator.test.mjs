@@ -105,6 +105,17 @@ test('a confirmed active quote creates the same bounded change-price action', as
   });
 });
 
+test('direct Wanda order creation blocks price change when pricing-account evidence is missing', async () => {
+  const { orchestrator, calls } = harness({
+    facts: { pricing_source: '万达临时锁座 available-offers + 后台报价规则' },
+  });
+  await orchestrator.process(record('order.created', { orderId: 'order-1' }), { kind: EVENT_ROUTE_KIND.ORDER_CREATED });
+  assert.equal(calls.some(([name, action]) => name === 'action' && action.kind === 'change_price'), false);
+  assert.equal(calls.find(([name]) => name === 'order-exception')[3], 'pricing_account_evidence_missing');
+  assert.match(calls.find(([name]) => name === 'action')[1].text, /先不要付款/u);
+  assert.equal(calls.find(([name]) => name === 'complete')[3].order_price_change.status, 'blocked');
+});
+
 test('order creation fails closed on a conflicting recent ticket count', async () => {
   const { orchestrator, calls } = harness({
     facts: { quote_ticket_count: 1 },

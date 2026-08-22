@@ -147,6 +147,18 @@ test('quote confirmation requires amount, count, policy version, delivery, and a
   assert.equal(facts.quote_reply_delivered, true);
 });
 
+test('direct Wanda quote confirmation requires opaque pricing-account evidence', async () => {
+  const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-context-pricing-evidence-')), 'context.json'));
+  const direct = {
+    ticketCount: 2, totalQuoteCents: 7400, pricingRuleVersion: 'policy-v1', replyDelivered: true,
+    pricingSource: '万达临时锁座 available-offers + 后台报价规则',
+  };
+  await store.markQuoted('tenant-1', message, direct);
+  assert.equal(await store.markQuoteConfirmed('tenant-1', message), false);
+  await store.markQuoted('tenant-1', message, { ...direct, pricingAccountRef: 'a'.repeat(32) });
+  assert.equal(await store.markQuoteConfirmed('tenant-1', message), true);
+});
+
 test('conversation agent persists only bounded workflow state without model prose', async () => {
   const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-context-')), 'context.json'));
   await store.recordAgentTurn('tenant-1', message, {

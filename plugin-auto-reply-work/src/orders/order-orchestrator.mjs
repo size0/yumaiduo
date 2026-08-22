@@ -3,6 +3,7 @@ import { requestedTicketCount } from '../agent/ticket-request-inspector.mjs';
 import { EVENT_ROUTE_KIND } from '../event-router.mjs';
 import { isQuoteConfirmation } from '../conversation/message-classifier.mjs';
 import { hasActiveQuote } from '../quote/quote-followup-policy.mjs';
+import { hasRequiredPricingAccountEvidence } from '../quote/quote-evidence-policy.mjs';
 import {
   configuredReply,
   createQuoteFollowUpAction,
@@ -96,6 +97,26 @@ export function createOrderOrchestrator({
       facts = { ...facts, quote_confirmed: true };
     }
     if (!facts.quote_confirmed || !hasActiveQuote(facts)) return completeIgnored(record, 'buyer_quote_not_confirmed_or_expired');
+    if (!hasRequiredPricingAccountEvidence(facts)) {
+      await conversationContextStore.markOrderException?.(
+        record.envelope.tenantId,
+        contextPayload,
+        'pricing_account_evidence_missing',
+        orderId,
+      );
+      const warning = createQuoteFollowUpAction(
+        withSessionPayload(record.envelope, contextPayload),
+        '当前报价缺少完整的官方核价账号证据，请先不要付款，已转人工核查。',
+      );
+      const warningResult = warning ? await executeAction(warning) : { status: 'skipped', reason: 'reply_address_missing' };
+      const actions = warning ? [{ action_id: warning.action_id, ...warningResult }] : [];
+      await eventStore.complete(record.key, record.leaseId, {
+        mode: 'quote_preview_only',
+        order_price_change: { status: 'blocked', reason: 'pricing_account_evidence_missing' },
+        actions,
+      });
+      return { status: 'completed', mode: 'quote_preview_only', actions };
+    }
 
     const settings = await loadRuntimeSettingsForAccount(record.envelope.tenantId, session.accountUnb);
     if (!settings.automation_enabled || !settings.price_change_enabled) return completeIgnored(record, 'auto_price_change_disabled');
