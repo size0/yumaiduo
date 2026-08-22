@@ -278,7 +278,9 @@ def test_selects_only_online_normal_risk_wplus_account_with_token_and_redacts_to
     result = asyncio.run(probe(gateway))
 
     assert factory.created_for == ["eligible"]
-    assert result["account_id"] == "eligible"
+    assert len(result["pricing_account_ref"]) == 32
+    assert result["pricing_account_ref"] != "eligible"
+    assert "account_id" not in result
     assert result["offers"] == OFFERS
     assert result["release_verified"] is True
     serialized = json.dumps(result, ensure_ascii=False, default=repr)
@@ -389,7 +391,8 @@ def test_missing_wplus_offer_retries_next_account_only_after_release() -> None:
 
     result = asyncio.run(probe(gateway))
 
-    assert result["account_id"] == "second"
+    assert len(result["pricing_account_ref"]) == 32
+    assert "account_id" not in result
     assert factory.created_for == ["first", "second"]
     assert [event[1] for event in first.events] == ["create_order", "activity_offers", "cancel_order", "realtime_seats"]
     assert [event[1] for event in second.events] == ["create_order", "activity_offers", "cancel_order", "realtime_seats"]
@@ -405,8 +408,10 @@ def test_sequential_probes_rotate_across_the_available_account_pool() -> None:
         {"first": first, "second": second},
     )
 
-    assert asyncio.run(probe(gateway))["account_id"] == "first"
-    assert asyncio.run(probe(gateway))["account_id"] == "second"
+    first_ref = asyncio.run(probe(gateway))["pricing_account_ref"]
+    second_ref = asyncio.run(probe(gateway))["pricing_account_ref"]
+    assert len(first_ref) == 32 and len(second_ref) == 32
+    assert first_ref != second_ref
     assert factory.created_for == ["first", "second"]
 
 
@@ -427,7 +432,8 @@ def test_create_failure_may_try_next_account_before_any_order_exists() -> None:
 
     result = asyncio.run(probe(gateway))
 
-    assert result["account_id"] == "second"
+    assert len(result["pricing_account_ref"]) == 32
+    assert "account_id" not in result
     serialized = json.dumps(result, ensure_ascii=False, default=repr)
     assert first_secret not in serialized and second_secret not in serialized
     assert first_secret not in logger.rendered() and second_secret not in logger.rendered()

@@ -30,13 +30,14 @@ test('quote reply persists delivery metadata and commits after the platform send
   await store.initialize();
   await store.enqueue({
     actionId: 'active:quote:reply', runId: 'active:quote', tenantId: 'tenant-1', accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', text: '权威报价', mode: 'active',
-    delivery: { type: 'quote', unit_quote_cents: 5000, total_quote_cents: 10000, ticket_count: 2, pricing_rule_version: 'quote-policy-test', cinema: '测试万达', channel_fee_total_cents: 300, circled_delivery_image_url: 'https://img.alicdn.com/circled.png' },
+    delivery: { type: 'quote', unit_quote_cents: 5000, total_quote_cents: 10000, ticket_count: 2, pricing_rule_version: 'quote-policy-test', pricing_account_ref: 'a'.repeat(32), cinema: '测试万达', channel_fee_total_cents: 300, circled_delivery_image_url: 'https://img.alicdn.com/circled.png' },
   });
   const sending = await store.claimDue();
   const delivered = await store.markSent(sending.action_id, sending.lease_id, 'platform-quote-1');
   assert.equal(delivered.status, 'sent_pending_commit');
   assert.equal(delivered.delivery.type, 'quote');
   assert.equal(delivered.delivery.channel_fee_total_cents, 300);
+  assert.equal(delivered.delivery.pricing_account_ref, 'a'.repeat(32));
   assert.equal(delivered.delivery.circled_delivery_image_url, 'https://img.alicdn.com/circled.png');
   const committing = await store.claimDue();
   assert.equal(committing.status, 'committing');

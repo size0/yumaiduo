@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v26-readonly-wplus-seats';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v27-pricing-account-evidence';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -343,6 +343,7 @@ function quoteDeliverySnapshot(quoted = {}) {
   const memberCostTotal = seatQuotes.length && memberPrices.every(Boolean) ? memberPrices.reduce((sum, value) => sum + value, 0) : memberUnitPrice ? memberUnitPrice * count : null;
   const channelFeeTotal = safeNonnegativeInteger(quoted.channel_fee_total_cents)
     ?? (seatQuotes.length && channelFees.every((value) => value != null) ? channelFees.reduce((sum, value) => sum + value, 0) : null);
+  const pricingAccountRef = /^[a-f0-9]{32}$/u.test(String(quoted.pricing_account_ref ?? '')) ? String(quoted.pricing_account_ref) : '';
   return {
     type: 'quote', unit_quote_cents: safePositiveInteger(quoted.unit_quote_cents), total_quote_cents: total, ticket_count: count,
     pricing_rule_version: pricingRuleVersion, cinema: text(recognition.cinema, 160), movie: text(recognition.movie, 160), date: text(recognition.date, 32),
@@ -351,6 +352,7 @@ function quoteDeliverySnapshot(quoted = {}) {
     original_price_total_cents: safePositiveInteger(quoted.original_price_total_cents) ?? originalPriceTotal,
     channel_fee_total_cents: channelFeeTotal,
     pricing_source: text(quoted.pricing_source, 100),
+    ...(pricingAccountRef ? { pricing_account_ref: pricingAccountRef } : {}),
   };
 }
 

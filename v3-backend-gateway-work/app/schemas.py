@@ -268,6 +268,7 @@ class QuoteRealtimeResponse(BaseModel):
     ticket_count: int | None = Field(default=None, ge=1, le=20)
     needs_ticket_count: bool
     pricing_source: str
+    pricing_account_ref: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     pricing_rule_version: str | None = Field(default=None, min_length=8, max_length=80)
     detail: str
     matched_cinema_name: str | None = Field(default=None, max_length=300)

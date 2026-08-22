@@ -211,7 +211,7 @@ test('quote analytics records non-personal showtime conversion and authoritative
   let now = 1_000;
   const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-quote-analytics-')), 'context.json'), { now: () => now });
   const screening = { cinema: '潍坊万达广场店', movie: '机器人总动员', date: '2026-08-22', showtime: '09:25', hall: '3号厅' };
-  await store.markQuoted('tenant-1', message, { ...screening, ticketCount: 1, unitQuoteCents: 3300, totalQuoteCents: 3300, memberCostTotalCents: 3100, channelFeeTotalCents: 300, pricingSource: 'wanda_realtime', pricingRuleVersion: 'policy-v1', replyDelivered: true });
+  await store.markQuoted('tenant-1', message, { ...screening, ticketCount: 1, unitQuoteCents: 3300, totalQuoteCents: 3300, memberCostTotalCents: 3100, channelFeeTotalCents: 300, pricingSource: 'wanda_realtime', pricingAccountRef: 'a'.repeat(32), pricingRuleVersion: 'policy-v1', replyDelivered: true });
   await store.markQuoteConfirmed('tenant-1', message);
   await store.bindOrder('tenant-1', message, 'order-1');
   await store.setOrderStage('tenant-1', message, 'paid_manual_delivery', 'order-1');
@@ -223,6 +223,7 @@ test('quote analytics records non-personal showtime conversion and authoritative
   assert.equal(records.length, 2);
   assert.deepEqual(records.map((item) => item.quote_total_cents).sort((a, b) => a - b), [3300, 6800]);
   assert.ok(records.some((item) => item.channel_fee_total_cents === 300));
+  assert.ok(records.some((item) => item.pricing_account_ref === 'a'.repeat(32)));
   assert.equal(records[0].screening_sample_size, 2);
   assert.equal(records[0].screening_order_created_count, 1);
   assert.equal(records[0].screening_order_success_rate, 50);

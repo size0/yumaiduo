@@ -106,6 +106,7 @@ async function commitQuoteDelivery(conversationContextStore, entry) {
     originalPriceTotalCents: quote.original_price_total_cents,
     channelFeeTotalCents: quote.channel_fee_total_cents,
     pricingSource: quote.pricing_source,
+    ...(quote.pricing_account_ref ? { pricingAccountRef: quote.pricing_account_ref } : {}),
     pricingRuleVersion: quote.pricing_rule_version,
     replyDelivered: true,
     deliveryActionId: entry.action_id,

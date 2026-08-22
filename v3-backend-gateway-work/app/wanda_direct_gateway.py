@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import os
 import time
 from collections.abc import Mapping, Sequence
@@ -93,6 +94,15 @@ def _account_id(account: Mapping[str, Any]) -> str:
         return opaque
     identity = str(account.get("id") or account.get("phone") or account.get("mobile") or account.get("token") or "").strip()
     return hashlib.sha256(identity.encode("utf-8")).hexdigest() if identity else ""
+
+
+def _pricing_account_ref(account: Mapping[str, Any]) -> str:
+    """Return a stable non-reversible reference without exposing account identity."""
+    account_id = _account_id(account)
+    token = str(account.get("token") or "").strip()
+    if not account_id or not token:
+        return ""
+    return hmac.new(token.encode("utf-8"), f"wanda-pricing:{account_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
 
 def _eligible_account(account: Mapping[str, Any]) -> bool:
@@ -241,7 +251,7 @@ class WandaDirectGateway:
                     raise DirectGatewayError("temporary_lock_release_unverified")
                 if offer_error is not None:
                     raise offer_error
-                result = {"account_id": account_id, "offers": offers, "release_verified": True}
+                result = {"pricing_account_ref": _pricing_account_ref(account), "offers": offers, "release_verified": True}
                 if isinstance(offers, Mapping) and _has_usable_wplus_offer(offers):
                     return result
                 # This account has no usable standard W+ offer. Its temporary

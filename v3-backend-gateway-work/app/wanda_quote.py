@@ -72,6 +72,12 @@ class SeatFact:
     zone_type: SeatZoneType
 
 
+@dataclass(frozen=True)
+class LockedMemberOffer:
+    unit_price_cents: int
+    pricing_account_ref: str | None = None
+
+
 class TicketGateway(Protocol):
     async def for_quote(self) -> "TicketGateway": ...
 
@@ -800,7 +806,7 @@ class RealtimeQuoteService:
         cinema_id: str,
         seats: Sequence[SeatFact],
         stage_timings: dict[str, int] | None = None,
-    ) -> int:
+    ) -> LockedMemberOffer:
         if not seats:
             raise HTTPException(status_code=422, detail="未找到足够的 W+座位用于临时锁座核价")
         partition = _partition(seats)
@@ -826,12 +832,15 @@ class RealtimeQuoteService:
                     quantity=len(seats),
                     allow_friday=self._allow_friday_member_day,
                 )
+                pricing_account_ref = _text(result.get("pricing_account_ref"))
+                if not re.fullmatch(r"[a-f0-9]{32}", pricing_account_ref):
+                    raise DirectGatewayError("temporary_lock_state_unknown")
                 if stage_timings is not None:
                     stage_timings["temporary_lock"] = round((time.perf_counter() - direct_started) * 1000)
                     stage_timings["available_offers"] = 0
                     stage_timings["cancel"] = 0
                     stage_timings["release_recheck"] = 0
-                return member_unit
+                return LockedMemberOffer(member_unit, pricing_account_ref)
             except DirectGatewayError as error:
                 if error.code == "temporary_lock_release_unverified":
                     raise HTTPException(status_code=502, detail="临时锁座未确认释放，已停止报价") from error
@@ -909,7 +918,7 @@ class RealtimeQuoteService:
             raise quote_error
         if member_unit is None:
             raise HTTPException(status_code=422, detail="未找到唯一可用的 W+会员专享优惠价")
-        return member_unit
+        return LockedMemberOffer(member_unit)
 
     async def quote(
         self,
@@ -1000,13 +1009,15 @@ class RealtimeQuoteService:
             raise _diagnostic_failure(error, step="select_offer_seats", recognition=recognition, match=match, realtime=realtime)
         locked_offer_started = time.perf_counter()
         try:
-            member_unit = await self._locked_member_offer(
+            locked_offer = await self._locked_member_offer(
                 gateway,
                 showtime_id=showtime_id,
                 cinema_id=cinema_id,
                 seats=offer_seats,
                 stage_timings=timings_ms,
             )
+            member_unit = locked_offer.unit_price_cents
+            pricing_account_ref = locked_offer.pricing_account_ref
             timings_ms["locked_offer"] = round((time.perf_counter() - locked_offer_started) * 1000)
         except HTTPException as error:
             raise _diagnostic_failure(error, step="locked_offer", recognition=recognition, match=match, realtime=realtime) from error
@@ -1052,6 +1063,7 @@ class RealtimeQuoteService:
                 ticket_count=len(seat_quotes),
                 needs_ticket_count=False,
                 pricing_source="万达临时锁座 available-offers + 后台报价规则",
+                pricing_account_ref=pricing_account_ref,
                 detail="官方已选座已逐座核对；临时锁座读取优惠后已取消并确认座位恢复可售",
                 matched_cinema_name=matched_cinema_name,
                 timings_ms=timings_ms,
@@ -1086,6 +1098,7 @@ class RealtimeQuoteService:
             ticket_count=requested_count,
             needs_ticket_count=not is_count_known,
             pricing_source="万达临时锁座 available-offers + 后台报价规则",
+            pricing_account_ref=pricing_account_ref,
             detail=f"{detail}；临时试价座位已取消并确认恢复可售",
             matched_cinema_name=matched_cinema_name,
             timings_ms=timings_ms,

@@ -116,7 +116,7 @@ export class ConversationContextStore {
       return true;
     });
   }
-  async markQuoted(tenantId, payload, { validForMs = 10 * 60 * 1_000, unitQuoteCents = null, totalQuoteCents = null, ticketCount = null, cinema = null, movie = null, date = null, showtime = null, hall = null, quoteScope = null, memberCostTotalCents = null, originalPriceTotalCents = null, channelFeeTotalCents = null, pricingSource = null, pricingRuleVersion = null, replyDelivered = false, deliveryActionId = null, platformMessageId = null, circledDeliveryImageUrl = null } = {}) {
+  async markQuoted(tenantId, payload, { validForMs = 10 * 60 * 1_000, unitQuoteCents = null, totalQuoteCents = null, ticketCount = null, cinema = null, movie = null, date = null, showtime = null, hall = null, quoteScope = null, memberCostTotalCents = null, originalPriceTotalCents = null, channelFeeTotalCents = null, pricingSource = null, pricingAccountRef = null, pricingRuleVersion = null, replyDelivered = false, deliveryActionId = null, platformMessageId = null, circledDeliveryImageUrl = null } = {}) {
     const validFor = Number(validForMs);
     if (!Number.isFinite(validFor) || validFor <= 0) throw new TypeError('validForMs must be positive');
     return this.#mutate((state) => {
@@ -136,6 +136,8 @@ export class ConversationContextStore {
       if (safeScope) snapshot.quote_scope = safeScope;
       const pricingVersion = String(pricingRuleVersion ?? '').trim().slice(0, 80);
       if (pricingVersion) snapshot.pricing_rule_version = pricingVersion;
+      const safePricingAccountRef = String(pricingAccountRef ?? '').trim();
+      if (/^[a-f0-9]{32}$/u.test(safePricingAccountRef)) snapshot.pricing_account_ref = safePricingAccountRef;
       if (replyDelivered === true) snapshot.quote_reply_delivered = true;
       const at = this.now();
       const priorHistory = Array.isArray(current.facts.quote_history)
@@ -161,6 +163,7 @@ export class ConversationContextStore {
         original_price_total_cents: originalPriceTotalCents,
         channel_fee_total_cents: channelFeeTotalCents,
         pricing_source: pricingSource,
+        pricing_account_ref: snapshot.pricing_account_ref,
         pricing_rule_version: pricingVersion || null,
         quote_reply_delivered: replyDelivered === true,
       });
@@ -584,6 +587,7 @@ function normalizeQuoteRecord(input) {
     original_price_total_cents: positiveCentsOrNull(input.original_price_total_cents),
     channel_fee_total_cents: nonnegativeCentsOrNull(input.channel_fee_total_cents),
     pricing_source: boundedText(input.pricing_source, 80),
+    ...(/^[a-f0-9]{32}$/u.test(String(input.pricing_account_ref ?? '')) ? { pricing_account_ref: String(input.pricing_account_ref) } : {}),
   };
 }
 

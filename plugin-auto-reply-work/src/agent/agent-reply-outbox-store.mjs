@@ -22,12 +22,14 @@ function quoteDelivery(value) {
   const total = positiveInteger(value.total_quote_cents); const count = positiveInteger(value.ticket_count);
   const pricingRuleVersion = bounded(value.pricing_rule_version, 80);
   if (!total || !count || !pricingRuleVersion) throw new TypeError('quote delivery requires total, count, and pricing rule version');
+  const pricingAccountRef = /^[a-f0-9]{32}$/u.test(bounded(value.pricing_account_ref, 32)) ? bounded(value.pricing_account_ref, 32) : '';
   return {
     type: 'quote', unit_quote_cents: positiveInteger(value.unit_quote_cents), total_quote_cents: total, ticket_count: count,
     pricing_rule_version: pricingRuleVersion, cinema: bounded(value.cinema, 160), movie: bounded(value.movie, 160), date: bounded(value.date, 32),
     showtime: bounded(value.showtime, 32), hall: bounded(value.hall, 80), quote_scope: ['area_probe', 'exact_seats'].includes(String(value.quote_scope)) ? String(value.quote_scope) : '',
     member_cost_total_cents: positiveInteger(value.member_cost_total_cents), original_price_total_cents: positiveInteger(value.original_price_total_cents), channel_fee_total_cents: nonnegativeInteger(value.channel_fee_total_cents), pricing_source: bounded(value.pricing_source, 100),
     circled_delivery_image_url: boundedHttpsUrl(value.circled_delivery_image_url),
+    ...(pricingAccountRef ? { pricing_account_ref: pricingAccountRef } : {}),
   };
 }
 

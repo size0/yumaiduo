@@ -547,6 +547,7 @@ export function createWorkflow({
         ...quoteCostEvidence(preview),
         ...(preview.quote_scope ? { quoteScope: preview.quote_scope } : {}),
         pricingRuleVersion: preview.pricing_rule_version,
+        ...(preview.pricing_account_ref ? { pricingAccountRef: preview.pricing_account_ref } : {}),
         replyDelivered: true,
       });
     }

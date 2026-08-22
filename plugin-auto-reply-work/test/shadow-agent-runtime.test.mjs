@@ -530,7 +530,7 @@ test('durable active image turn invokes real recognition, read-only resolution, 
     quotePreviewClient: {
       async recognize(input) { calls.push(['recognize', input.id]); return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 }, hand_drawn_circle: { exists: true } } }; },
       async resolveShowtime(input) { calls.push(['resolve', input.recognition.cinema]); return { ...input, status: 'resolved' }; },
-      async quote(input) { calls.push(['quote', input.status]); return { status: 'preview_ready', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1, pricing_rule_version: 'quote-policy-test', recognition: input.recognition, reply_text: '实时单价50.00元/张，1张合计50.00元。' }; },
+      async quote(input) { calls.push(['quote', input.status]); return { status: 'preview_ready', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1, pricing_rule_version: 'quote-policy-test', pricing_account_ref: 'a'.repeat(32), recognition: input.recognition, reply_text: '实时单价50.00元/张，1张合计50.00元。' }; },
     },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -544,7 +544,7 @@ test('durable active image turn invokes real recognition, read-only resolution, 
     type: 'quote', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1,
     pricing_rule_version: 'quote-policy-test', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', hall: '', quote_scope: '',
     member_cost_total_cents: null, original_price_total_cents: null, channel_fee_total_cents: null, pricing_source: '',
-    circled_delivery_image_url: 'https://img.alicdn.com/a.png',
+    circled_delivery_image_url: 'https://img.alicdn.com/a.png', pricing_account_ref: 'a'.repeat(32),
   });
   const run = await store.get('active:tenant-1:event-1');
   assert.deepEqual(run.observations.map((item) => item.tool), ['recognize_image', 'resolve_showtime', 'quote_realtime']);
