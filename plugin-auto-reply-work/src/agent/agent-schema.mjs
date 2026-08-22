@@ -88,13 +88,17 @@ export function normalizeAgentPlan(value) {
   const missingFields = Array.isArray(value.missing_fields)
     ? value.missing_fields.slice(0, 10).map((item) => boundedText(item, 64)).filter(Boolean)
     : [];
+  const argumentsValue = normalizeArguments(value.arguments);
+  if (['confirm_quote', 'request_price_change'].includes(action) && Object.keys(argumentsValue).length > 0) {
+    throw new TypeError(`${action} does not accept agent arguments`);
+  }
   const experienceCandidate = normalizeExperience(value.experience_candidate);
   return Object.freeze({
     intent,
     confidence,
     goal: boundedText(value.goal, 160),
     action,
-    arguments: Object.freeze(normalizeArguments(value.arguments)),
+    arguments: Object.freeze(argumentsValue),
     missing_fields: Object.freeze(missingFields),
     reply: boundedText(value.reply, 500),
     needs_human: value.needs_human === true,

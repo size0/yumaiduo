@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v22-dify-shadow-advisory';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v23-deterministic-quote-confirmation';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -80,7 +80,7 @@ function sourceObservation(source, tool) {
   };
 }
 
-function runtimeTools(source, state, mode, manualTaskStore, coreFor, quotePreviewClient, initialObservations = []) {
+function runtimeTools(source, state, mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, initialObservations = []) {
   let quoteInput = [...initialObservations].reverse().find((item) => item?.facts?._quote_input)?.facts?._quote_input ?? null;
   if (!quoteInput) {
     try { quoteInput = compactQuoteInput(state?.facts?.quote_draft?.recognition_artifact); }
@@ -174,10 +174,31 @@ function runtimeTools(source, state, mode, manualTaskStore, coreFor, quotePrevie
     },
     async confirm_active_quote() {
       const snapshot = source?.result?.agent_reply_snapshot;
-      const authoritativeReply = mode !== 'active' && snapshot?.kind === 'conversation_follow_up' ? text(snapshot.text, 1_000) : '';
+      const shadowReply = mode !== 'active' && snapshot?.kind === 'conversation_follow_up' ? text(snapshot.text, 1_000) : '';
+      if (mode !== 'active') {
+        return {
+          status: 'success', tool: 'confirm_active_quote', summary: '影子模式仅评估报价确认请求',
+          facts: { quote_confirmed: false }, ...(shadowReply ? { authoritative_reply: shadowReply } : {}), next_actions: ['respond'],
+        };
+      }
+      if (typeof conversationContextStore?.markQuoteConfirmed !== 'function') {
+        return { status: 'error', tool: 'confirm_active_quote', summary: '确定性报价确认门禁不可用', facts: {}, next_actions: ['handoff'], stop_reason: 'quote_confirmation_gate_unavailable' };
+      }
+      const envelope = source?.envelope ?? {};
+      const confirmed = await conversationContextStore.markQuoteConfirmed(envelope.tenantId, envelope.payload ?? {});
+      if (confirmed !== true) {
+        return {
+          status: 'warning', tool: 'confirm_active_quote', summary: '确定性报价确认门禁拒绝本次确认',
+          facts: { quote_confirmed: false },
+          authoritative_reply: '当前报价缺少有效规则版本或送达确认，不能进入下单流程。请发送最新完整选座页，我重新实时核价。',
+          next_actions: ['respond'],
+        };
+      }
       return {
-        status: 'success', tool: 'confirm_active_quote', summary: mode === 'active' ? '报价确认请求交由确定性订单门禁' : '影子模式仅评估报价确认请求',
-        facts: { quote_confirmed: false }, ...(authoritativeReply ? { authoritative_reply: authoritativeReply } : {}), next_actions: ['respond'],
+        status: 'success', tool: 'confirm_active_quote', summary: '确定性报价确认门禁已通过',
+        facts: { quote_confirmed: true },
+        authoritative_reply: '点击右上角立即购买~确定购买，先不输密码再返回（如果有免密付款页面修改为普通支付）\n提交订单后请先不要付款，等待系统确认改价成功后再付款。',
+        next_actions: ['respond'],
       };
     },
     async create_manual_task() {
@@ -364,7 +385,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         human_takeover: false, signal: controller.signal,
       };
       const agent = createConversationAgent({
-        planner, tools: runtimeTools(source, context.state, run.mode, manualTaskStore, coreFor, quotePreviewClient, run.observations),
+        planner, tools: runtimeTools(source, context.state, run.mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, run.observations),
         maxSteps, mode: run.mode, allowWriteSimulation: run.mode !== 'active',
       });
       // Dify is advisory-only and runs solely beside a live Shadow run. Its

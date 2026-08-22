@@ -127,6 +127,16 @@ test('invalid or transaction-parameterized provider plans fail at the AI boundar
     primaryProvider: { async plan() { return validPlan({ action: 'request_price_change', arguments: { amount_cents: 8_800 } }); } },
   });
   await assert.rejects(() => unsafe.plan({}), /forbidden agent argument/u);
+
+  const disguised = createAiOrchestrator({
+    primaryProvider: { async plan() { return validPlan({ action: 'request_price_change', arguments: { requested: true } }); } },
+  });
+  await assert.rejects(() => disguised.plan({}), /request_price_change does not accept agent arguments/u);
+
+  const parameterizedConfirmation = createAiOrchestrator({
+    primaryProvider: { async plan() { return validPlan({ action: 'confirm_quote', arguments: { requested: true } }); } },
+  });
+  await assert.rejects(() => parameterizedConfirmation.plan({}), /confirm_quote does not accept agent arguments/u);
 });
 
 test('Dify advisory evaluation is an explicit Shadow-only path and cannot replace the primary plan', async () => {

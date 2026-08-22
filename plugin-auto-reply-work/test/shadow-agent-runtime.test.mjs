@@ -316,6 +316,60 @@ test('durable active agent queues a bounded reply in the outbox instead of sendi
   assert.equal((await store.get('active:tenant-1:event-1')).status, 'completed');
 });
 
+test('durable active confirmation delegates to the deterministic quote confirmation gate', async () => {
+  const activeEnvelope = { ...envelope, payload: { ...envelope.payload, content: '确认', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-confirm-')), 'runs.json'));
+  await store.initialize();
+  const confirmations = []; const queued = [];
+  const contextStore = {
+    async get() { return { facts: { stage: 'quoted', quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000, pricing_rule_version: 'v1', quote_reply_delivered: true }, messages: [] }; },
+    async markQuoteConfirmed(tenantId, payload) { confirmations.push([tenantId, payload]); return true; },
+  };
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: contextStore,
+    planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '确认报价', action: 'confirm_quote', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家确认' }; } },
+    getSettings: async () => ({}),
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(activeEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.deepEqual(confirmations, [['tenant-1', activeEnvelope.payload]]);
+  assert.equal(queued.length, 1);
+  assert.match(queued[0].text, /先不要付款/u);
+  const run = await store.get('active:tenant-1:event-1');
+  assert.deepEqual(run.tool_calls.map((call) => call.tool), ['confirm_active_quote']);
+  assert.equal(run.observations[0].facts.quote_confirmed, true);
+});
+
+test('active confirmation refuses an expired or undelivered quote without claiming success', async () => {
+  const activeEnvelope = { ...envelope, payload: { ...envelope.payload, content: '确认', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-confirm-rejected-')), 'runs.json'));
+  await store.initialize();
+  const queued = [];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: {
+      async get() { return { facts: { stage: 'quoted', quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000, pricing_rule_version: 'v1', quote_reply_delivered: true }, messages: [] }; },
+      async markQuoteConfirmed() { return false; },
+    },
+    planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '确认报价', action: 'confirm_quote', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家确认' }; } },
+    getSettings: async () => ({}),
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(activeEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.equal(queued.length, 1);
+  assert.match(queued[0].text, /不能进入下单流程/u);
+  assert.doesNotMatch(queued[0].text, /已确认/u);
+  const run = await store.get('active:tenant-1:event-1');
+  assert.equal(run.observations[0].facts.quote_confirmed, false);
+});
+
 test('durable active image turn invokes real recognition, read-only resolution, and realtime quote tools in order', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-real-quote-')), 'runs.json'));
   await store.initialize();
