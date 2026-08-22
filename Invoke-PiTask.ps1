@@ -138,17 +138,21 @@ if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
 }
 
 $scriptRoot = Get-FullPath -Path $scriptRoot -BasePath (Get-Location).Path
-$gitTopLevelOutput = @(& git -C $scriptRoot rev-parse --show-toplevel 2>&1)
-if ($LASTEXITCODE -ne 0 -or $gitTopLevelOutput.Count -eq 0) {
+# Discover the worktree root with .NET paths instead of parsing `git rev-parse`
+# output. Windows PowerShell 5 can decode native UTF-8 output with the active
+# OEM code page and corrupt repository paths containing Chinese characters.
+$repositoryRoot = $scriptRoot
+while (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot '.git'))) {
+    $parent = Split-Path -Parent $repositoryRoot
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $repositoryRoot) {
+        throw 'Invoke-PiTask.ps1 must be run from inside a Git worktree.'
+    }
+    $repositoryRoot = $parent
+}
+& git -C $repositoryRoot rev-parse --is-inside-work-tree *> $null
+if ($LASTEXITCODE -ne 0) {
     throw 'Invoke-PiTask.ps1 must be run from inside a Git worktree.'
 }
-$repositoryRoot = Get-FullPath -Path (([string]$gitTopLevelOutput[-1]).Trim()) -BasePath $scriptRoot
-
-$commonDirectoryOutput = @(& git -C $repositoryRoot rev-parse --git-common-dir 2>&1)
-if ($LASTEXITCODE -ne 0 -or $commonDirectoryOutput.Count -eq 0) {
-    throw 'Unable to resolve the shared Git directory.'
-}
-$commonGitDirectory = Get-FullPath -Path (([string]$commonDirectoryOutput[-1]).Trim()) -BasePath $repositoryRoot
 
 $baseOutput = @(& git -C $repositoryRoot rev-parse --verify --end-of-options ("$BaseCommit^{commit}") 2>&1)
 if ($LASTEXITCODE -ne 0 -or $baseOutput.Count -eq 1 -and [string]::IsNullOrWhiteSpace([string]$baseOutput[0])) {
@@ -160,21 +164,17 @@ if ($resolvedBaseCommit -notmatch '^[0-9a-f]{40,64}$') {
 }
 
 if ([string]::IsNullOrWhiteSpace($RunRoot)) {
-    $RunRoot = Join-Path $commonGitDirectory 'pi-task-runs'
+    $canonicalParent = Split-Path -Parent $repositoryRoot
+    $canonicalName = Split-Path -Leaf $repositoryRoot
+    $RunRoot = Join-Path $canonicalParent "$canonicalName-pi-task-runs"
 }
 else {
     $RunRoot = Get-FullPath -Path $RunRoot -BasePath $repositoryRoot
 }
 
 if ([string]::IsNullOrWhiteSpace($WorktreeRoot)) {
-    $canonicalRepository = if ((Split-Path -Leaf $commonGitDirectory) -eq '.git') {
-        Split-Path -Parent $commonGitDirectory
-    }
-    else {
-        $repositoryRoot
-    }
-    $worktreeParent = Split-Path -Parent $canonicalRepository
-    $worktreeContainerName = (Split-Path -Leaf $canonicalRepository) + '-pi-task-worktrees'
+    $worktreeParent = Split-Path -Parent $repositoryRoot
+    $worktreeContainerName = (Split-Path -Leaf $repositoryRoot) + '-pi-task-worktrees'
     $WorktreeRoot = Join-Path $worktreeParent $worktreeContainerName
 }
 else {

@@ -138,6 +138,17 @@ public static class FakePi
         (Test-Path -LiteralPath $fixture.RunRoot) | Should Be $false
     }
 
+    It 'supports repository paths containing Unicode characters' {
+        $unicodeSuffix = [string]([char]0x9c7c) + [string]([char]0x9ea6) + [string]([char]0x591a)
+        $fixture = New-TaskFixture ("unicode-$unicodeSuffix")
+        $result = Invoke-TaskScript -Fixture $fixture -Mode ReadOnly
+
+        $result.ExitCode | Should Be 0
+        $metadata = Get-OnlyMetadata -Fixture $fixture
+        $metadata.status | Should Be 'succeeded'
+        (Test-Path -LiteralPath $metadata.worktree) | Should Be $true
+    }
+
     It 'pins the requested base commit in a dedicated branch and worktree' {
         $fixture = New-TaskFixture 'fixed-base'
         Set-Content -LiteralPath (Join-Path $fixture.Repository 'after-base.txt') -Value 'later' -Encoding utf8
