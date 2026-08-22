@@ -11,6 +11,14 @@ import { AGENT_RUNTIME_VERSION } from './agent/shadow-agent-runtime.mjs';
 import { hasUnresolvedReplyPlaceholder } from './agent/response-composer.mjs';
 import { EVENT_ROUTE_KIND, routeWorkflowEvent } from './event-router.mjs';
 import { createReplyOrchestrator, isBuyerReplyAction } from './reply/reply-orchestrator.mjs';
+import {
+  isBareAcknowledgement,
+  isCurrentQuoteQuestion,
+  isExplicitTypedSeatChoice,
+  isQuoteConfirmation,
+  isQuotePurchaseIntent,
+  isSeatClarificationQuestion,
+} from './conversation/message-classifier.mjs';
 
 // Buyers commonly send the screenshot, city, seats, and quantity as separate
 // messages. Process only the final event after this quiet window.
@@ -717,14 +725,6 @@ export function createWorkflow({
       showtime: value('showtime'), hall: value('hall') || null, seat_zone_types: ['W+'],
       official_selection: { is_selected: false, selected_seat_numbers: [], selected_count: 0 },
     };
-  }
-
-  function isExplicitTypedSeatChoice(value) {
-    const text = String(value ?? '').trim();
-    if (!text || /[？?吗么呢]/u.test(text)) return false;
-    return /^(?:好的?[，,、\s]*要?\s*)?\d{1,2}\s*排\s*\d{1,2}\s*(?:座|号)?[。.!！]?$/u.test(text)
-      || /\d{1,2}\s*排\s*\d{1,2}\s*(?:座|号)/u.test(text)
-      || /\d{1,2}\s*排[\d\s、,，.．-]{2,}(?:座|号)/u.test(text);
   }
 
   function isQuotedSeatOrCountFragment(envelope, quoteContext) {
@@ -1642,29 +1642,6 @@ function hasActiveQuote(facts) {
     && positiveCents(facts?.quote_ticket_count) !== null;
 }
 
-function isBareAcknowledgement(value) {
-  return /^(?:ok|okay|好(?:的)?|知道了|明白了|收到|嗯+|谢谢(?:了)?|行)\s*[!！。.]?$/iu.test(String(value ?? '').trim());
-}
-
-function isCurrentQuoteQuestion(value) {
-  const content = String(value ?? '').replace(/\s+/gu, '').trim();
-  return /^(?:(?:你这|这个|这边|那这个)?(?:多少钱|多少|什么价)|这个呢|现在多少钱|价格(?:呢|多少)?|会员价(?:可以)?优惠吗|[WwＷｗ][+＋](?:价格|优惠)?(?:呢|吗)?)[？?]?$/u.test(content)
-    || /^(?:不是|不是说|怎么不是)\d+(?:\.\d{1,2})?(?:元|块)?(?:吗|嘛)?[？?]?$/u.test(content)
-    || /^(?:那我|我)?(?:就是)?直接.{0,20}(?:拍下|下单)(?:是吧|对吧|吗|么)?[？?]?$/u.test(content);
-}
-
-function isQuoteConfirmation(value) {
-  const content = String(value ?? '').trim();
-  if (/^(?:ok|okay|好(?:的)?|对(?:的)?|可以|确认|没问题|行|嗯+)\s*[!！。.]?$/iu.test(content)) return true;
-  // Within an unexpired, delivered quote, these are bounded purchase intents,
-  // not general conversation words. They authorize the existing quote only.
-  return isQuotePurchaseIntent(content);
-}
-
-function isQuotePurchaseIntent(value) {
-  return /^(?:下单|改价|待付款|我?已?拍(?:了|下)?)(?:\s*[，,。！!]?\s*(?:待付款|改价))?\s*[!！。.]?$/u.test(String(value ?? '').trim());
-}
-
 function hasRecentQuotePurchaseIntent(messages) {
   return Array.isArray(messages)
     && messages.filter((message) => message?.role === 'buyer').slice(-6)
@@ -1689,11 +1666,6 @@ function conflictingRecentTicketCount(messages, quotedCount) {
     if (requested && requested !== quoteCount) return requested;
   }
   return null;
-}
-
-function isSeatClarificationQuestion(value) {
-  const text = String(value ?? '').trim();
-  return /(?:座位|位置|第\s*\d{1,2}\s*(?:排|行)|中间)/u.test(text) && /(?:吗|么|？|\?)$/u.test(text);
 }
 
 function quoteFollowUpAction(envelope, message) {
