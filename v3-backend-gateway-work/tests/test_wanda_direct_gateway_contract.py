@@ -231,6 +231,7 @@ def build_gateway(
     clock: FakeClock | None = None,
     logger: FakeLogger | None = None,
     lease_ttl_seconds: float = 30.0,
+    delayed_release_recheck_delays: tuple[float, ...] = (15.0, 15.0),
 ) -> tuple[Any, FakeClock, FakeLogger, FakeClientFactory]:
     fake_clock = clock or FakeClock()
     fake_logger = logger or FakeLogger()
@@ -243,6 +244,7 @@ def build_gateway(
         clock=fake_clock,
         logger=fake_logger,
         release_recheck_delays=(0.0, 2.0, 5.0),
+        delayed_release_recheck_delays=delayed_release_recheck_delays,
     )
     return gateway, fake_clock, fake_logger, factory
 
@@ -303,6 +305,16 @@ def test_account_lease_is_bounded_fenced_and_cannot_be_released_by_an_expired_ho
     assert leases.try_acquire("eligible") is None
     assert leases.release(second) is True
     assert leases.try_acquire("eligible") is not None
+
+
+def test_delayed_release_recheck_window_is_strictly_bounded() -> None:
+    contract = _contract()
+    client = FakeOfficialClient("eligible")
+    with pytest.raises(ValueError, match="delayed_release_recheck_delays"):
+        build_gateway(
+            contract, [account("eligible")], {"eligible": client},
+            delayed_release_recheck_delays=(0.0, 61.0),
+        )
 
 
 def test_same_account_cannot_create_two_temporary_orders_concurrently() -> None:
@@ -481,8 +493,68 @@ def test_cancel_success_without_seat_restoration_is_release_unverified() -> None
         asyncio.run(probe(gateway))
 
     assert_error_code(raised.value, "temporary_lock_release_unverified")
-    assert clock.sleeps == [2.0, 5.0]
-    assert [event[1] for event in client.events].count("realtime_seats") == 3
+    assert clock.sleeps[:2] == [2.0, 5.0]
+    assert [event[1] for event in client.events].count("realtime_seats") >= 3
+
+
+def test_release_failure_stays_failed_while_background_recheck_confirms_late_restoration() -> None:
+    contract = _contract()
+
+    async def scenario() -> None:
+        secret = "contract-secret-eligible"
+        client = FakeOfficialClient(
+            "eligible", cancel_succeeds=True,
+            release_snapshots=[False, False, False, True, True],
+        )
+        gateway, clock, logger, _factory = build_gateway(
+            contract, [account("eligible", token=secret)], {"eligible": client},
+            lease_ttl_seconds=180.0,
+        )
+
+        with pytest.raises(contract.DirectGatewayError) as raised:
+            await probe(gateway)
+        assert_error_code(raised.value, "temporary_lock_release_unverified")
+
+        with pytest.raises(contract.DirectGatewayError) as leased:
+            await probe(gateway)
+        assert_error_code(leased.value, "account_lease_unavailable")
+
+        await gateway.wait_for_background_rechecks()
+        assert clock.sleeps == [2.0, 5.0, 15.0]
+        assert [event[1] for event in client.events].count("realtime_seats") == 4
+        assert "release_confirmed_after_failure" in logger.rendered()
+        assert secret not in logger.rendered()
+        assert "temporary-eligible" not in logger.rendered()
+
+        result = await probe(gateway)
+        assert result["release_verified"] is True
+
+    asyncio.run(scenario())
+
+
+def test_background_release_recheck_is_bounded_and_never_changes_failed_quote_result() -> None:
+    contract = _contract()
+
+    async def scenario() -> None:
+        client = FakeOfficialClient(
+            "eligible", cancel_succeeds=True,
+            release_snapshots=[False, False, False, False, False],
+        )
+        gateway, clock, logger, _factory = build_gateway(
+            contract, [account("eligible")], {"eligible": client},
+            lease_ttl_seconds=180.0,
+        )
+
+        with pytest.raises(contract.DirectGatewayError) as raised:
+            await probe(gateway)
+        assert_error_code(raised.value, "temporary_lock_release_unverified")
+        await gateway.wait_for_background_rechecks()
+
+        assert clock.sleeps == [2.0, 5.0, 15.0, 15.0]
+        assert [event[1] for event in client.events].count("realtime_seats") == 5
+        assert "release_still_unverified_after_background_recheck" in logger.rendered()
+
+    asyncio.run(scenario())
 
 
 def test_direct_flow_never_uses_legacy_order_or_ticket_system_urls(monkeypatch: pytest.MonkeyPatch) -> None:

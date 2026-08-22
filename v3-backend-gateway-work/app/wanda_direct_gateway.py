@@ -138,11 +138,15 @@ class WandaDirectGateway:
         clock: _Clock | None = None,
         logger: Any = None,
         release_recheck_delays: Sequence[float] = (0.0, 2.0, 5.0),
+        delayed_release_recheck_delays: Sequence[float] = (15.0, 15.0),
         max_account_attempts: int = 3,
     ) -> None:
         delays = tuple(float(value) for value in release_recheck_delays)
         if not delays or delays[0] != 0.0 or any(value < 0 for value in delays):
             raise ValueError("release_recheck_delays must begin with zero and stay non-negative")
+        delayed_delays = tuple(float(value) for value in delayed_release_recheck_delays)
+        if not delayed_delays or any(value <= 0 or value > 30 for value in delayed_delays) or sum(delayed_delays) > 60:
+            raise ValueError("delayed_release_recheck_delays must be positive and total at most 60 seconds")
         self._account_source = account_source
         self._client_factory = client_factory
         self._leases = lease_registry
@@ -151,6 +155,8 @@ class WandaDirectGateway:
         if not isinstance(max_account_attempts, int) or isinstance(max_account_attempts, bool) or not 1 <= max_account_attempts <= 5:
             raise ValueError("max_account_attempts must be between 1 and 5")
         self._release_recheck_delays = delays
+        self._delayed_release_recheck_delays = delayed_delays
+        self._background_release_rechecks: set[asyncio.Task[None]] = set()
         self._max_account_attempts = max_account_attempts
         self._selection_lock = Lock()
         self._selection_cursor = 0
@@ -180,6 +186,7 @@ class WandaDirectGateway:
                 continue
             client = self._client_factory(account)
             order_id = ""
+            release_lease_in_request = True
             try:
                 try:
                     created = await client.create_order(normalized)
@@ -193,6 +200,10 @@ class WandaDirectGateway:
                             client, order_id, normalized["showtime_id"], set(normalized["seat_ids"])
                         )
                         if not cancelled or not released:
+                            self._schedule_delayed_release_recheck(
+                                client, lease, normalized["showtime_id"], set(normalized["seat_ids"])
+                            )
+                            release_lease_in_request = False
                             raise DirectGatewayError("temporary_lock_release_unverified")
                         raise DirectGatewayError("temporary_lock_state_unknown")
                 except DirectGatewayError as error:
@@ -223,6 +234,10 @@ class WandaDirectGateway:
                     client, order_id, normalized["showtime_id"], set(normalized["seat_ids"])
                 )
                 if not cancelled or not released:
+                    self._schedule_delayed_release_recheck(
+                        client, lease, normalized["showtime_id"], set(normalized["seat_ids"])
+                    )
+                    release_lease_in_request = False
                     raise DirectGatewayError("temporary_lock_release_unverified")
                 if offer_error is not None:
                     raise offer_error
@@ -236,13 +251,63 @@ class WandaDirectGateway:
                 last_released_result = result
                 continue
             finally:
-                self._leases.release(lease)
+                if release_lease_in_request:
+                    self._leases.release(lease)
 
         if last_released_result is not None:
             return last_released_result
         if lease_seen and not retryable_failure_seen:
             raise DirectGatewayError("account_lease_unavailable")
         raise DirectGatewayError("temporary_lock_failed")
+
+    def _schedule_delayed_release_recheck(
+        self, client: Any, lease: AccountLease, showtime_id: str, expected_seat_ids: set[str]
+    ) -> None:
+        task = asyncio.create_task(
+            self._delayed_release_recheck(client, lease, showtime_id, expected_seat_ids)
+        )
+        self._background_release_rechecks.add(task)
+        task.add_done_callback(self._background_release_rechecks.discard)
+
+    async def _delayed_release_recheck(
+        self, client: Any, lease: AccountLease, showtime_id: str, expected_seat_ids: set[str]
+    ) -> None:
+        outcome = "release_still_unverified_after_background_recheck"
+        attempts = 0
+        try:
+            for delay in self._delayed_release_recheck_delays:
+                await self._clock.sleep(delay)
+                attempts += 1
+                try:
+                    snapshot = await client.realtime_seats(showtime_id)
+                    released = isinstance(snapshot, Mapping) and _seat_ids_released(snapshot, expected_seat_ids)
+                except Exception:
+                    released = False
+                if released:
+                    outcome = "release_confirmed_after_failure"
+                    break
+            self._log_delayed_release_outcome(outcome, attempts)
+        finally:
+            self._leases.release(lease)
+
+    def _log_delayed_release_outcome(self, outcome: str, attempts: int) -> None:
+        log = getattr(self._logger, "info", None)
+        if not callable(log):
+            return
+        try:
+            log(
+                "wanda delayed release recheck completed",
+                extra={"outcome": outcome, "attempts": attempts},
+            )
+        except Exception:
+            # Logging must never retain the account lease or escape a detached task.
+            return
+
+    async def wait_for_background_rechecks(self) -> None:
+        """Wait for currently scheduled read-only release checks during shutdown or tests."""
+        pending = tuple(self._background_release_rechecks)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _cancel_and_verify(
         self, client: Any, order_id: str, showtime_id: str, expected_seat_ids: set[str]
