@@ -157,6 +157,16 @@ export function createWorkerPool(workflow, { concurrency = 4, logger = console }
   return Object.freeze({ poll, stop });
 }
 
+export function runConcurrentTicks(workflow, concurrency = 4) {
+  const count = Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 16 ? concurrency : 4;
+  return Promise.all(Array.from({ length: count }, async () => {
+    for (let processed = 0; processed < 32; processed += 1) {
+      const result = await workflow.tick();
+      if (result == null) return;
+    }
+  }));
+}
+
 export function historicalEvaluationCandidatesFrom(runs, { runtimeVersion, target = 100, batchSize = 1 } = {}) {
   const version = String(runtimeVersion ?? '').trim();
   const maximum = Number.isSafeInteger(Number(target)) ? Math.max(1, Math.min(100, Number(target))) : 100;

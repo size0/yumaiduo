@@ -94,6 +94,8 @@ Extract from `application.mjs`:
 
 `application.mjs` must end as dependency assembly plus `start`, `stop`, `health`, `enqueueEvent` and `handleHttpRequest` delegation.
 
+Completed: storage, Agent runtime, lifecycle, operator presenters, and operator API now live behind these seams; `application.mjs` is the composition root only. Compatibility re-exports remain temporarily for existing tests and callers.
+
 ## Parallel-work rules
 
 The following hotspots have one writer at a time:
