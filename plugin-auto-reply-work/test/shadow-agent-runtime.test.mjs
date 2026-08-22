@@ -183,6 +183,46 @@ test('historical evaluation runs are versioned, side-effect-free, and independen
   assert.deepEqual(run.tool_calls.map((call) => call.tool), ['recognize_image', 'resolve_showtime', 'quote_realtime']);
 });
 
+test('shadow and evaluation write-shaped plans remain externally side-effect-free', async (t) => {
+  for (const mode of ['shadow', 'evaluation']) {
+    await t.test(mode, async () => {
+      const preferenceEnvelope = { ...envelope, payload: { ...envelope.payload, content: '7排5座', imageUrls: [] } };
+      const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), `wanda-${mode}-no-effects-`)), 'runs.json'));
+      await store.initialize();
+      let contextReads = 0;
+      const runtime = createShadowAgentRuntime({
+        runStore: store,
+        eventStore: { async get() { return {
+          key: 'tenant-1:event-1', status: 'completed', envelope: preferenceEnvelope,
+          result: { agent_reply_snapshot: { kind: 'conversation_follow_up', text: '已记录文字座位偏好，具体以出票时实时可选为准。' } },
+        }; } },
+        conversationContextStore: {
+          async get() { contextReads += 1; return { facts: {}, messages: [] }; },
+          async recordCircledDeliveryInstruction() { throw new Error(`${mode} must not write conversation state`); },
+        },
+        planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '记录偏好', action: 'record_seat_preference', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '文字座位' }; } },
+        getSettings: async () => ({}),
+        manualTaskStore: { async create() { throw new Error(`${mode} must not create manual tasks`); } },
+        replyOutboxStore: { async enqueue() { throw new Error(`${mode} must not enqueue replies`); } },
+        coreFor() { throw new Error(`${mode} must not call platform APIs`); },
+        quotePreviewClient: {
+          async recognize() { throw new Error(`${mode} must not recognize again`); },
+          async resolveShowtime() { throw new Error(`${mode} must not resolve showtimes`); },
+          async quote() { throw new Error(`${mode} must not quote again`); },
+        },
+      });
+      const scheduled = await runtime.schedule(preferenceEnvelope, { mode });
+      assert.equal((await runtime.tick()).status, 'completed');
+      const run = await store.get(scheduled.run.run_id);
+      assert.deepEqual(run.tool_calls.map((call) => call.tool), ['record_seat_preference']);
+      assert.equal(run.result.status, 'reply');
+      assert.equal(run.result.authoritative_reply_used, true);
+      assert.equal(run.result.reply_queued, undefined);
+      assert.equal(contextReads, mode === 'shadow' ? 1 : 0);
+    });
+  }
+});
+
 test('durable active agent queues a bounded reply in the outbox instead of sending inline', async () => {
   const activeEnvelope = { ...envelope, payload: { ...envelope.payload, content: '图片怎么发', imageUrls: [] } };
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-runtime-')), 'runs.json'));
@@ -229,7 +269,9 @@ test('durable active image turn invokes real recognition, read-only resolution, 
   await runtime.schedule(envelope, { mode: 'active' });
   await runtime.tick();
   assert.deepEqual(calls, [['recognize', 'event-1'], ['resolve', '测试万达'], ['quote', 'resolved']]);
+  assert.equal(queued.length, 1);
   assert.equal(queued[0].text, '实时单价50.00元/张，1张合计50.00元。\n接受本次报价请回复“确认”。');
+  assert.doesNotMatch(queued[0].text, /模型报价不得采用/u);
   assert.deepEqual(queued[0].delivery, {
     type: 'quote', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1,
     pricing_rule_version: 'quote-policy-test', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', hall: '', quote_scope: '',
@@ -238,6 +280,8 @@ test('durable active image turn invokes real recognition, read-only resolution, 
   });
   const run = await store.get('active:tenant-1:event-1');
   assert.deepEqual(run.observations.map((item) => item.tool), ['recognize_image', 'resolve_showtime', 'quote_realtime']);
+  assert.equal(run.result.reason, 'authoritative_tool_response');
+  assert.equal(run.result.authoritative_reply_used, true);
 });
 
 test('active quote tool cannot execute before read-only showtime resolution', async () => {

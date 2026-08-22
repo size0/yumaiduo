@@ -752,6 +752,47 @@ test('an exact-seat screenshot clearly replaces a different active area quote', 
   assert.deepEqual(marked[0][2], { unitQuoteCents: 4100, totalQuoteCents: 8200, ticketCount: 2, cinema: undefined, quoteScope: 'exact_seats', pricingRuleVersion: undefined, replyDelivered: true });
 });
 
+test('reprocessing the same event keeps one stable reply action and does not send twice', async () => {
+  const messages = [];
+  const pluginMessageIds = new Set();
+  let sends = 0;
+  const completions = [];
+  const { workflow } = harness({
+    autoReplyEnabled: true,
+    eventStore: {
+      async wasSentMessage(_tenantId, _chatId, messageId) { return pluginMessageIds.has(messageId); },
+      async recordSentMessage(_tenantId, _chatId, messageId) { pluginMessageIds.add(messageId); },
+      async complete(_key, _leaseId, result) { completions.push(result); },
+    },
+    core: { im: {
+      async listMessages() { return { items: [...messages] }; },
+      async sendMessage(input) {
+        sends += 1;
+        const messageId = `same-event-reply-${sends}`;
+        messages.unshift({ direction: 'outbound', messageId, content: input.text, sentAt: new Date().toISOString() });
+        return { messageId };
+      },
+    } },
+    quotePreviewClient: {
+      async capture() { return { status: 'quote_failed', failure_code: 'showtime_not_found', reply_text: '暂未核到该场实时价格，请补充开场时间。' }; },
+    },
+  });
+  const claimed = record({
+    id: 'evt-same-reply', tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(),
+    payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '这场多少钱' },
+  });
+  await workflow.processClaimed(claimed);
+  await workflow.processClaimed(claimed);
+
+  assert.equal(sends, 1);
+  assert.equal(completions.length, 2);
+  assert.deepEqual(completions.map((item) => item.actions[0].action_id), ['evt-same-reply:quote-reply', 'evt-same-reply:quote-reply']);
+  assert.equal(completions[0].actions[0].status, 'succeeded');
+  assert.deepEqual(completions[1].actions[0], {
+    action_id: 'evt-same-reply:quote-reply', status: 'skipped', reason: 'duplicate_reply',
+  });
+});
+
 test('a pre-recognition duplicate draft does not call the quote or generic reply clients', async () => {
   let quoteCalls = 0;
   let replyCalls = 0;
@@ -891,12 +932,27 @@ test('a quote failure sends one failure reply without an extra recognition messa
   });
 });
 
-test('safety-critical quote failures ignore a stale configurable human-handoff template', async () => {
+test('temporary-lock release failure fails closed and cannot be overwritten by an agent reply', async () => {
+  let agentCalls = 0;
+  const markedQuotes = [];
   const { workflow, calls } = harness({
     autoReplyEnabled: true,
     runtimeSettings: {
       automation_enabled: true, recognition_enabled: true, quote_enabled: true, ai_reply_enabled: true,
+      conversation_agent_mode: 'active', execution_owner: 'agent',
       reply_templates: { temporary_lock_release_unverified: '临时试价座位未确认释放，已停止自动报价并转人工处理。' },
+    },
+    conversationContextStore: {
+      async get() { return { facts: {}, messages: [] }; },
+      async recordQuoteDraft() {},
+      async claimQuoteDraftAttempt() { return true; },
+      async markQuoted(...args) { markedQuotes.push(args); },
+    },
+    conversationAgentPlanner: {
+      async plan() {
+        agentCalls += 1;
+        return { intent: '选座核价', confidence: 1, goal: '覆盖失败', action: 'respond', arguments: {}, missing_fields: [], reply: '座位已释放，可以继续付款。', needs_human: false, reason: '模型误判' };
+      },
     },
     quotePreviewClient: {
       async recognize() { return { status: 'recognized', recognition: { image_type: 'SEAT_MAP' } }; },
@@ -909,6 +965,11 @@ test('safety-critical quote failures ignore a stale configurable human-handoff t
   }));
   const sent = calls.filter(([name]) => name === 'send').map(([, input]) => input.text);
   assert.deepEqual(sent, ['临时试价座位的释放状态暂未确认，已停止自动报价；请勿付款，并稍后刷新选座页后重试。']);
+  assert.equal(agentCalls, 0);
+  assert.deepEqual(markedQuotes, []);
+  const completion = calls.find(([name]) => name === 'complete')[3];
+  assert.equal(completion.quote_failure_code, 'temporary_lock_release_unverified');
+  assert.deepEqual(completion.agent_reply_snapshot, { kind: 'conversation_follow_up', text: sent[0] });
 });
 
 test('a failed seat-map recognition sends a safe request for a clearer image', async () => {
