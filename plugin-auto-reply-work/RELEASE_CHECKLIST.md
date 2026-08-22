@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前 main 尚未部署。生产插件仍是 V22 行为基线；当前 Agent Runtime 为 `wanda-agent-runtime-v28-pricing-evidence-gate`，旧Runtime样本不得计入放行门槛。下方旧0.6.0审核包不能代表当前源码。
+> 当前生产已部署源码候选 `103a7b9bcc1e9b3d40650cda93f73d442af9dbb3`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime为 `wanda-agent-runtime-v28-pricing-evidence-gate`。生产继续保持Shadow、确定性执行Owner和Active 0%；旧Runtime样本不得计入放行门槛。下方旧0.6.0审核包不能代表当前源码。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 插件测试 494 项、V3 后端测试 184 项通过；V3 测试无弃用警告
+- [x] 插件测试 494 项、V3 后端测试 185 项通过；V3 测试无弃用警告
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -29,26 +29,30 @@
 
 ## 当前源码发布前必须完成
 
-- [ ] 在受限环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，不得复用账号Token
-- [ ] 执行 `cd v3-backend-gateway-work && python scripts/validate_direct_gateway_env.py --require-enabled`
-- [ ] 确认账号池权限为服务账号可读、不可组写、其他用户无权限，并确认预检至少发现1个可用W+账号
-- [x] 已在源码提交 `7b809e9` 使用官方registry干净安装的依赖执行插件494项测试和V3 184项测试；代码未发生变化
+- [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
+- [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
+- [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
+- [x] 已在源码提交 `103a7b9` 使用官方registry干净安装的依赖执行插件494项测试和V3 185项测试；代码未发生变化
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `7b809e91d850b76a0c40207ec1d5b2ba81701a1d` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/7b809e91d850`，尚未上传或部署
-- [ ] 在服务器创建独立、不可变、可回滚的V3和插件release目录；不得覆盖当前生产release
-- [ ] 部署后执行 `python deploy/verify_runtime_contracts.py --v3-health-url http://127.0.0.1:8011/health --plugin-health-url http://127.0.0.1:<插件端口>/healthz`，并验证systemd `active`、`NRestarts=0`、WorkingDirectory和错误日志
+- [x] 已为源码提交 `103a7b9bcc1e9b3d40650cda93f73d442af9dbb3` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/103a7b9bcc1e`
+- [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
+- [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [ ] 使用只读官方座位请求进行smoke；临时试价只能使用预先批准的受控场次，并必须确认取消和座位恢复
-- [ ] 确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、Active 0%、Canary关闭且kill switch开启
-- [ ] 为当前V28 Runtime重新采集至少100轮自动安全审计和100轮图片样本；旧版本样本不得补门槛
-- [ ] 完成当前release回滚演练并记录恢复后的WorkingDirectory、健康状态和队列恢复结果
+- [x] 已确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、`conversation_agent_active_ready=false`、Active 0%、Canary关闭且kill switch开启
+- [ ] 为当前V28 Runtime重新采集至少100轮自动安全审计和100轮图片样本；当前已自动形成1轮文字和1轮图片evaluation，旧版本样本不得补门槛
+- [x] 已完成V10/V22回滚及V11/V28恢复演练；两端健康、WorkingDirectory和队列恢复通过
+- [x] 已修复候选包遗漏vendor SDK运行时的问题，并将SDK `dist/index.js`设为构建强制文件；首次失败切换已自动回滚，无买家交易状态迁移
+- [x] 插件systemd沙箱已显式允许写入当前 `DATA_DIR=/var/lib/ticket-system/wanda-ai-plugin-data`，V28历史评测队列已恢复持久化
 
 ## 当前候选包证据
 
-- V3 SHA-256：`c3a549da5ea9e44348f9125896c26e3b063f1a392bccf33f93c5137aae1e9e0c`
-- 插件 SHA-256：`03ba36f783cf54c533c9d9bdcfb79d01a503df68892c0b3b40cffb62aa9c86ae`
-- Manifest SHA-256：`b97928f8124d24936b8c46dfb061ef73a0b426b12bab82dfe38c8d022e215bff`
+- V3 SHA-256：`031bd41b07ab2decedb6f187a2828da6caf97581a8b0bbbc77842cf1c8768412`
+- 插件 SHA-256：`1049f0e54badc8a214bee3aed4af68aa613f19cb94beeaaeb6d38d40de5a0893`
+- Manifest SHA-256：`8639343072cca8cfe28832dc2d57073ca2e472d518f345169963f8660308f454`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/7b809e91d850`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/103a7b9bcc1e`
+- 生产V3：`/opt/wanda-v3-backend/releases/v11-pricing-account-evidence-103a7b9bcc1e`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v28-pricing-evidence-103a7b9bcc1e`
 
 ## 提交前由门户确认
 
