@@ -1,7 +1,7 @@
 const ACTIONS = Object.freeze([
   'respond', 'ask_for_image', 'ask_for_city', 'ask_for_missing_information',
   'inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote',
-  'create_manual_task', 'record_seat_preference', 'confirm_quote', 'handoff', 'wait',
+  'create_manual_task', 'get_manual_task_status', 'record_seat_preference', 'confirm_quote', 'handoff', 'wait',
 ]);
 
 function contract({ effect = 'read', facts = [], next = [], authoritativeReply = false }) {
@@ -57,6 +57,9 @@ export const AGENT_TOOL_CONTRACTS = Object.freeze({
   }),
   create_manual_task: contract({
     effect: 'write', facts: ['manual_task_created'], next: ['respond', 'handoff'], authoritativeReply: true,
+  }),
+  get_manual_task_status: contract({
+    facts: ['manual_task_found', 'manual_task_status', 'manual_task_resolved'], next: ['respond', 'handoff'], authoritativeReply: true,
   }),
   read_linked_order: contract({
     facts: ['has_linked_order', 'lifecycle', 'paid', 'fulfilled'], next: ['respond', 'create_manual_task', 'handoff'], authoritativeReply: true,

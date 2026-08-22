@@ -363,7 +363,7 @@ function agentActionLabel(value) {
     respond: '回复流程说明', ask_for_image: '请买家补发选座截图', ask_for_city: '询问城市',
     ask_for_missing_information: '询问缺失信息', start_quote: '请求旧版识图核价',
     recognize_image: '识别买家图片', resolve_showtime: '匹配影院场次', quote_realtime: '调用实时核价',
-    request_price_change: '申请安全改价', create_manual_task: '创建人工处理任务',
+    request_price_change: '申请安全改价', create_manual_task: '创建人工处理任务', get_manual_task_status: '查询人工处理进度',
     show_available_wplus_seats: '查询可用W+座位', record_seat_preference: '记录圈选出票指令',
     confirm_quote: '确认本次报价', get_order_status: '查询订单状态', read_linked_order: '读取关联订单',
     inspect_ticket_request: '检查票务请求', handoff: '转人工处理', wait: '暂停自动处理',

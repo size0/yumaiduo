@@ -23,6 +23,29 @@ test('manual tasks are idempotent, bounded, and isolated by tenant', async () =>
   assert.equal(JSON.stringify(tenantOne).includes('buyer-1'), true);
 });
 
+test('finds the latest manual task only for the exact tenant conversation', async () => {
+  const store = new AgentManualTaskStore(join(await mkdtemp(join(tmpdir(), 'wanda-agent-manual-lookup-')), 'tasks.json'));
+  await store.initialize();
+  const base = {
+    tenantId: 'tenant-1', accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1',
+    orderId: '', reasonCode: 'manual_review', summary: '需要人工处理', source: 'agent',
+  };
+  await store.create({ ...base, taskId: 'task-old', eventId: 'event-old' });
+  await store.create({ ...base, taskId: 'task-new', eventId: 'event-new' });
+  await store.update('tenant-1', 'task-new', { status: 'in_progress' });
+  await store.create({ ...base, taskId: 'other-buyer', eventId: 'event-other', peerUnb: 'buyer-2' });
+
+  const latest = await store.findLatestForConversation('tenant-1', {
+    accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1',
+  });
+  assert.equal(latest.task_id, 'task-new');
+  assert.equal(latest.status, 'in_progress');
+  assert.equal(await store.findLatestForConversation('tenant-1', {
+    accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'missing',
+  }), null);
+  await assert.rejects(() => store.findLatestForConversation('', {}), /manual task conversation address/u);
+});
+
 test('manual tasks support assignment, priority, labels, SLA, notes, and lifecycle updates', async () => {
   let now = Date.parse('2026-08-22T00:00:00.000Z');
   const store = new AgentManualTaskStore(join(await mkdtemp(join(tmpdir(), 'wanda-agent-manual-')), 'tasks.json'), { now: () => now });

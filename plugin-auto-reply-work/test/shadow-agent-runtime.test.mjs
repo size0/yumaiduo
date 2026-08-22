@@ -370,6 +370,53 @@ test('active confirmation refuses an expired or undelivered quote without claimi
   assert.equal(run.observations[0].facts.quote_confirmed, false);
 });
 
+test('manual task status is read by exact conversation without exposing task or order identifiers', async () => {
+  const activeEnvelope = { ...envelope, payload: { ...envelope.payload, content: '人工处理进度怎么样了', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-manual-status-')), 'runs.json'));
+  await store.initialize();
+  const lookups = []; const queued = [];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '查询人工进度', action: 'respond', arguments: {}, missing_fields: [], reply: '模型不得猜测进度', needs_human: false, reason: '进度咨询' }; } },
+    getSettings: async () => ({}),
+    manualTaskStore: { async findLatestForConversation(tenantId, address) { lookups.push([tenantId, address]); return { task_id: 'secret-task', order_id: 'secret-order', assignee: 'secret-operator', status: 'resolved' }; } },
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(activeEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.deepEqual(lookups, [['tenant-1', { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1' }]]);
+  assert.equal(queued.length, 1);
+  assert.match(queued[0].text, /是否已经出票仍以闲鱼订单状态/u);
+  assert.doesNotMatch(JSON.stringify(queued), /secret-task|secret-order|secret-operator/u);
+  const run = await store.get('active:tenant-1:event-1');
+  assert.deepEqual(run.observations[0].facts, {
+    manual_task_found: true, manual_task_status: 'resolved', manual_task_resolved: true,
+  });
+});
+
+test('historical manual task evaluation never reads mutable current task state', async () => {
+  const statusEnvelope = { ...envelope, payload: { ...envelope.payload, content: '人工处理进度怎么样了', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-evaluation-manual-status-')), 'runs.json'));
+  await store.initialize();
+  let reads = 0;
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: statusEnvelope, result: {} }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '查询人工进度', action: 'get_manual_task_status', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '进度咨询' }; } },
+    getSettings: async () => ({}),
+    manualTaskStore: { async findLatestForConversation() { reads += 1; return null; } },
+  });
+  const scheduled = await runtime.schedule(statusEnvelope, { mode: 'evaluation' });
+  await runtime.tick();
+  assert.equal(reads, 0);
+  const run = await store.get(scheduled.run.run_id);
+  assert.equal(run.result.reason, 'historical_manual_task_snapshot_unavailable');
+});
+
 test('durable active image turn invokes real recognition, read-only resolution, and realtime quote tools in order', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-real-quote-')), 'runs.json'));
   await store.initialize();

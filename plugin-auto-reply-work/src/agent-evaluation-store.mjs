@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-const ACTIONS = new Set(['respond', 'ask_for_image', 'ask_for_city', 'ask_for_missing_information', 'start_quote', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'request_price_change', 'create_manual_task', 'show_available_wplus_seats', 'record_seat_preference', 'confirm_quote', 'get_order_status', 'read_linked_order', 'inspect_ticket_request', 'handoff', 'wait']);
+const ACTIONS = new Set(['respond', 'ask_for_image', 'ask_for_city', 'ask_for_missing_information', 'start_quote', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'request_price_change', 'create_manual_task', 'get_manual_task_status', 'show_available_wplus_seats', 'record_seat_preference', 'confirm_quote', 'get_order_status', 'read_linked_order', 'inspect_ticket_request', 'handoff', 'wait']);
 const RATINGS = new Set(['unreviewed', 'qualified', 'unqualified', 'not_applicable']);
 const CONSISTENCY = new Set(['unreviewed', 'consistent', 'inconsistent', 'not_applicable']);
 const HIGH_RISK_TOOLS = new Set(['request_price_change', 'change_price', 'create_order', 'pay', 'issue_ticket', 'refund', 'ship']);

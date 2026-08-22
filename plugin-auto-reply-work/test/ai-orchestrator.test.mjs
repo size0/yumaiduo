@@ -137,6 +137,11 @@ test('invalid or transaction-parameterized provider plans fail at the AI boundar
     primaryProvider: { async plan() { return validPlan({ action: 'confirm_quote', arguments: { requested: true } }); } },
   });
   await assert.rejects(() => parameterizedConfirmation.plan({}), /confirm_quote does not accept agent arguments/u);
+
+  const parameterizedManualStatus = createAiOrchestrator({
+    primaryProvider: { async plan() { return validPlan({ action: 'get_manual_task_status', arguments: { task: 'latest' } }); } },
+  });
+  await assert.rejects(() => parameterizedManualStatus.plan({}), /get_manual_task_status does not accept agent arguments/u);
 });
 
 test('Dify advisory evaluation is an explicit Shadow-only path and cannot replace the primary plan', async () => {

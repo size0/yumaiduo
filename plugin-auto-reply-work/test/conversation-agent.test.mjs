@@ -19,7 +19,7 @@ test('agent plan accepts only the bounded customer-service action space', () => 
     intent: '选座核价', confidence: 0.93, goal: '查询实时价格', action: 'start_quote',
     arguments: { use_current_message: true }, missing_fields: [], reply: '', needs_human: false, reason: '信息完整',
   });
-  for (const action of ['inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'read_linked_order', 'request_price_change', 'create_manual_task']) {
+  for (const action of ['inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'read_linked_order', 'request_price_change', 'create_manual_task', 'get_manual_task_status']) {
     assert.equal(normalizeAgentPlan({ intent: '选座核价', confidence: 0.9, goal: '推进', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '受控工具' }).action, action);
   }
   assert.throws(() => normalizeAgentPlan({

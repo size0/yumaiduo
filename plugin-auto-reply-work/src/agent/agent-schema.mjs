@@ -10,6 +10,7 @@ const ACTIONS = new Set([
   'read_active_quote',
   'request_price_change',
   'create_manual_task',
+  'get_manual_task_status',
   'show_available_wplus_seats',
   'record_seat_preference',
   'confirm_quote',
@@ -89,7 +90,7 @@ export function normalizeAgentPlan(value) {
     ? value.missing_fields.slice(0, 10).map((item) => boundedText(item, 64)).filter(Boolean)
     : [];
   const argumentsValue = normalizeArguments(value.arguments);
-  if (['confirm_quote', 'request_price_change'].includes(action) && Object.keys(argumentsValue).length > 0) {
+  if (['confirm_quote', 'request_price_change', 'get_manual_task_status'].includes(action) && Object.keys(argumentsValue).length > 0) {
     throw new TypeError(`${action} does not accept agent arguments`);
   }
   const experienceCandidate = normalizeExperience(value.experience_candidate);

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v23-deterministic-quote-confirmation';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v24-manual-task-status';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -211,6 +211,39 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
         orderId: String(state?.facts?.order_id ?? ''), reasonCode: 'agent_requested_manual_review', summary: 'Agent请求人工处理', source: 'agent',
       });
       return { status: 'success', tool: 'create_manual_task', summary: created.created ? '已创建人工处理任务' : '人工处理任务已存在', facts: { manual_task_created: created.created }, authoritative_reply: '这个问题需要人工进一步确认，已记录处理，请稍候。', next_actions: ['respond'] };
+    },
+    async get_manual_task_status() {
+      if (mode === 'evaluation') {
+        return { status: 'error', tool: 'get_manual_task_status', summary: '历史事件缺少事件时点的人工任务快照', facts: {}, next_actions: ['handoff'], stop_reason: 'historical_manual_task_snapshot_unavailable' };
+      }
+      if (typeof manualTaskStore?.findLatestForConversation !== 'function') {
+        return { status: 'error', tool: 'get_manual_task_status', summary: '人工任务状态读取工具不可用', facts: {}, next_actions: ['handoff'], stop_reason: 'manual_task_reader_unavailable' };
+      }
+      const envelope = source?.envelope ?? {};
+      const payload = envelope.payload ?? {};
+      const task = await manualTaskStore.findLatestForConversation(envelope.tenantId, {
+        accountUnb: payload.accountUnb ?? payload.account_unb,
+        chatId: payload.chatId ?? payload.chat_id,
+        peerUnb: payload.peerUnb ?? payload.peer_unb,
+      });
+      if (!task) {
+        return {
+          status: 'success', tool: 'get_manual_task_status', summary: '当前会话没有人工处理任务',
+          facts: { manual_task_found: false, manual_task_status: 'none', manual_task_resolved: false },
+          authoritative_reply: '当前会话暂未查到人工处理任务；如果仍需人工核对，请告诉我具体问题。', next_actions: ['respond'],
+        };
+      }
+      const taskStatus = ['open', 'in_progress', 'resolved'].includes(String(task.status)) ? String(task.status) : 'open';
+      const replies = {
+        open: '人工处理任务已记录，目前仍在排队处理中，请稍候。',
+        in_progress: '人工客服正在处理这项任务，有结果后会继续通知您。',
+        resolved: '人工处理记录已更新；是否已经出票仍以闲鱼订单状态和人工明确通知为准。',
+      };
+      return {
+        status: 'success', tool: 'get_manual_task_status', summary: `已读取人工任务状态：${taskStatus}`,
+        facts: { manual_task_found: true, manual_task_status: taskStatus, manual_task_resolved: taskStatus === 'resolved' },
+        authoritative_reply: replies[taskStatus], next_actions: ['respond'],
+      };
     },
     async read_linked_order() {
       const orderId = text(state?.facts?.order_id, 128);

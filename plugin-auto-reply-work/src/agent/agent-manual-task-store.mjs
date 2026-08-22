@@ -114,6 +114,18 @@ export class AgentManualTaskStore {
     const state = await this.#read(); const task = state.tasks[String(taskIdValue)];
     return task && task.tenantId === String(tenantIdValue) ? external(task, this.#now()) : null;
   }
+  async findLatestForConversation(tenantIdValue, address = {}) {
+    const tenantId = bounded(tenantIdValue, 128);
+    const accountUnb = bounded(address?.accountUnb ?? address?.account_unb, 128);
+    const chatId = bounded(address?.chatId ?? address?.chat_id, 128);
+    const peerUnb = bounded(address?.peerUnb ?? address?.peer_unb, 128);
+    if (!tenantId || !accountUnb || !chatId || !peerUnb) throw new TypeError('manual task conversation address is required');
+    const state = await this.#read();
+    const task = Object.values(state.tasks)
+      .filter((item) => item.tenantId === tenantId && item.accountUnb === accountUnb && item.chatId === chatId && item.peerUnb === peerUnb)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    return task ? external(task, this.#now()) : null;
+  }
   async list({ tenantId, status, assignee, priority, label, limit = 100 } = {}) {
     const state = await this.#read();
     return Object.values(state.tasks).filter((taskValue) => {
