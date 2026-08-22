@@ -584,7 +584,11 @@ def create_app(
         recognition = await (service.recognize(request, app.state.settings_store.read(), app.state.knowledge_base_store.active("vision")) if isinstance(service, VisionService) else service.recognize(request, app.state.settings_store.read()))
         return VisionRecognizeResponse(prompt_version=PROMPT_VERSION, recognition=recognition)
 
-    @app.post("/api/wanda-ai/quote/realtime", response_model=QuoteRealtimeResponse)
+    @app.post(
+        "/api/wanda-ai/quote/realtime",
+        response_model=QuoteRealtimeResponse,
+        response_model_exclude={"pricing_account_ref"},
+    )
     async def quote_realtime(request: QuoteRealtimeRequest) -> QuoteRealtimeResponse:
         recognition = app.state.local_catalog.canonicalize(request.recognition)
         return await app.state.quote_service.quote(request.model_copy(update={"recognition": recognition}))

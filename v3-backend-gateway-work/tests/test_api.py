@@ -1609,6 +1609,7 @@ class FakeRealtimeQuoteService:
             ticket_count=None,
             needs_ticket_count=True,
             pricing_source="W+会员专享优惠",
+            pricing_account_ref="a" * 32,
             detail="按图中圈选区域核价",
         )
 
@@ -1624,6 +1625,7 @@ class FakePreviewQuoteService:
             ticket_count=request.ticket_count,
             needs_ticket_count=request.ticket_count is None,
             pricing_source="W+ preview",
+            pricing_account_ref="b" * 32,
             detail="preview only",
         )
 
@@ -2013,7 +2015,6 @@ def test_realtime_quote_route_has_the_frontend_contract(tmp_path: Path) -> None:
         "ticket_count": None,
         "needs_ticket_count": True,
         "pricing_source": "W+会员专享优惠",
-        "pricing_account_ref": None,
         "pricing_rule_version": None,
         "detail": "按图中圈选区域核价",
         "matched_cinema_name": None,
@@ -2021,6 +2022,23 @@ def test_realtime_quote_route_has_the_frontend_contract(tmp_path: Path) -> None:
         "reply_text": None,
         "timings_ms": {},
     }
+
+
+def test_pricing_account_ref_is_available_only_on_authenticated_internal_quote_route(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WANDA_PREVIEW_INGEST_KEY", "test-preview-key")
+    client = TestClient(create_app(
+        ModelSettingsStore(tmp_path / "model_config.json"),
+        quote_service=FakePreviewQuoteService(),
+    ))
+    payload = {"tenant_id": "tenant-1", "ticket_count": 2, "recognition": {"image_type": "SEAT_MAP"}}
+    assert client.post("/api/quotes/preview-quote", json=payload).status_code == 401
+    response = client.post(
+        "/api/quotes/preview-quote",
+        headers={"X-Wanda-Preview-Key": "test-preview-key"},
+        json=payload,
+    )
+    assert response.status_code == 200
+    assert response.json()["pricing_account_ref"] == "b" * 32
 
 
 def test_available_wplus_seats_lists_only_current_wplus_seats_in_the_requested_row(tmp_path: Path, monkeypatch) -> None:
