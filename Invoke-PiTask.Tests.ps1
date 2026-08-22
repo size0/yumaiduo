@@ -45,6 +45,7 @@ public static class FakePi
             File.WriteAllText(Path.Combine(Environment.CurrentDirectory, fileToCreate), "agent change");
         }
 
+        Console.WriteLine("UTF8-RESULT-\u4F60\u597D");
         var exitCode = Environment.GetEnvironmentVariable("FAKE_PI_EXIT");
         return String.IsNullOrEmpty(exitCode) ? 0 : Int32.Parse(exitCode);
     }
@@ -188,6 +189,10 @@ public static class FakePi
         (@($allMetadata.branch | Select-Object -Unique)).Count | Should Be 2
         (Get-ChildItem -LiteralPath $fixture.RunRoot -Filter 'latest.json' -File -Recurse).Count | Should Be 0
         $firstMetadata.test_status | Should Be 'not_run'
+        $resultBytes = [System.IO.File]::ReadAllBytes($firstMetadata.result_file)
+        ($resultBytes.Length -gt 2 -and -not ($resultBytes[0] -eq 0xff -and $resultBytes[1] -eq 0xfe)) | Should Be $true
+        $expectedUnicodeOutput = 'UTF8-RESULT-' + [string]([char]0x4f60) + [string]([char]0x597d)
+        [System.IO.File]::ReadAllText($firstMetadata.result_file, [System.Text.Encoding]::UTF8) | Should Match $expectedUnicodeOutput
     }
 
     It 'does not commit agent changes and reports commit diff and test status' {

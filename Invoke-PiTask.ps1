@@ -21,6 +21,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $PSCommandPath
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 function Get-FullPath {
     param(
@@ -306,7 +307,12 @@ $accessInstruction
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & pi @piArguments 2>&1 | Tee-Object -FilePath $resultFile
+        if (Test-Path -LiteralPath $resultFile) { Remove-Item -LiteralPath $resultFile -Force }
+        & pi @piArguments 2>&1 | ForEach-Object {
+            $line = [string]$_
+            Write-Host $line
+            [System.IO.File]::AppendAllText($resultFile, $line + [Environment]::NewLine, $utf8NoBom)
+        }
         $piExitCode = $LASTEXITCODE
     }
     finally {
@@ -326,8 +332,13 @@ $accessInstruction
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
+            if (Test-Path -LiteralPath $testResultFile) { Remove-Item -LiteralPath $testResultFile -Force }
             & $powerShellExecutable -NoLogo -NoProfile -NonInteractive -Command $TestCommand 2>&1 |
-                Tee-Object -FilePath $testResultFile
+                ForEach-Object {
+                    $line = [string]$_
+                    Write-Host $line
+                    [System.IO.File]::AppendAllText($testResultFile, $line + [Environment]::NewLine, $utf8NoBom)
+                }
             $testExitCode = $LASTEXITCODE
         }
         finally {
