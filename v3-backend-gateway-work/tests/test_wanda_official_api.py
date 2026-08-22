@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
@@ -189,6 +190,10 @@ def test_direct_gateway_builder_is_default_off_and_requires_explicit_opt_in(monk
     path.write_text("[]", encoding="utf-8")
     monkeypatch.setenv("WANDA_DIRECT_GATEWAY_ENABLED", "true")
     monkeypatch.setenv("WANDA_DIRECT_ACCOUNT_POOL_PATH", str(path))
+    monkeypatch.delenv("WANDA_PRICING_ACCOUNT_REF_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="WANDA_PRICING_ACCOUNT_REF_KEY"):
+        build_wanda_direct_gateway_from_env()
+    monkeypatch.setenv("WANDA_PRICING_ACCOUNT_REF_KEY", "test-pricing-reference-key-0000001")
     assert build_wanda_direct_gateway_from_env() is not None
 
 

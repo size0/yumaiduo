@@ -96,13 +96,12 @@ def _account_id(account: Mapping[str, Any]) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest() if identity else ""
 
 
-def _pricing_account_ref(account: Mapping[str, Any]) -> str:
+def _pricing_account_ref(account: Mapping[str, Any], reference_key: bytes) -> str:
     """Return a stable non-reversible reference without exposing account identity."""
     account_id = _account_id(account)
-    token = str(account.get("token") or "").strip()
-    if not account_id or not token:
+    if not account_id:
         return ""
-    return hmac.new(token.encode("utf-8"), f"wanda-pricing:{account_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return hmac.new(reference_key, f"wanda-pricing:{account_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
 
 def _eligible_account(account: Mapping[str, Any]) -> bool:
@@ -145,6 +144,7 @@ class WandaDirectGateway:
         account_source: _AccountSource,
         client_factory: Any,
         lease_registry: AccountLeaseRegistry,
+        pricing_ref_key: str,
         clock: _Clock | None = None,
         logger: Any = None,
         release_recheck_delays: Sequence[float] = (0.0, 2.0, 5.0),
@@ -157,6 +157,10 @@ class WandaDirectGateway:
         delayed_delays = tuple(float(value) for value in delayed_release_recheck_delays)
         if not delayed_delays or any(value <= 0 or value > 30 for value in delayed_delays) or sum(delayed_delays) > 60:
             raise ValueError("delayed_release_recheck_delays must be positive and total at most 60 seconds")
+        normalized_pricing_ref_key = str(pricing_ref_key or '').strip()
+        if len(normalized_pricing_ref_key.encode('utf-8')) < 32:
+            raise ValueError("pricing_ref_key must contain at least 32 bytes")
+        self._pricing_ref_key = normalized_pricing_ref_key.encode('utf-8')
         self._account_source = account_source
         self._client_factory = client_factory
         self._leases = lease_registry
@@ -251,7 +255,7 @@ class WandaDirectGateway:
                     raise DirectGatewayError("temporary_lock_release_unverified")
                 if offer_error is not None:
                     raise offer_error
-                result = {"pricing_account_ref": _pricing_account_ref(account), "offers": offers, "release_verified": True}
+                result = {"pricing_account_ref": _pricing_account_ref(account, self._pricing_ref_key), "offers": offers, "release_verified": True}
                 if isinstance(offers, Mapping) and _has_usable_wplus_offer(offers):
                     return result
                 # This account has no usable standard W+ offer. Its temporary
@@ -368,8 +372,12 @@ def build_wanda_direct_gateway_from_env() -> WandaDirectGateway | None:
     from .wanda_official_api import DEFAULT_ACCOUNT_POOL_PATH, JsonWandaAccountSource, WandaOfficialApiClient
 
     pool_path = os.getenv("WANDA_DIRECT_ACCOUNT_POOL_PATH", "").strip() or str(DEFAULT_ACCOUNT_POOL_PATH)
+    pricing_ref_key = os.getenv("WANDA_PRICING_ACCOUNT_REF_KEY", "").strip()
+    if len(pricing_ref_key.encode("utf-8")) < 32:
+        raise RuntimeError("WANDA_PRICING_ACCOUNT_REF_KEY must contain at least 32 bytes")
     return WandaDirectGateway(
         account_source=JsonWandaAccountSource(pool_path),
         client_factory=lambda account: WandaOfficialApiClient(account),
         lease_registry=AccountLeaseRegistry(ttl_seconds=180.0),
+        pricing_ref_key=pricing_ref_key,
     )

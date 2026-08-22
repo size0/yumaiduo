@@ -232,6 +232,7 @@ def build_gateway(
     logger: FakeLogger | None = None,
     lease_ttl_seconds: float = 30.0,
     delayed_release_recheck_delays: tuple[float, ...] = (15.0, 15.0),
+    pricing_ref_key: str = "contract-pricing-reference-key-0001",
 ) -> tuple[Any, FakeClock, FakeLogger, FakeClientFactory]:
     fake_clock = clock or FakeClock()
     fake_logger = logger or FakeLogger()
@@ -241,6 +242,7 @@ def build_gateway(
         account_source=FakeAccountSource(accounts),
         client_factory=factory,
         lease_registry=leases,
+        pricing_ref_key=pricing_ref_key,
         clock=fake_clock,
         logger=fake_logger,
         release_recheck_delays=(0.0, 2.0, 5.0),
@@ -287,6 +289,28 @@ def test_selects_only_online_normal_risk_wplus_account_with_token_and_redacts_to
     assert secret not in serialized
     assert "token" not in result
     assert secret not in logger.rendered()
+
+
+def test_pricing_account_reference_is_stable_across_token_rotation_and_keyed_server_side() -> None:
+    contract = _contract()
+    reference_key = "contract-pricing-reference-key-0001"
+    first = FakeOfficialClient("eligible")
+    first_gateway, _clock, _logger, _factory = build_gateway(
+        contract, [account("eligible", token="first-rotating-token")], {"eligible": first},
+        pricing_ref_key=reference_key,
+    )
+    second = FakeOfficialClient("eligible")
+    second_gateway, _clock, _logger, _factory = build_gateway(
+        contract, [account("eligible", token="second-rotating-token")], {"eligible": second},
+        pricing_ref_key=reference_key,
+    )
+
+    first_ref = asyncio.run(probe(first_gateway))["pricing_account_ref"]
+    second_ref = asyncio.run(probe(second_gateway))["pricing_account_ref"]
+    assert first_ref == second_ref
+    assert "eligible" not in first_ref
+    with pytest.raises(ValueError, match="pricing_ref_key"):
+        build_gateway(contract, [account("eligible")], {"eligible": first}, pricing_ref_key="too-short")
 
 
 def test_account_lease_is_bounded_fenced_and_cannot_be_released_by_an_expired_holder() -> None:
