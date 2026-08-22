@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v21-active-quote-reference';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v22-dify-shadow-advisory';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -367,7 +367,16 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         planner, tools: runtimeTools(source, context.state, run.mode, manualTaskStore, coreFor, quotePreviewClient, run.observations),
         maxSteps, mode: run.mode, allowWriteSimulation: run.mode !== 'active',
       });
-      const outcome = await agent.runTurn(context, {
+      // Dify is advisory-only and runs solely beside a live Shadow run. Its
+      // failure is persisted as evaluation metadata and can never affect the
+      // primary plan, tools, reply outbox, or deterministic business event.
+      const shadowProviderEvaluationPromise = run.mode === 'shadow' && typeof planner.evaluateShadow === 'function'
+        ? Promise.resolve().then(() => planner.evaluateShadow(context)).then(
+          (advisory) => ({ status: 'completed', advisory }),
+          () => ({ status: 'failed', reason: 'shadow_provider_unavailable' }),
+        )
+        : Promise.resolve(null);
+      const outcomePromise = agent.runTurn(context, {
         onToolStart: (call) => runStore.beginTool(run.run_id, run.lease_id, {
           callId: `tool:${call.step}:${call.tool}`, step: call.step, tool: call.tool,
           trace: call.trace, observations: call.observations,
@@ -378,6 +387,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         onCheckpoint: (checkpoint) => runStore.checkpoint(run.run_id, run.lease_id, checkpoint, { leaseMs }),
         shouldContinue: () => now() < Number(run.deadline_at),
       });
+      const [outcome, shadowProviderEvaluation] = await Promise.all([outcomePromise, shadowProviderEvaluationPromise]);
       await heartbeat.stop();
       let replyQueued = false;
       let queuedReply = outcome.status === 'reply' && typeof outcome.reply === 'string' ? outcome.reply.trim() : '';
@@ -406,6 +416,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         authoritative_reply_used: outcome.reason === 'authoritative_tool_response',
         ...(comparisonReply(outcome.reply) ? { proposed_reply: comparisonReply(outcome.reply) } : {}),
         ...(run.mode === 'active' ? { reply_queued: replyQueued } : {}),
+        ...(shadowProviderEvaluation ? { shadow_provider_evaluation: shadowProviderEvaluation } : {}),
         authoritative_outcome: source.result?.preview_status === 'preview_ready' ? 'quote_succeeded' : source.result?.quote_failure_code ? 'quote_failed' : 'not_available',
       };
       if (outcome.reason === 'agent_deadline_exceeded') {

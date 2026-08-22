@@ -1,4 +1,5 @@
 import { normalizeAgentPlan } from '../agent/agent-schema.mjs';
+import { normalizeAiShadowAdvisory } from './ai-shadow-advisory-schema.mjs';
 
 const SENSITIVE_NESTED_KEY = /(?:token|secret|authorization|cookie|api[_-]?key|phone|mobile|order[_-]?id)/iu;
 const SAFE_FACT_KEYS = new Set([
@@ -17,16 +18,24 @@ const SAFE_FACT_KEYS = new Set([
  * snapshot and must return a typed Agent plan that is still subject to the
  * deterministic policy engine and tool contracts.
  */
-export function createAiOrchestrator({ primaryProvider } = {}) {
+export function createAiOrchestrator({ primaryProvider, shadowProvider = null } = {}) {
   if (primaryProvider == null) return null;
   if (typeof primaryProvider?.plan !== 'function') throw new TypeError('primary AI provider must implement plan');
+  if (shadowProvider != null && typeof shadowProvider?.evaluate !== 'function') {
+    throw new TypeError('Shadow AI provider must implement evaluate');
+  }
 
   async function plan(input) {
     const snapshot = boundedSourceSnapshot(input);
     return normalizeAgentPlan(await primaryProvider.plan(snapshot));
   }
 
-  return Object.freeze({ plan });
+  if (!shadowProvider) return Object.freeze({ plan });
+  async function evaluateShadow(input) {
+    const snapshot = boundedSourceSnapshot(input);
+    return normalizeAiShadowAdvisory(await shadowProvider.evaluate(snapshot));
+  }
+  return Object.freeze({ plan, evaluateShadow });
 }
 
 function boundedSourceSnapshot(input = {}) {

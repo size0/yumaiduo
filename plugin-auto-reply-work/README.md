@@ -108,4 +108,13 @@ node index.mjs
 - `CONFIG_ENCRYPTION_KEY`
 - `IMAGE_HOST_ALLOWLIST`
 
+可选Dify Shadow评估（默认关闭）：
+
+- `DIFY_SHADOW_ENABLED=true`
+- `DIFY_WORKFLOW_URL=https://<内部Dify域名>/v1/workflows/run`
+- `DIFY_API_KEY`（仅服务端环境变量）
+- `DIFY_TIMEOUT_MS`（默认10000，范围1000～30000）
+
+Dify只接收脱敏、截断后的最近会话摘要，并且只能返回FAQ、意图、回复草稿和转人工建议。它没有报价、锁座、取消、改价、发送、出票或订单裁决能力；Dify失败不会覆盖现有Agent计划，也不会影响确定性业务事件。
+
 上线前必须完成：manifest 校验、自注册、`/healthz` 的 `registered:true`、伪造签名与过期时间戳拒绝、重复事件幂等、测试租户真实识图/报价/待付款改价、人工接管、异常诊断、已付款停止改价和回滚演练。门户中的使用文档与真实售后联系方式需由开发者账号维护。

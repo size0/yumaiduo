@@ -112,6 +112,43 @@ test('quote preview configuration uses the V3 recognize and quote endpoints', as
   assert.equal(config.conversationAgent.url, 'http://127.0.0.1:8010/api/agents/turn');
 });
 
+test('Dify Shadow configuration is opt-in, HTTPS-only, and requires the existing Agent runtime', async () => {
+  const enabledEnv = {
+    ...validEnv,
+    QUOTE_PREVIEW_ONLY: 'true',
+    AI_REPLY_PREVIEW_ENABLED: 'true',
+    WANDA_V3_PREVIEW_INGEST_URL: 'http://127.0.0.1:8010',
+    WANDA_V3_PREVIEW_INGEST_KEY: 'a'.repeat(32),
+    DIFY_SHADOW_ENABLED: 'true',
+    DIFY_WORKFLOW_URL: 'https://dify.internal.example/v1/workflows/run',
+    DIFY_API_KEY: 'd'.repeat(32),
+    DIFY_TIMEOUT_MS: '8000',
+  };
+  const enabled = await loadConfig({ env: enabledEnv, manifest });
+  assert.deepEqual(enabled.difyShadow, {
+    url: 'https://dify.internal.example/v1/workflows/run',
+    apiKey: 'd'.repeat(32),
+    timeoutMs: 8_000,
+  });
+  assert.equal((await loadConfig({ env: validEnv, manifest })).difyShadow, null);
+  await assert.rejects(
+    loadConfig({ env: { ...enabledEnv, AI_REPLY_PREVIEW_ENABLED: 'false' }, manifest }),
+    /DIFY_SHADOW_ENABLED requires/u,
+  );
+  await assert.rejects(
+    loadConfig({ env: { ...enabledEnv, DIFY_WORKFLOW_URL: 'http://dify.example.com/v1/workflows/run' }, manifest }),
+    /must use HTTPS/u,
+  );
+  await assert.rejects(
+    loadConfig({ env: { ...enabledEnv, DIFY_WORKFLOW_URL: 'https://dify.example.com/v1/chat-messages' }, manifest }),
+    /must end with \/v1\/workflows\/run/u,
+  );
+  await assert.rejects(
+    loadConfig({ env: { ...enabledEnv, DIFY_API_KEY: 'short' }, manifest }),
+    /DIFY_API_KEY must contain/u,
+  );
+});
+
 test('configuration does not accept previous plugin environment aliases', async () => {
   const withoutBackendUrl = { ...validEnv, TICKET_BRIDGE_BASE_URL: 'http://127.0.0.1:8000/api/xianyu-plugin' };
   delete withoutBackendUrl.BACKEND_BASE_URL;

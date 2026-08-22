@@ -42,6 +42,69 @@ test('shadow agent fails closed when a successful source quote lacks its authori
   assert.deepEqual(run.result.source_snapshot, { has_image: true, authoritative_outcome: 'quote_succeeded' });
 });
 
+test('live Shadow runs persist Dify advisory output without giving it execution authority', async () => {
+  const advisoryEnvelope = { ...envelope, payload: { ...envelope.payload, content: '你好', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-shadow-advisory-')), 'runs.json'));
+  await store.initialize();
+  let advisoryCalls = 0;
+  const planner = {
+    async plan() {
+      return { intent: '其他', confidence: 0.99, goal: '问候', action: 'respond', arguments: {}, missing_fields: [], reply: '您好，请问需要查询什么？', needs_human: false, reason: '普通问候' };
+    },
+    async evaluateShadow(input) {
+      advisoryCalls += 1;
+      assert.equal(input.latest_message, '你好');
+      return {
+        intent: '其他', confidence: 0.91, reply_draft: '您好，请问需要查询什么？',
+        handoff_recommended: false, reason_code: 'general_greeting', missing_fields: [],
+      };
+    },
+  };
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: advisoryEnvelope, result: {} }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner,
+    getSettings: async () => ({}),
+  });
+  await runtime.schedule(advisoryEnvelope);
+  await runtime.tick();
+  const run = await store.get('shadow:tenant-1:event-1');
+  assert.equal(advisoryCalls, 1);
+  assert.deepEqual(run.result.shadow_provider_evaluation, {
+    status: 'completed',
+    advisory: {
+      intent: '其他', confidence: 0.91, reply_draft: '您好，请问需要查询什么？',
+      handoff_recommended: false, reason_code: 'general_greeting', missing_fields: [],
+    },
+  });
+  assert.equal(run.result.proposed_reply, '您好，请问需要查询什么？');
+  assert.equal(run.result.reply_queued, undefined);
+});
+
+test('Dify Shadow failure is recorded without changing the primary Agent outcome', async () => {
+  const advisoryEnvelope = { ...envelope, payload: { ...envelope.payload, content: '你好', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-shadow-advisory-failure-')), 'runs.json'));
+  await store.initialize();
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: advisoryEnvelope, result: {} }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner: {
+      async plan() { return { intent: '其他', confidence: 0.99, goal: '问候', action: 'respond', arguments: {}, missing_fields: [], reply: '您好，请问需要查询什么？', needs_human: false, reason: '普通问候' }; },
+      evaluateShadow() { throw new Error('Dify unavailable with secret details'); },
+    },
+    getSettings: async () => ({}),
+  });
+  await runtime.schedule(advisoryEnvelope);
+  await runtime.tick();
+  const run = await store.get('shadow:tenant-1:event-1');
+  assert.equal(run.result.status, 'reply');
+  assert.equal(run.result.proposed_reply, '您好，请问需要查询什么？');
+  assert.deepEqual(run.result.shadow_provider_evaluation, { status: 'failed', reason: 'shadow_provider_unavailable' });
+  assert.doesNotMatch(JSON.stringify(run.result), /secret details/u);
+});
+
 test('shadow runtime replays a persisted authoritative reply without asking the model to rewrite it', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-shadow-authoritative-')), 'runs.json'));
   await store.initialize();
@@ -228,11 +291,15 @@ test('durable active agent queues a bounded reply in the outbox instead of sendi
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-runtime-')), 'runs.json'));
   await store.initialize();
   const queuedReplies = [];
+  let shadowEvaluations = 0;
   const runtime = createShadowAgentRuntime({
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
-    planner: { async plan() { return { intent: '其他', confidence: 0.98, goal: '说明流程', action: 'respond', arguments: {}, missing_fields: [], reply: '请发送完整选座页截图并说明张数。', needs_human: false, reason: '流程咨询' }; } },
+    planner: {
+      async plan() { return { intent: '其他', confidence: 0.98, goal: '说明流程', action: 'respond', arguments: {}, missing_fields: [], reply: '请发送完整选座页截图并说明张数。', needs_human: false, reason: '流程咨询' }; },
+      async evaluateShadow() { shadowEvaluations += 1; throw new Error('must not run in active mode'); },
+    },
     getSettings: async () => ({}),
     replyOutboxStore: { async enqueue(input) { queuedReplies.push(input); return { created: true, entry: { status: 'pending' } }; } },
   });
@@ -240,6 +307,8 @@ test('durable active agent queues a bounded reply in the outbox instead of sendi
   const result = await runtime.tick();
   assert.equal(result.status, 'completed');
   assert.equal(result.result.reply_queued, true);
+  assert.equal(shadowEvaluations, 0);
+  assert.equal(result.result.shadow_provider_evaluation, undefined);
   assert.deepEqual(queuedReplies, [{
     actionId: 'active:tenant-1:event-1:reply', runId: 'active:tenant-1:event-1', tenantId: 'tenant-1', mode: 'active',
     accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', text: '请发送完整选座页截图并说明张数。',
