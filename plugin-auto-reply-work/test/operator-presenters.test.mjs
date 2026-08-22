@@ -8,6 +8,7 @@ import {
   manualTaskReviewRecord,
   matchesOperationEvent,
   nonNegativeCentsOrNull,
+  pricingAccountEvidenceSummary,
   pricingFormulaSummary,
   runtimePatchFromUi,
   runtimeToUiSettings,
@@ -161,6 +162,23 @@ test('presents operational logs and numeric fields with bounded defaults', () =>
     id: 'event-1', time: 'now', event: 'order.created', status: 'completed', attempts: 2,
     error: null, diagnostic: '已忽略：not applicable',
   });
+});
+
+test('summarizes opaque pricing-account evidence without exposing account references', () => {
+  const summary = pricingAccountEvidenceSummary([
+    { pricing_account_ref: 'a'.repeat(32) },
+    { pricing_account_ref: 'a'.repeat(32) },
+    { pricing_account_ref: 'b'.repeat(32) },
+    { pricing_account_ref: 'invalid' },
+    {},
+  ]);
+  assert.deepEqual(summary, {
+    pricing_account_evidence_count: 3,
+    pricing_account_unknown_count: 2,
+    pricing_account_count: 2,
+  });
+  assert.equal(Object.isFrozen(summary), true);
+  assert.doesNotMatch(JSON.stringify(summary), /a{32}|b{32}/u);
 });
 
 test('creates stable API errors and pricing policy descriptions', () => {

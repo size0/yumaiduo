@@ -13,6 +13,7 @@ import {
   manualTaskReviewRecord,
   matchesOperationEvent,
   nonNegativeCentsOrNull,
+  pricingAccountEvidenceSummary,
   pricingFormulaSummary,
   runtimePatchFromUi,
   runtimeToUiSettings,
@@ -201,6 +202,7 @@ export function createOperatorApi({ config, platformRuntime, backendClient, stor
       summary: Object.freeze({
         sample_size: records.length,
         paid_success_count: paid,
+        ...pricingAccountEvidenceSummary(records),
         paid_success_rate: records.length ? Number(((paid / records.length) * 100).toFixed(1)) : null,
         minimum_pricing_evaluation_samples: 100,
         pricing_evaluation_status: records.length >= 100 ? 'eligible_for_manual_shadow_evaluation' : 'collecting_statistics',

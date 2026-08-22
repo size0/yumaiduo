@@ -64,6 +64,18 @@ export function imageSignatureMatches(bytes, contentType) {
   return false;
 }
 
+export function pricingAccountEvidenceSummary(records = []) {
+  const values = Array.isArray(records) ? records : [];
+  const refs = values
+    .map((record) => String(record?.pricing_account_ref ?? '').trim())
+    .filter((value) => /^[a-f0-9]{32}$/u.test(value));
+  return Object.freeze({
+    pricing_account_evidence_count: refs.length,
+    pricing_account_unknown_count: Math.max(0, values.length - refs.length),
+    pricing_account_count: new Set(refs).size,
+  });
+}
+
 export function pricingFormulaSummary(settings = {}) {
   const wplusAdjustment = Number(settings.wplus_adjustment_cents ?? -290);
   const threshold = Number(settings.wplus_member_price_threshold_cents ?? 6000);
