@@ -476,6 +476,19 @@ test('zero authoritative showtime matches asks for a refreshed official screensh
   assert.doesNotMatch(result.reply_text, /补充影院和开场时间/u);
 });
 
+test('zero showtime matches asks for a missing movie before telling the buyer to refresh known cinema and time facts', async () => {
+  const client = createQuotePreviewClient({ quotePreview: { recognizeUrl: 'http://127.0.0.1:8010/api/quotes/preview-recognize', quoteUrl: 'http://127.0.0.1:8010/api/quotes/preview-quote', ingestKey: 'a'.repeat(32) } }, {
+    fetchImpl: async (url) => String(url).endsWith('/preview-recognize')
+      ? new Response(JSON.stringify({ recognition: { image_type: 'SEAT_MAP', cinema: '上海临港万达广场店', movie: null, date: '2026-08-23', showtime: '13:20', hall: '1号激光厅', official_selection: { is_selected: false, selected_seat_numbers: [], selected_count: 0 } } }), { status: 200 })
+      : new Response(JSON.stringify({ detail: { code: 'showtime_not_unique', diagnostics: { requested_match: { cinema: '上海临港万达广场店', movie: '', date: '2026-08-23', showtime: '13:20', hall: '1号激光厅' }, match: { result_count: 0 } } } }), { status: 422 }),
+  });
+  const result = await client.capture({ id: 'missing-movie-zero-showtime-match', tenantId: 'tenant-1', payload: { imageUrls: ['https://img.alicdn.com/seat.png'] } });
+  assert.equal(result.failure_code, 'showtime_not_found');
+  assert.match(result.reply_text, /还缺：影片名/u);
+  assert.match(result.reply_text, /影片：完整影片名/u);
+  assert.doesNotMatch(result.reply_text, /补充影院|刷新万达选座页/u);
+});
+
 test('a complete structured text supplement falls back to text-only realtime quote after image recognition fails', async () => {
   const requests = [];
   const client = createQuotePreviewClient({
@@ -541,6 +554,39 @@ test('a short text supplement deterministically fuses the active quote draft wit
   assert.deepEqual(result.field_sources, {
     cinema: 'image', movie: 'buyer_text', date: 'buyer_text', showtime: 'buyer_text', hall: 'buyer_text', ticket_count: 'typed_seats',
   });
+});
+
+test('an explicit movie-name reply completes an active image quote draft without another vision request', async () => {
+  let requests = 0;
+  const client = createQuotePreviewClient({
+    quotePreview: { recognizeUrl: 'http://127.0.0.1/recognize', quoteUrl: 'http://127.0.0.1/quote', ingestKey: 'a'.repeat(32) },
+  }, {
+    async fetchImpl() { requests += 1; throw new Error('vision must not run for a text movie supplement'); },
+  });
+  const recognized = await client.recognize({
+    id: 'movie-supplement', tenantId: 'tenant-1', payload: {
+      content: '影片：捕风追影', imageUrls: [],
+      quote_draft: {
+        fields: {
+          cinema: { value: '上海临港万达广场店', source: 'image', confidence: 0.9 },
+          date: { value: '2026-08-23', source: 'image', confidence: 0.9 },
+          showtime: { value: '13:20', source: 'image', confidence: 0.9 },
+          hall: { value: '1号激光厅', source: 'image', confidence: 0.9 },
+          ticket_count: { value: 1, source: 'typed_seats', confidence: 0.9 },
+        },
+        recognition_artifact: { recognition: {
+          platform: 'WANDA', image_type: 'SEAT_MAP', cinema: '上海临港万达广场店', date: '2026-08-23',
+          showtime: '13:20', hall: '1号激光厅', official_selection: { is_selected: false, selected_seat_numbers: [], selected_count: 0 },
+        } },
+        state: 'matching', expires_at: Date.now() + 60_000,
+      },
+    },
+  });
+  assert.equal(requests, 0);
+  assert.equal(recognized.status, 'recognized');
+  assert.equal(recognized.recognition.movie, '捕风追影');
+  assert.equal(recognized.ticket_count, 1);
+  assert.equal(recognized.field_sources.movie, 'buyer_text');
 });
 
 test('a short city supplement augments the image draft without changing seats or price facts', async () => {

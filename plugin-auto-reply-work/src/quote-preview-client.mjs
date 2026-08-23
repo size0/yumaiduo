@@ -81,7 +81,7 @@ function firstImageUrl(payload) {
 }
 
 function isTextQuoteIntent(content) {
-  return /(?:多少钱|好多钱|价格|票价|核价|万达|\d{1,2}\s*(?:月|[./-])\s*\d{1,2}|(?:[01]?\d|2[0-3])\s*[:：.]\s*[0-5]\d|\d{1,2}\s*排\s*\d{1,2}|\d+\s*张|[一二三四五六七八九十]\s*张)/u.test(content);
+  return /(?:多少钱|好多钱|价格|票价|核价|万达|(?:影片|电影|片名)\s*[:：]|\d{1,2}\s*(?:月|[./-])\s*\d{1,2}|(?:[01]?\d|2[0-3])\s*[:：.]\s*[0-5]\d|\d{1,2}\s*排\s*\d{1,2}|\d+\s*张|[一二三四五六七八九十]\s*张)/u.test(content);
 }
 
 function parseTextDate(match, now) {
@@ -315,6 +315,11 @@ function timeSupplement(value) {
   return match ? `${String(match[1]).padStart(2, '0')}:${match[2]}` : '';
 }
 
+function movieSupplement(value) {
+  const match = String(value ?? '').match(/(?:^|\n)\s*(?:影片|电影|片名)\s*[:：]\s*([^\n]{1,160})/u);
+  return text(match?.[1], 160);
+}
+
 function textFactsWithQuoteDraft(parsedText, quoteDraft, content) {
   const draft = quoteDraftFacts(quoteDraft);
   const parsed = parsedText?.status === 'recognized' ? parsedText : null;
@@ -325,6 +330,7 @@ function textFactsWithQuoteDraft(parsedText, quoteDraft, content) {
   const supplement = {
     city,
     cinema: cinemaSupplement && (!existingCinema || genericCinema) ? cinemaSupplement : '',
+    movie: movieSupplement(content),
     showtime: timeSupplement(content),
     hall: text(String(content ?? '').match(/第?\s*\d{1,2}\s*号?\s*(?:放映厅|影厅|厅)/u)?.[0].replace(/\s+/gu, ''), 80),
   };
@@ -335,7 +341,7 @@ function textFactsWithQuoteDraft(parsedText, quoteDraft, content) {
     ...draft.recognition,
     ...(draft.recognition.city || parsed?.recognition?.city || supplement.city ? { city: parsed?.recognition?.city || supplement.city || draft.recognition.city } : {}),
     ...(draft.recognition.cinema || parsed?.recognition?.cinema || supplement.cinema ? { cinema: parsed?.recognition?.cinema || supplement.cinema || draft.recognition.cinema } : {}),
-    ...(draft.recognition.movie || parsed?.recognition?.movie ? { movie: parsed?.recognition?.movie || draft.recognition.movie } : {}),
+    ...(draft.recognition.movie || parsed?.recognition?.movie || supplement.movie ? { movie: parsed?.recognition?.movie || supplement.movie || draft.recognition.movie } : {}),
     ...(draft.recognition.date || parsed?.recognition?.date ? { date: parsed?.recognition?.date || draft.recognition.date } : {}),
     ...(draft.recognition.showtime || parsed?.recognition?.showtime || supplement.showtime ? { showtime: parsed?.recognition?.showtime || supplement.showtime || draft.recognition.showtime } : {}),
     ...(draft.recognition.hall || parsed?.recognition?.hall || supplement.hall ? { hall: parsed?.recognition?.hall || supplement.hall || draft.recognition.hall } : {}),
@@ -810,17 +816,19 @@ function quoteFailureReplyText(code, recognition = null) {
     if (!recognition?.city && cinema) return `已识别到${cinema}，请补充所在城市，我会保留当前影片和场次信息继续实时核验，无需重发截图。`;
     return '该影院暂未在官方影院库唯一匹配，请核对所在城市和完整官方影院名；已识别的影片和场次信息会继续保留。';
   }
-  if (code === 'showtime_not_found') return '当前万达官方场次中未找到该日期和开场时间，请刷新万达选座页后发送最新截图。';
-  if (code === 'showtime_not_unique') {
+  if (code === 'showtime_not_found' || code === 'showtime_not_unique') {
     const missing = [
       !text(recognition?.cinema, 160) && '完整万达影院名',
       !text(recognition?.movie, 160) && '影片名',
       !text(recognition?.date, 32) && '日期',
       !text(recognition?.showtime, 32) && '开场时间',
     ].filter(Boolean);
-    return missing.length
-      ? `暂未唯一匹配到官方实时场次，还缺：${missing.join('、')}。`
-      : '暂未唯一匹配到官方实时场次，请确认影片名称是否有错字，或补发场次顶部截图。';
+    if (missing.length) {
+      const instruction = missing.length === 1 && missing[0] === '影片名' ? '请直接回复“影片：完整影片名”。' : '';
+      return `暂未唯一匹配到官方实时场次，还缺：${missing.join('、')}。${instruction}`;
+    }
+    if (code === 'showtime_not_found') return '当前万达官方场次中未找到该日期和开场时间，请刷新万达选座页后发送最新截图。';
+    return '暂未唯一匹配到官方实时场次，请确认影片名称是否有错字，或补发场次顶部截图。';
   }
   if (code === 'official_selection_unverifiable') return '截图中的官方已选座当前并非全部实时可选，请在购票平台重新选择当前可选座位后发送最新完整截图；请先不要付款。';
   if (code === 'temporary_lock_release_unverified') return '临时试价座位的释放状态暂未确认，已停止自动报价；请勿付款，并稍后刷新选座页后重试。';
