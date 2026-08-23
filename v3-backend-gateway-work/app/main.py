@@ -37,7 +37,7 @@ from .wanda_quote_store import WandaQuoteSettingsStore
 COS_CLEANUP_INTERVAL_SECONDS = 30 * 60
 PREVIEW_VISION_RETRY_DELAY_SECONDS = 0.35
 QUOTE_SHUTDOWN_TIMEOUT_SECONDS = 65
-V3_RUNTIME_CONTRACT = "wanda-v3-v13-shadow-evaluation-switch"
+V3_RUNTIME_CONTRACT = "wanda-v3-v14-autoquote-safety-gates"
 async def _run_storage_cleanup(app: FastAPI) -> None:
     cleanup = getattr(app.state.storage_service, "cleanup_expired_images", None)
     if cleanup is not None:

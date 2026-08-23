@@ -18,7 +18,7 @@ from app.schemas import ModelSettingsUpdate, QuoteMatchCandidate, QuoteMatchCand
 from app.settings_store import ModelSettingsStore
 from app.storage_store import CosSettingsStore
 from app.storage import CosStorageService
-from app.vision import SYSTEM_PROMPT as VISION_SYSTEM_PROMPT, VisionFailure, VisionService, _resolve_public_image_url, build_system_prompt
+from app.vision import SYSTEM_PROMPT as VISION_SYSTEM_PROMPT, VisionFailure, VisionService, _normalize_recognition_payload, _resolve_public_image_url, build_system_prompt
 from app.reply_preview import SYSTEM_PROMPT as REPLY_SYSTEM_PROMPT, ReplyPreviewService
 from app.wanda_quote import LocalTicketGateway, RealtimeQuoteService, SeatFact, TicketGateway, _gateway_auth_headers, _requested_zone, _seat_facts, _select_seats, _showtime_start, _wplus_probe_candidates
 from app.wanda_quote_store import WandaQuoteSettingsStore
@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v13-shadow-evaluation-switch",
+        "runtime_contract": "wanda-v3-v14-autoquote-safety-gates",
     }
 
 
@@ -710,6 +710,25 @@ def test_recognition_normalizes_cross_platform_bottom_selection_cards() -> None:
     assert recognition.official_selection.total_price == 91.8
 
 
+def test_maoyan_minimap_viewport_is_not_accepted_as_a_hand_drawn_circle() -> None:
+    recognition = _normalize_recognition_payload(json.dumps({
+        "platform": "MAOYAN",
+        "image_type": "SEAT_MAP",
+        "hand_drawn_circle": {
+            "exists": True,
+            "color": "red",
+            "rough_area": "座位图上方中间区域",
+            "suspected_row_range": "1-4排",
+            "suspected_zone_type": "未知",
+            "estimated_seat_count": 0,
+            "contains_wplus_icon": False,
+        },
+    }))
+
+    assert recognition.hand_drawn_circle.exists is False
+    assert recognition.hand_drawn_circle.estimated_seat_count == 0
+
+
 def test_hand_drawn_circle_does_not_supply_a_ticket_count() -> None:
     recognition = Recognition.model_validate({
         "image_type": "SEAT_MAP",
@@ -1373,6 +1392,53 @@ def test_exact_mixed_price_seats_are_quoted_individually_and_summed() -> None:
     assert "8排10座 61.90元" in reply
     assert "6排16座 62.90元" in reply
     assert "2张合计124.80元" in reply
+
+
+def test_exact_mixed_seat_types_probe_one_representative_per_type() -> None:
+    class MixedOfferGateway(FakeTicketGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.locked_seat_ids: list[str] = []
+            self.current_seat_id = ""
+
+        async def lock(self, payload: dict[str, object]) -> dict[str, object]:
+            result = await super().lock(payload)
+            self.current_seat_id = str(payload["seat_ids"][0]).split(",", 1)[0]
+            self.locked_seat_ids.append(self.current_seat_id)
+            return result
+
+        async def available_offers(self, **kwargs: str) -> dict[str, object]:
+            self.calls.append("available_offers")
+            assert kwargs["order_id"] == "temporary-order"
+            unit = {"w-1": 6100, "r-1": 6500}[self.current_seat_id]
+            return {"data": {"activities": [{
+                "name": "W+会员专享优惠", "able": True,
+                "allot_seat": {"totalPayPrice": unit},
+            }]}}
+
+    gateway = MixedOfferGateway()
+    request = QuoteRealtimeRequest.model_validate({
+        "recognition": {
+            "image_type": "SEAT_MAP",
+            "official_selection": {
+                "is_selected": True,
+                "selected_seat_numbers": ["8排10座", "6排16座"],
+                "selected_count": 2,
+            },
+        },
+    })
+
+    quote = asyncio.run(RealtimeQuoteService(gateway).quote(request))
+
+    assert gateway.locked_seat_ids == ["w-1", "r-1"]
+    assert [item.member_price_cents for item in quote.seat_quotes] == [6100, 6500]
+    assert [item.unit_quote_cents for item in quote.seat_quotes] == [6100, 6600]
+    assert quote.total_quote_cents == 12700
+    assert gateway.calls == [
+        "for_quote", "match", "realtime_seats",
+        "lock", "available_offers", "cancel", "realtime_seats",
+        "lock", "available_offers", "cancel", "realtime_seats",
+    ]
 
 
 def test_realtime_quote_accepts_an_official_partner_cinema_when_catalog_and_gateway_verify_it() -> None:

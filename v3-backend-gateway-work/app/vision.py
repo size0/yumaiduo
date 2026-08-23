@@ -147,6 +147,19 @@ def _normalize_recognition_payload(content: str) -> Recognition:
             raw[key] = {name: value for name, value in raw[key].items() if name in allowed_keys}
     if isinstance(raw.get("official_selection"), dict) and isinstance(raw["official_selection"].get("seats"), list):
         raw["official_selection"]["seats"] = [{k: v for k, v in seat.items() if k in {"seat_number", "price", "ticket_status"}} for seat in raw["official_selection"]["seats"] if isinstance(seat, dict)]
+    circle = raw.get("hand_drawn_circle")
+    if isinstance(circle, dict) and circle.get("exists") is True:
+        try:
+            estimated_count = int(circle.get("estimated_seat_count") or 0)
+        except (TypeError, ValueError):
+            estimated_count = 0
+        # A model-only `exists=true` is not sufficient evidence. Seat-map
+        # minimap viewports and built-in sold/W+ icons are frequently red and
+        # must not become a buyer hand-drawn preference. Require at least one
+        # bounded seat estimate; the estimate remains preference metadata and
+        # is never accepted as the requested ticket count.
+        if estimated_count <= 0:
+            circle["exists"] = False
     return Recognition.model_validate(raw)
 
 

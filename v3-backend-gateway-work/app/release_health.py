@@ -7,7 +7,7 @@ from typing import Any, Final
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-EXPECTED_V3_RUNTIME_CONTRACT: Final = "wanda-v3-v13-shadow-evaluation-switch"
+EXPECTED_V3_RUNTIME_CONTRACT: Final = "wanda-v3-v14-autoquote-safety-gates"
 EXPECTED_AGENT_RUNTIME_VERSION: Final = "wanda-agent-runtime-v33-shadow-evaluation-switch"
 MAX_HEALTH_RESPONSE_BYTES: Final = 64 * 1024
 

@@ -311,35 +311,42 @@ class RealtimeQuoteService:
         if not is_exact and request.ticket_count is None and official_count == 0:
             requested_count = None
             is_count_known = False
-        exact_zones = {seat.zone_type for seat in selected} if is_exact else set()
-        exact_uniform_selection = is_exact and len(exact_zones) == 1
-        # totalPayPrice is a per-seat-type payable amount. Probe one real seat
-        # and never divide that value by the buyer's requested ticket count.
-        offer_quantity = 1
-        if exact_uniform_selection:
-            # Seats of the same verified type share one deterministic unit
-            # cost even when the buyer's screenshot shows account discounts.
-            offer_seats = selected[:1]
-        elif is_exact:
-            # Mixed-zone selections retain the established single-offer probe;
-            # never average a multi-zone available-offers total across seats.
-            offer_seats = _wplus_probe_candidates(all_seats)[:offer_quantity]
+        # `allotSeat.totalPayPrice` is a one-seat payable amount for the
+        # probed realtime seat type. Probe one real representative per type;
+        # never substitute a W+ seat for an exact regular/discount selection
+        # and never spread one type's unit cost across a mixed selection.
+        probe_groups: dict[tuple[str, SeatZoneType], list[SeatFact]] = {}
+        if is_exact:
+            for seat in selected:
+                probe_groups.setdefault((seat.area_code, seat.zone_type), []).append(seat)
         else:
-            offer_seats = selected[:1]
-        if len(offer_seats) != offer_quantity:
-            error = HTTPException(status_code=422, detail="未找到足够的 W+座位用于临时锁座核价")
+            seat = selected[0]
+            probe_groups[(seat.area_code, seat.zone_type)] = [seat]
+        if not probe_groups:
+            error = HTTPException(status_code=422, detail="未找到足够的实时座位用于临时锁座核价")
             raise _diagnostic_failure(error, step="select_offer_seats", recognition=recognition, match=match, realtime=realtime)
+
         locked_offer_started = time.perf_counter()
+        member_units: dict[tuple[str, SeatZoneType], int] = {}
+        pricing_account_refs: set[str] = set()
         try:
-            locked_offer = await self._locked_member_offer(
-                gateway,
-                showtime_id=showtime_id,
-                cinema_id=cinema_id,
-                seats=offer_seats,
-                stage_timings=timings_ms,
-            )
-            member_unit = locked_offer.unit_price_cents
-            pricing_account_ref = locked_offer.pricing_account_ref
+            for probe_key, seats_of_type in probe_groups.items():
+                probe_timings: dict[str, int] = {}
+                locked_offer = await self._locked_member_offer(
+                    gateway,
+                    showtime_id=showtime_id,
+                    cinema_id=cinema_id,
+                    seats=seats_of_type[:1],
+                    stage_timings=probe_timings,
+                )
+                member_units[probe_key] = locked_offer.unit_price_cents
+                if locked_offer.pricing_account_ref:
+                    pricing_account_refs.add(locked_offer.pricing_account_ref)
+                for timing_name, duration_ms in probe_timings.items():
+                    timings_ms[timing_name] = timings_ms.get(timing_name, 0) + duration_ms
+            if len(pricing_account_refs) > 1:
+                raise HTTPException(status_code=502, detail="混合座位类型核价账号证据不一致，已停止报价")
+            pricing_account_ref = next(iter(pricing_account_refs), None)
             timings_ms["locked_offer"] = round((time.perf_counter() - locked_offer_started) * 1000)
         except HTTPException as error:
             raise _diagnostic_failure(error, step="locked_offer", recognition=recognition, match=match, realtime=realtime) from error
@@ -352,12 +359,12 @@ class RealtimeQuoteService:
                         seat_number=seat.label,
                         seat_zone_type=seat.zone_type,
                         original_price_cents=seat.original_price_cents,
-                        member_price_cents=member_unit,
+                        member_price_cents=member_units[(seat.area_code, seat.zone_type)],
                         channel_fee_cents=seat.channel_fee_cents,
                         unit_quote_cents=_bounded_quote_for_seat(
                             SeatFact(
                                 seat.seat_id, seat.area_code, seat.original_price_cents,
-                                member_unit, seat.channel_fee_cents, seat.label, seat.zone_type,
+                                member_units[(seat.area_code, seat.zone_type)], seat.channel_fee_cents, seat.label, seat.zone_type,
                             ),
                             seat.zone_type,
                             wplus_adjustment_cents=wplus_adjustment_cents,
@@ -392,6 +399,7 @@ class RealtimeQuoteService:
             )
 
         probe_seat = selected[0]
+        member_unit = member_units[(probe_seat.area_code, probe_seat.zone_type)]
         quote_zone = target_zone if target_zone is not SeatZoneType.UNKNOWN else zone
         try:
             unit_quote = _bounded_quote_for_seat(
