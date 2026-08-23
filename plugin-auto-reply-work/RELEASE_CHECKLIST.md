@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产已部署源码候选 `336f8c2fb27a8d4b2eaae8ac09aaa0903e4a71a8`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime仍为 `wanda-agent-runtime-v31-release-fence-cleanup`。本次只拆分报价客户端内部职责，不改变Agent工具或交易行为；生产继续保持Shadow、确定性执行Owner和Active 0%。
+> 当前生产已部署源码候选 `b23846b95ac10960f7b573bd3e911a9c9143c5d7`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime仍为 `wanda-agent-runtime-v31-release-fence-cleanup`。本次拆分V3报价领域与诊断模块，不改变价格公式、临时试价或Agent工具行为；生产继续保持Shadow、确定性执行Owner和Active 0%。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 当前源码插件测试 491 项、V3 后端测试 191 项通过；新增11项模块边界测试覆盖文字事实、识图融合、失败映射和回复展示
+- [x] 当前源码插件测试 491 项、V3 后端测试 197 项通过；新增V3领域与诊断测试覆盖实时座位解析、逐座权威校验、确定性试价、价格边界及脱敏失败结构
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -39,27 +39,27 @@
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `336f8c2` 使用干净依赖执行插件491项测试和V3 191项测试；生产release再次执行插件491项测试通过
+- [x] 已在源码提交 `b23846b` 使用干净依赖执行插件491项测试和V3 197项测试；生产release再次执行插件491项测试通过
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `336f8c2fb27a8d4b2eaae8ac09aaa0903e4a71a8` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/336f8c2fb27a`
+- [x] 已为源码提交 `b23846b95ac10960f7b573bd3e911a9c9143c5d7` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/b23846b95ac1`
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [x] 已对牡丹江万达广场店17:15场次执行只读W+座位Smoke，8排返回6个实时可选座位；未创建临时订单
 - [x] 已确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、`conversation_agent_active_ready=false`、Active 0%、Canary关闭且kill switch开启
 - [ ] V31重新采集至少100轮自动安全审计和100轮图片样本；V30及更旧版本样本不得补门槛
-- [x] 已完成报价模块化release到前一V31 release回滚及恢复演练；两端健康、WorkingDirectory和队列恢复通过
+- [x] 已完成V3报价领域拆分release到前一V31 release回滚及恢复演练；两端健康、WorkingDirectory和队列恢复通过
 - [x] 已修复候选包遗漏vendor SDK运行时的问题，并将SDK `dist/index.js`设为构建强制文件；首次失败切换已自动回滚，无买家交易状态迁移
 - [x] 插件systemd沙箱已显式允许写入当前 `DATA_DIR=/var/lib/ticket-system/wanda-ai-plugin-data`，V28历史评测队列已恢复持久化
 
 ## 当前生产候选包证据
 
-- V3 SHA-256：`2535dad2a0f6ece53fa48081ac1063c305f0a0f7d36f85de8b2b8057c9f22bc9`
-- 插件 SHA-256：`b66ef64facc4b090828cb440c93465eadcc40d5dfa9bb8288ccd15dc5bc9a6d1`
-- Manifest SHA-256：`f15995cb6c45a73666669615f6e6ff6d29282195eb262d192eb7c4c7ea29813a`
+- V3 SHA-256：`8a08aeeb0c6aec175173705aa14ec71060fd65e55a02f731a2adf9c26f25ec24`
+- 插件 SHA-256：`796aa1c77967ff36a78b6490bba517828da521fb710cb179849d4f3ae14a5a2d`
+- Manifest SHA-256：`902b2fe3e6ab0264b1956712f9cef89d89217e434e2a9189971af9bb7e067828`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/336f8c2fb27a`
-- 生产V3：`/opt/wanda-v3-backend/releases/v11-pricing-account-evidence-336f8c2fb27a`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v31-quote-modules-336f8c2fb27a`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/b23846b95ac1`
+- 生产V3：`/opt/wanda-v3-backend/releases/v11-quote-domain-b23846b95ac1`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v31-quote-domain-b23846b95ac1`
 
 ## 提交前由门户确认
 
