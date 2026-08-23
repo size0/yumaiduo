@@ -146,6 +146,8 @@ test('isolated operations workbench is action-first and keeps settings outside t
     (await import('node:fs/promises')).readFile(workbenchStylesPath, 'utf8'),
   ]);
   assert.match(html, /运营工作台/u);
+  assert.match(html, /href="ui\/workbench\.css"/u);
+  assert.match(html, /src="ui\/workbench\.js"/u);
   assert.match(html, /id="automation-rail"/u);
   assert.match(html, /id="action-queue"/u);
   assert.match(html, /id="sample-cards"/u);

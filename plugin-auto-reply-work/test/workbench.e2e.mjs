@@ -42,7 +42,12 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
     },
     logger: { error() {} },
   });
-  const server = http.createServer((req, res) => void handler(req, res, new URL(req.url, 'http://localhost').pathname));
+  const requestedPaths = [];
+  const server = http.createServer((req, res) => {
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    requestedPaths.push(pathname);
+    void handler(req, res, pathname);
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.diagnostic('fixture server ready');
   const browser = await chromium.launch({ executablePath, headless: true });
@@ -52,10 +57,14 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
     await new Promise((resolve) => server.close(resolve));
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  await page.goto(`http://127.0.0.1:${server.address().port}/ui`);
+  await page.goto(`http://127.0.0.1:${server.address().port}/__plugin__/ui`);
   t.diagnostic('workbench loaded');
   await page.getByText('本地预览').waitFor();
   t.diagnostic('workbench data rendered');
+  assert.ok(requestedPaths.includes('/__plugin__/ui/workbench.css'));
+  assert.ok(requestedPaths.includes('/__plugin__/ui/workbench.js'));
+  assert.equal(requestedPaths.includes('/__plugin__/workbench.css'), false);
+  assert.equal(requestedPaths.includes('/__plugin__/workbench.js'), false);
 
   assert.equal(await page.getByText('自动报价').locator('..').getByText('已关闭').count(), 1);
   assert.equal(await page.getByText('待付款改价').locator('..').getByText('已开启').count(), 1);
