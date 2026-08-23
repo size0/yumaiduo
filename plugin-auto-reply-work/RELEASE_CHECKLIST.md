@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产已部署源码候选 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4`：V3契约为 `wanda-v3-v13-shadow-evaluation-switch`，插件Runtime为 `wanda-agent-runtime-v33-shadow-evaluation-switch`。确定性识图、自动报价和待付款改价已开启；自由生成AI回复保持关闭，独立只读Shadow评测持续积累事件时点样本。
+> 当前生产已部署源码候选 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4`：V3契约为 `wanda-v3-v13-shadow-evaluation-switch`，插件Runtime为 `wanda-agent-runtime-v33-shadow-evaluation-switch`。因生产审计发现圈选误判和混合座位类型核价缺口，自动报价已紧急关闭；确定性待付款改价保持开启，防止已确认报价订单漏改。自由生成AI回复保持关闭，独立只读Shadow评测继续积累事件时点样本。
 
 ## 已完成
 
@@ -45,7 +45,7 @@
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [x] 已对牡丹江万达广场店17:15场次执行只读W+座位Smoke，8排返回6个实时可选座位；未创建临时订单
-- [x] 已确认 `automation_enabled=true`、`recognition_enabled=true`、`quote_enabled=true`、`auto_price_change=true`、`ai_reply_enabled=false`、`shadow_evaluation_enabled=true`；`conversation_agent_mode=shadow`、`execution_owner=deterministic`、Active 0%、Canary关闭且kill switch开启
+- [x] 当前生产设置为 `automation_enabled=true`、`recognition_enabled=true`、`quote_enabled=false`、`auto_price_change=true`、`ai_reply_enabled=false`、`shadow_evaluation_enabled=true`；只允许既有有效确认报价进入确定性待付款改价，新自动报价保持关闭；`conversation_agent_mode=shadow`、`execution_owner=deterministic`、Active 0%、Canary关闭且kill switch开启
 - [ ] V33重新采集至少100轮自动安全审计和100轮图片样本；V32及更旧版本样本不得补门槛
 - [x] 已完成单座优惠修复release到前一V31 release回滚及恢复演练；两端健康、WorkingDirectory和队列恢复通过
 - [x] V32生产只读Smoke把“泉州晋江万达今天15:50奥德赛还有W座位吗”规划为 `resolve_ticket_identity → show_available_wplus_seats`，官方唯一匹配晋江万达广场激光IMAX店并返回7排9座、7排10座；未创建临时试价订单
