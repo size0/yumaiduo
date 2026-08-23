@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产已部署源码候选 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4`：V3契约为 `wanda-v3-v13-shadow-evaluation-switch`，插件Runtime为 `wanda-agent-runtime-v33-shadow-evaluation-switch`。因生产审计发现圈选误判和混合座位类型核价缺口，自动报价已紧急关闭；确定性待付款改价保持开启，防止已确认报价订单漏改。自由生成AI回复保持关闭，独立只读Shadow评测继续积累事件时点样本。
+> 当前生产V3来自 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4`，插件UI优化release来自 `1fc21db90c3ca4d53550f826d14849d4181bb720`：V3契约为 `wanda-v3-v13-shadow-evaluation-switch`，插件Runtime为 `wanda-agent-runtime-v33-shadow-evaluation-switch`。因生产审计发现圈选误判和混合座位类型核价缺口，自动报价已紧急关闭；确定性待付款改价保持开启，防止已确认报价订单漏改。自由生成AI回复保持关闭，独立只读Shadow评测继续积累事件时点样本。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 当前源码插件测试 507 项、V3 后端测试 207 项通过；新增事件时点快照、未来状态隔离、人工卖家历史、上下文确认推理、纯文字W+查询、全排座位、候选序号、文字位置偏好及Shadow评测/AI发送开关分离测试
+- [x] 当前源码插件测试 512 项、V3 后端测试 207 项通过；新增事件时点快照、未来状态隔离、人工卖家历史、上下文确认推理、纯文字W+查询、全排座位、候选序号、文字位置偏好、Shadow评测/AI发送开关分离及运营工作台模型测试
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -39,10 +39,11 @@
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `b92d6d5` 使用干净依赖执行插件507项测试和V3 207项测试；生产release再次执行插件507项测试通过
+- [x] 已在源码提交 `1fc21db` 使用干净依赖执行插件512项测试；生产release再次执行插件512项测试通过；V3 207项保持通过
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/b92d6d5ba812`
-- [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
+- [x] 已为源码提交 `1fc21db90c3ca4d53550f826d14849d4181bb720` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/1fc21db90c3c`
+- [x] 已在服务器创建独立V3和插件release目录，未覆盖历史release
+- [x] 新运营工作台以 `/ui/workbench` 隔离上线；Playwright使用本机Edge完成桌面、390px移动端、状态卡、队列筛选、样本门槛及横向溢出E2E，生产静态资源Smoke和实际回滚恢复通过
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [x] 已对牡丹江万达广场店17:15场次执行只读W+座位Smoke，8排返回6个实时可选座位；未创建临时订单
 - [x] 当前生产设置为 `automation_enabled=true`、`recognition_enabled=true`、`quote_enabled=false`、`auto_price_change=true`、`ai_reply_enabled=false`、`shadow_evaluation_enabled=true`；只允许既有有效确认报价进入确定性待付款改价，新自动报价保持关闭；`conversation_agent_mode=shadow`、`execution_owner=deterministic`、Active 0%、Canary关闭且kill switch开启
@@ -56,12 +57,12 @@
 ## 当前生产候选包证据
 
 - V3 SHA-256：`ed07d72e97cfb1a1f82f0c3f2ba23b411d12d95594eb6eee068911fc32fcf71f`
-- 插件 SHA-256：`a680dd624a1d56466b4f181538ccde4bcecc04c87027e7648c1f171637fe898c`
-- Manifest SHA-256：`895db693d0de4e66bec1b1f43abc8ea8ba98a21049b95de4911cf4151f648a09`
+- 插件 SHA-256：`1b7822354e2fcd063ae96a1daefc344574d9e6b2c725fa857c324189c45351a6`
+- Manifest SHA-256：`caf1cee8019355723158cc2c9c840b2c4cb7d165987f1c059b34fee8ec355aef`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/b92d6d5ba812`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/1fc21db90c3c`
 - 生产V3：`/opt/wanda-v3-backend/releases/v13-shadow-switch-b92d6d5ba812`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v33-shadow-switch-b92d6d5ba812`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v33-operations-workbench-1fc21db90c3c`
 
 ## 提交前由门户确认
 
