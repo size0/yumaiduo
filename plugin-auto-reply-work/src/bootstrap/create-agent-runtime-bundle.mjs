@@ -1,6 +1,5 @@
 import { createConversationAgentClient } from '../agent/conversation-agent-client.mjs';
 import { createAiOrchestrator } from '../ai/ai-orchestrator.mjs';
-import { createDifyClient } from '../ai/dify-client.mjs';
 import { createAgentHumanComparisonScanner } from '../agent/agent-human-comparison-scanner.mjs';
 import { createAgentReplyOutboxDispatcher } from '../agent/agent-reply-outbox-dispatcher.mjs';
 import { createShadowAgentRuntime } from '../agent/shadow-agent-runtime.mjs';
@@ -10,7 +9,6 @@ import { createReplyOrchestrator } from '../reply/reply-orchestrator.mjs';
 const DEFAULT_FACTORIES = Object.freeze({
   createConversationAgentClient,
   createAiOrchestrator,
-  createDifyClient,
   createAgentHumanComparisonScanner,
   createAgentReplyOutboxDispatcher,
   createShadowAgentRuntime,
@@ -40,8 +38,7 @@ export function createAgentRuntimeBundle({
   const factories = { ...DEFAULT_FACTORIES, ...overrides };
   const coreFor = (tenantId) => platformRuntime.createClient(tenantId);
   const primaryProvider = factories.createConversationAgentClient(config);
-  const shadowProvider = factories.createDifyClient(config);
-  const conversationAgentPlanner = factories.createAiOrchestrator({ primaryProvider, shadowProvider });
+  const conversationAgentPlanner = factories.createAiOrchestrator({ primaryProvider });
 
   const agentHumanComparisonScanner = factories.createAgentHumanComparisonScanner({
     conversationContextStore: storage.conversationContextStore,

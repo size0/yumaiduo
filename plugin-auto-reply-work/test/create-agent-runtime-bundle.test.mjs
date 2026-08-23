@@ -22,8 +22,7 @@ test('builds the provider-neutral Agent runtime without exposing provider capabi
   const input = dependencies();
   const captured = {};
   const primaryProvider = { plan: async () => ({}) };
-  const shadowProvider = { evaluate: async () => ({}) };
-  const planner = { plan: async () => ({}), evaluateShadow: async () => ({}) };
+  const planner = { plan: async () => ({}) };
   const scanner = { tick: async () => null };
   const dispatcher = { tick: async () => null };
   const runtime = { schedule: async () => null, tick: async () => null };
@@ -31,7 +30,7 @@ test('builds the provider-neutral Agent runtime without exposing provider capabi
     ...input,
     factories: {
       createConversationAgentClient: () => primaryProvider,
-      createDifyClient: () => shadowProvider,
+      createDifyClient: () => { throw new Error('retired provider factory must not be called'); },
       createAiOrchestrator: (options) => { captured.ai = options; return planner; },
       createAgentHumanComparisonScanner: (options) => { captured.scanner = options; return scanner; },
       createActionExecutor: (options) => { captured.executor = options; return { execute: async () => ({}) }; },
@@ -41,7 +40,7 @@ test('builds the provider-neutral Agent runtime without exposing provider capabi
     },
   });
 
-  assert.deepEqual(captured.ai, { primaryProvider, shadowProvider });
+  assert.deepEqual(captured.ai, { primaryProvider });
   assert.equal(captured.runtime.planner, planner);
   assert.equal(captured.runtime.runStore, input.storage.agentRunStore);
   assert.equal(captured.runtime.replyOutboxStore, input.storage.agentReplyOutboxStore);
@@ -67,7 +66,7 @@ test('keeps quote outbox delivery as a two-phase commit into conversation facts'
     ...input,
     factories: {
       createConversationAgentClient: () => null,
-      createDifyClient: () => null,
+      createDifyClient: () => { throw new Error('retired provider factory must not be called'); },
       createAiOrchestrator: () => null,
       createAgentHumanComparisonScanner: () => ({ tick: async () => null }),
       createActionExecutor: () => ({ execute: async () => ({}) }),

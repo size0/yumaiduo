@@ -63,7 +63,7 @@ test('fails closed before execution when reply text contains an unresolved templ
   assert.equal(calls, 0);
 });
 
-test('refuses transaction actions so Dify or another caller cannot use the reply boundary to execute them', async () => {
+test('refuses transaction actions so no caller can use the reply boundary to execute them', async () => {
   const orchestrator = createReplyOrchestrator({ actionExecutor: { async execute() { throw new Error('must not run'); } } });
 
   await assert.rejects(

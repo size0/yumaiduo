@@ -225,7 +225,6 @@ export async function loadConfig({ env = process.env, projectRoot = PROJECT_ROOT
   let quotePreview = null;
   let replyPreview = null;
   let conversationAgent = null;
-  let difyShadow = null;
   if (quotePreviewOnly) {
     const ingestUrl = parseSecureServiceUrl(env.WANDA_V3_PREVIEW_INGEST_URL, 'WANDA_V3_PREVIEW_INGEST_URL');
     const ingestKey = requiredString(env.WANDA_V3_PREVIEW_INGEST_KEY, 'WANDA_V3_PREVIEW_INGEST_KEY');
@@ -249,26 +248,6 @@ export async function loadConfig({ env = process.env, projectRoot = PROJECT_ROOT
       });
     }
   }
-  const difyShadowEnabled = parseBoolean(env.DIFY_SHADOW_ENABLED, 'DIFY_SHADOW_ENABLED', false);
-  if (difyShadowEnabled) {
-    if (!quotePreviewOnly || !replyPreviewEnabled || !conversationAgent) {
-      throw new ConfigurationError('DIFY_SHADOW_ENABLED requires QUOTE_PREVIEW_ONLY=true and AI_REPLY_PREVIEW_ENABLED=true');
-    }
-    const url = parseSecureServiceUrl(env.DIFY_WORKFLOW_URL, 'DIFY_WORKFLOW_URL');
-    if (!new URL(url).pathname.endsWith('/v1/workflows/run')) {
-      throw new ConfigurationError('DIFY_WORKFLOW_URL must end with /v1/workflows/run');
-    }
-    const apiKey = requiredString(env.DIFY_API_KEY, 'DIFY_API_KEY');
-    if (apiKey.length < 16 || apiKey.length > 512) {
-      throw new ConfigurationError('DIFY_API_KEY must contain 16 to 512 characters');
-    }
-    difyShadow = Object.freeze({
-      url,
-      apiKey,
-      timeoutMs: parseInteger(env.DIFY_TIMEOUT_MS, 'DIFY_TIMEOUT_MS', { min: 1_000, max: 30_000, fallback: 10_000 }),
-    });
-  }
-
   return Object.freeze({
     projectRoot,
     manifest: resolvedManifest,
@@ -322,7 +301,6 @@ export async function loadConfig({ env = process.env, projectRoot = PROJECT_ROOT
     quotePreview,
     replyPreview,
     conversationAgent,
-    difyShadow,
     imageHostAllowlist: parseHostAllowlist(env.IMAGE_HOST_ALLOWLIST),
     logLevel,
     backend: Object.freeze({

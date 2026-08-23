@@ -149,48 +149,16 @@ test('invalid or transaction-parameterized provider plans fail at the AI boundar
   await assert.rejects(() => parameterizedSeatLookup.plan({}), /show_available_wplus_seats does not accept agent arguments/u);
 });
 
-test('Dify advisory evaluation is an explicit Shadow-only path and cannot replace the primary plan', async () => {
-  let primaryCalls = 0;
-  let shadowCalls = 0;
-  const orchestrator = createAiOrchestrator({
-    primaryProvider: { async plan() { primaryCalls += 1; return validPlan(); } },
-    shadowProvider: {
-      async evaluate(input) {
-        shadowCalls += 1;
-        assert.equal(input.latest_message, '你好');
-        return {
-          intent: '其他', confidence: 0.9, reply_draft: '您好，请问需要查询什么？',
-          handoff_recommended: false, reason_code: 'general_greeting', missing_fields: [],
-        };
-      },
-    },
-  });
-  const plan = await orchestrator.plan({ latest_message: '你好' });
-  assert.equal(plan.action, 'read_active_quote');
-  assert.equal(primaryCalls, 1);
-  assert.equal(shadowCalls, 0);
-  const advisory = await orchestrator.evaluateShadow({ latest_message: '你好' });
-  assert.equal(shadowCalls, 1);
-  assert.equal(advisory.reason_code, 'general_greeting');
-});
-
-test('invalid Shadow provider output fails closed without affecting primary planning', async () => {
+test('the AI boundary ignores retired secondary providers and exposes no send or tool capability', async () => {
+  let retiredProviderCalls = 0;
   const orchestrator = createAiOrchestrator({
     primaryProvider: { async plan() { return validPlan(); } },
-    shadowProvider: { async evaluate() { return { reply_draft: '已经改价，可以付款' }; } },
+    shadowProvider: { async evaluate() { retiredProviderCalls += 1; return {}; } },
   });
-  await assert.rejects(() => orchestrator.evaluateShadow({}), /invalid AI Shadow advisory/u);
-  assert.equal((await orchestrator.plan({})).action, 'read_active_quote');
-});
-
-test('the AI boundary exposes no send or tool execution capability', () => {
-  const primaryOnly = createAiOrchestrator({ primaryProvider: { async plan() { return validPlan(); } } });
-  assert.deepEqual(Object.keys(primaryOnly), ['plan']);
-  const withShadow = createAiOrchestrator({
-    primaryProvider: { async plan() { return validPlan(); } },
-    shadowProvider: { async evaluate() { return {}; } },
-  });
-  assert.deepEqual(Object.keys(withShadow), ['plan', 'evaluateShadow']);
-  assert.equal(withShadow.send, undefined);
-  assert.equal(withShadow.executeTool, undefined);
+  assert.equal((await orchestrator.plan({ latest_message: '你好' })).action, 'read_active_quote');
+  assert.equal(retiredProviderCalls, 0);
+  assert.deepEqual(Object.keys(orchestrator), ['plan']);
+  assert.equal(orchestrator.evaluateShadow, undefined);
+  assert.equal(orchestrator.send, undefined);
+  assert.equal(orchestrator.executeTool, undefined);
 });

@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产已部署源码候选 `103a7b9bcc1e9b3d40650cda93f73d442af9dbb3`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime为 `wanda-agent-runtime-v28-pricing-evidence-gate`。生产继续保持Shadow、确定性执行Owner和Active 0%；旧Runtime样本不得计入放行门槛。下方旧0.6.0审核包不能代表当前源码。
+> 当前生产仍是源码候选 `103a7b9bcc1e9b3d40650cda93f73d442af9dbb3`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime为 `wanda-agent-runtime-v28-pricing-evidence-gate`。当前main已移除外部advisory Provider并升级为V29，尚未部署；生产继续保持Shadow、确定性执行Owner和Active 0%。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 插件测试 494 项、V3 后端测试 185 项通过；V3 测试无弃用警告
+- [x] 当前源码插件测试 484 项、V3 后端测试 185 项通过；V3 测试无弃用警告
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -25,7 +25,7 @@
 - [x] 万达官方直连具备创建状态、取消状态、实时座位释放、15/30秒后台复核、租约续期及最多3账号安全轮转契约
 - [x] 直接报价使用独立HMAC密钥生成 `pricing_account_ref`，并在报价确认和平台改价前强制校验证据
 - [x] 官方直连部署预检不会输出密钥、Token、手机号、账号标识或账号池路径
-- [x] Dify仅为默认关闭的Shadow advisory Provider，不具备工具、发送、报价、订单或履约权限
+- [x] 当前源码已移除未启用的外部Dify advisory Provider；V29仅保留主Agent与确定性交易引擎
 
 ## 当前源码发布前必须完成
 
@@ -39,12 +39,12 @@
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [ ] 使用只读官方座位请求进行smoke；临时试价只能使用预先批准的受控场次，并必须确认取消和座位恢复
 - [x] 已确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、`conversation_agent_active_ready=false`、Active 0%、Canary关闭且kill switch开启
-- [ ] 为当前V28 Runtime重新采集至少100轮自动安全审计和100轮图片样本；当前已自动形成1轮文字和1轮图片evaluation，旧版本样本不得补门槛
+- [ ] V29部署后重新采集至少100轮自动安全审计和100轮图片样本；V28及更旧版本样本不得补门槛
 - [x] 已完成V10/V22回滚及V11/V28恢复演练；两端健康、WorkingDirectory和队列恢复通过
 - [x] 已修复候选包遗漏vendor SDK运行时的问题，并将SDK `dist/index.js`设为构建强制文件；首次失败切换已自动回滚，无买家交易状态迁移
 - [x] 插件systemd沙箱已显式允许写入当前 `DATA_DIR=/var/lib/ticket-system/wanda-ai-plugin-data`，V28历史评测队列已恢复持久化
 
-## 当前候选包证据
+## 当前生产候选包证据
 
 - V3 SHA-256：`031bd41b07ab2decedb6f187a2828da6caf97581a8b0bbbc77842cf1c8768412`
 - 插件 SHA-256：`1049f0e54badc8a214bee3aed4af68aa613f19cb94beeaaeb6d38d40de5a0893`
