@@ -100,7 +100,7 @@ function renderAutomation() {
 
 function filteredQueue() {
   if (state.filter === 'urgent') return state.queue.filter((item) => item.severity === 'urgent' || item.severity === 'high');
-  if (state.filter === 'orders') return state.queue.filter((item) => ['order-exception', 'paid-order'].includes(item.kind));
+  if (state.filter === 'money') return state.queue.filter((item) => ['money-risk', 'price-change-risk'].includes(item.kind));
   if (state.filter === 'manual') return state.queue.filter((item) => item.kind === 'manual-task');
   return state.queue;
 }
@@ -108,11 +108,11 @@ function filteredQueue() {
 function renderQueue() {
   const urgent = state.queue.filter((item) => item.severity === 'urgent' || item.severity === 'high');
   elements['urgent-count'].textContent = String(urgent.length);
-  elements['urgent-summary'].textContent = urgent.length ? `其中${state.queue.filter((item) => item.kind === 'order-exception').length}项为订单异常；先核对已付款与金额问题。` : '当前没有高优先级订单异常，继续关注新消息与人工任务。';
+  elements['urgent-summary'].textContent = urgent.length ? '只统计有明确证据的金额、张数、改价风险和系统人工任务。' : '当前没有确定性交易风险。人工回复和人工出票属于正常工作，不算异常。';
   const records = filteredQueue();
   elements['action-queue'].replaceChildren();
   if (!records.length) {
-    const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = '当前筛选条件下没有待处理事项。'; elements['action-queue'].append(empty); return;
+    const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = '当前没有需要系统提醒的确定性风险。人工处理流程不计为异常。'; elements['action-queue'].append(empty); return;
   }
   records.slice(0, 80).forEach((record) => elements['action-queue'].append(queueItem(record)));
 }
@@ -181,7 +181,7 @@ function settingsUrl(hash) {
 }
 
 function kindLabel(kind) {
-  return ({ 'order-exception': '订单异常', 'paid-order': '已付款', 'manual-task': '人工任务', conversation: '会话跟进' })[kind] ?? '待处理';
+  return ({ 'money-risk': '金额风险', 'quantity-risk': '张数风险', 'price-change-risk': '改价风险', 'system-risk': '系统风险', 'manual-task': '系统任务' })[kind] ?? '风险核对';
 }
 function formatTime(value) {
   const date = new Date(value); return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date) : '';

@@ -31,10 +31,10 @@
     <main id="workbench-main">
       <section class="hero-grid" aria-labelledby="today-title">
         <article class="hero-card hero-card-primary">
-          <p class="eyebrow">TODAY</p>
-          <h2 id="today-title">今天先处理什么</h2>
-          <div class="hero-number"><strong id="urgent-count">0</strong><span>项需要优先关注</span></div>
-          <p id="urgent-summary">正在读取异常订单与人工任务。</p>
+          <p class="eyebrow">DETERMINISTIC RISK</p>
+          <h2 id="today-title">系统需要你检查什么</h2>
+          <div class="hero-number"><strong id="urgent-count">0</strong><span>项近24小时确定性风险</span></div>
+          <p id="urgent-summary">正在核对资金、张数和改价风险。</p>
         </article>
         <article class="hero-card">
           <div class="section-heading"><div><p class="eyebrow">RUNTIME SAFETY</p><h2>当前自动化边界</h2></div><span class="runtime-badge" id="runtime-mode">读取中</span></div>
@@ -45,12 +45,12 @@
 
       <section class="section-block" aria-labelledby="queue-title">
         <div class="section-heading section-heading-actions">
-          <div><p class="eyebrow">ACTION QUEUE</p><h2 id="queue-title">待人工处理</h2><p>优先展示付款异常、履约异常和已打开的人工任务。</p></div>
-          <div class="segmented-filter" role="group" aria-label="筛选待处理事项">
-            <button class="filter-button is-active" type="button" data-filter="all">全部</button>
+          <div><p class="eyebrow">RISK REVIEW</p><h2 id="queue-title">需要系统提醒的风险</h2><p>人工回复、人工报价和人工出票是正常工作，不计为异常；这里只显示有明确证据的风险。</p></div>
+          <div class="segmented-filter" role="group" aria-label="筛选系统风险">
+            <button class="filter-button is-active" type="button" data-filter="all">全部风险</button>
             <button class="filter-button" type="button" data-filter="urgent">紧急</button>
-            <button class="filter-button" type="button" data-filter="orders">订单</button>
-            <button class="filter-button" type="button" data-filter="manual">人工任务</button>
+            <button class="filter-button" type="button" data-filter="money">金额/改价</button>
+            <button class="filter-button" type="button" data-filter="manual">系统人工任务</button>
           </div>
         </div>
         <div class="queue-list" id="action-queue"><div class="empty-state">正在读取待处理事项。</div></div>

@@ -1,6 +1,18 @@
-const ORDER_EXCEPTION_STAGES = new Set(['exception_review', 'fulfillment_exception', 'paid_unmanaged']);
-const PAID_STAGES = new Set(['paid_manual_delivery', 'paid_unmanaged']);
-const ACTIONABLE_STAGES = new Set(['quoted', 'quote_confirmed', 'waiting_payment', ...PAID_STAGES, ...ORDER_EXCEPTION_STAGES]);
+const DEFAULT_RISK_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const EXPECTED_MANUAL_REASONS = new Set([
+  'paid_quote_unconfirmed_or_expired',
+  'pricing_policy_changed_before_order',
+  'price_change_gate_human_takeover',
+  'auto_price_change_disabled',
+]);
+const REASON_DETAILS = Object.freeze({
+  paid_amount_mismatch: ['money-risk', '实付金额与确认金额不一致', '先核对平台实付金额，不要继续自动处理。'],
+  paid_amount_unverifiable: ['money-risk', '实付金额暂时无法核验', '平台金额证据不完整，需要人工核对。'],
+  ticket_count_conflict: ['quantity-risk', '订单张数与票务请求不一致', '先确认买家实际需要的张数。'],
+  paid_ticket_count_conflict_manual_delivery: ['quantity-risk', '已付款订单张数不一致', '出票前必须确认订单张数。'],
+  PRICE_CHANGE_AUTHORIZATION_FAILED: ['price-change-risk', '待付款改价授权失败', '不要重复改价，先检查订单和报价关联。'],
+  reported_pricing_loss_wplus_capacity_or_channel_fee: ['money-risk', '订单可能存在成本亏损', '核对W+额度、渠道费用和最终实付。'],
+});
 
 function integer(value, fallback = 0) {
   const parsed = Number(value);
@@ -43,61 +55,61 @@ export function sampleSummaryFrom({ readiness = {}, image = {}, comparisons = []
 }
 
 function timestamp(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
   const parsed = Date.parse(String(value ?? ''));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function severityScore(item) {
-  if (item.kind === 'order-exception') return 100;
-  if (item.kind === 'manual-task' && item.priority === 'urgent') return 90;
-  if (item.kind === 'manual-task' && item.priority === 'high') return 80;
-  if (item.kind === 'paid-order') return 70;
-  if (item.kind === 'manual-task') return 60;
-  if (item.stage === 'waiting_payment' || item.stage === 'quote_confirmed') return 40;
-  return 20;
+  if (item.severity === 'urgent') return 100;
+  if (item.severity === 'high') return 80;
+  return 60;
 }
 
-export function buildActionQueue({ operations = [], orders = [], manualTasks = [] } = {}) {
-  const orderById = new Map((Array.isArray(orders) ? orders : []).filter((item) => item?.order_id).map((item) => [String(item.order_id), item]));
+function isRecent(value, now, riskWindowMs) {
+  const at = timestamp(value);
+  return at > 0 && at <= now + 60_000 && now - at <= riskWindowMs;
+}
+
+function riskFrom(record, prefix) {
+  const reason = String(record?.exception_reason ?? '').trim();
+  if (!reason || EXPECTED_MANUAL_REASONS.has(reason)) return null;
+  const [kind = 'system-risk', title = '检测到需要核对的交易风险', detail = '请核对订单权威状态。'] = REASON_DETAILS[reason] ?? [];
+  return {
+    id: `${prefix}:${record?.order_id ?? record?.event_id ?? record?.id ?? reason}`,
+    kind,
+    severity: ['paid_amount_mismatch', 'paid_ticket_count_conflict_manual_delivery', 'reported_pricing_loss_wplus_capacity_or_channel_fee'].includes(reason) ? 'urgent' : 'high',
+    reason,
+    buyerLabel: String(record?.buyer_label ?? '匿名买家'),
+    shopName: String(record?.shop_name ?? ''),
+    stage: String(record?.stage ?? ''),
+    title,
+    detail,
+    orderId: record?.order_id ? String(record.order_id) : null,
+    accountUnb: record?.account_unb ?? null,
+    chatId: record?.chat_id ?? null,
+    peerUnb: record?.peer_unb ?? null,
+    updatedAt: record?.updated_at ?? record?.platform_pay_time ?? null,
+  };
+}
+
+export function buildActionQueue({ operations = [], orders = [], manualTasks = [], now = Date.now(), riskWindowMs = DEFAULT_RISK_WINDOW_MS } = {}) {
   const queue = [];
   const representedOrders = new Set();
-  for (const operation of Array.isArray(operations) ? operations : []) {
-    const orderId = String(operation?.order_id ?? '');
-    const order = orderId ? orderById.get(orderId) ?? {} : {};
-    const stage = String(operation?.stage ?? order?.stage ?? '');
-    const exception = Boolean(operation?.exception_reason) || ORDER_EXCEPTION_STAGES.has(stage);
-    if (!exception && !ACTIONABLE_STAGES.has(stage)) continue;
-    if (orderId && (exception || PAID_STAGES.has(stage))) representedOrders.add(orderId);
-    queue.push({
-      id: `operation:${operation?.event_id ?? operation?.id ?? orderId}`,
-      kind: exception ? 'order-exception' : PAID_STAGES.has(stage) ? 'paid-order' : 'conversation',
-      severity: exception ? 'urgent' : PAID_STAGES.has(stage) ? 'high' : 'normal',
-      buyerLabel: String(operation?.buyer_label ?? order?.buyer_label ?? '匿名买家'),
-      shopName: String(operation?.shop_name ?? order?.shop_name ?? ''),
-      stage,
-      title: exception ? '订单需要立即人工核对' : String(operation?.next_action ?? '查看会话进度'),
-      detail: String(operation?.exception_reason ?? order?.platform_order_status_text ?? operation?.next_action ?? ''),
-      orderId: orderId || null,
-      accountUnb: operation?.account_unb ?? order?.account_unb ?? null,
-      chatId: operation?.chat_id ?? order?.chat_id ?? null,
-      peerUnb: operation?.peer_unb ?? order?.peer_unb ?? null,
-      updatedAt: operation?.updated_at ?? order?.updated_at ?? null,
-    });
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (!isRecent(order?.updated_at ?? order?.platform_pay_time, now, riskWindowMs)) continue;
+    const risk = riskFrom(order, 'order');
+    if (!risk) continue;
+    queue.push(risk);
+    if (risk.orderId) representedOrders.add(risk.orderId);
   }
-  for (const order of orderById.values()) {
-    const orderId = String(order.order_id);
-    if (representedOrders.has(orderId)) continue;
-    const stage = String(order.stage ?? '');
-    if (!ORDER_EXCEPTION_STAGES.has(stage) && !PAID_STAGES.has(stage)) continue;
-    const exception = ORDER_EXCEPTION_STAGES.has(stage) || Boolean(order.exception_reason);
-    queue.push({
-      id: `order:${orderId}`, kind: exception ? 'order-exception' : 'paid-order', severity: exception ? 'urgent' : 'high',
-      buyerLabel: String(order.buyer_label ?? '匿名买家'), shopName: String(order.shop_name ?? ''), stage,
-      title: exception ? '订单需要立即人工核对' : '已付款，等待人工履约',
-      detail: String(order.exception_reason ?? order.platform_order_status_text ?? ''), orderId,
-      accountUnb: order.account_unb ?? null, chatId: order.chat_id ?? null, peerUnb: order.peer_unb ?? null,
-      updatedAt: order.updated_at ?? order.platform_pay_time ?? null,
-    });
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    const orderId = operation?.order_id ? String(operation.order_id) : '';
+    if (orderId && representedOrders.has(orderId)) continue;
+    if (!isRecent(operation?.updated_at, now, riskWindowMs)) continue;
+    const risk = riskFrom(operation, 'operation');
+    if (risk) queue.push(risk);
   }
   for (const task of Array.isArray(manualTasks) ? manualTasks : []) {
     if (!['open', 'in_progress'].includes(String(task?.status))) continue;

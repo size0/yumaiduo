@@ -33,7 +33,7 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
           { event_id: 'event-quoted', buyer_label: '买家B', stage: 'quoted', next_action: '等待买家确认报价', updated_at: '2026-08-23T07:00:00Z' },
         ];
       },
-      async listTicketOrders() { return [{ order_id: 'order-1', buyer_label: '买家A', platform_order_status_text: '已付款，等待发货', platform_payment_cents: 20000 }]; },
+      async listTicketOrders() { return [{ order_id: 'order-1', buyer_label: '买家A', stage: 'exception_review', exception_reason: 'paid_amount_mismatch', updated_at: Date.now() }]; },
       async listManualTasks() { return [{ task_id: 'manual-1', buyer_label: '买家C', status: 'open', priority: 'high', summary: '人工核价', updated_at: '2026-08-23T07:02:00Z' }]; },
       async getAgentCanaryReadiness() { return { runtime_version: 'runtime-v33', audited_sample_count: 91, minimum_sample_count: 100, tool_selection_accuracy: 92.3, blockers: ['insufficient_audited_samples', 'tool_selection_accuracy_below_95'] }; },
       async getAgentOfflineEvaluation() { return { runtime_version: 'runtime-v33', sample_count: 32, minimum_sample_count: 100, full_path_pass_rate: 85.7, blockers: ['insufficient_image_samples', 'full_path_pass_rate_below_95'] }; },
@@ -56,7 +56,8 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
   assert.match(await page.locator('#sample-cards').textContent(), /91\s*\/\s*100/u);
   assert.match(await page.locator('#sample-cards').textContent(), /32\s*\/\s*100/u);
   assert.match(await page.locator('#blocker-list').textContent(), /工具选择正确率低于95%/u);
-  assert.equal(await page.locator('.queue-item').count(), 3);
+  assert.match(await page.locator('#action-queue').textContent(), /实付金额与确认金额不一致/u);
+  assert.equal(await page.locator('.queue-item').count(), 2);
 
   await page.getByRole('button', { name: '人工任务' }).click();
   assert.equal(await page.locator('.queue-item').count(), 1);

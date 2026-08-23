@@ -37,22 +37,34 @@ test('sample summary keeps text, image and human evidence separate', () => {
   });
 });
 
-test('action queue prioritizes paid exceptions and open manual tasks over passive conversations', () => {
+test('risk queue excludes normal manual reply and fulfillment states', () => {
   const queue = buildActionQueue({
+    now: Date.parse('2026-08-23T08:00:00Z'),
     operations: [
-      { event_id: 'event-quoted', buyer_label: '买家B', stage: 'quoted', next_action: '等待确认', updated_at: '2026-08-23T07:00:00Z' },
-      { event_id: 'event-paid', buyer_label: '买家A', stage: 'exception_review', exception_reason: 'paid_amount_mismatch', order_id: 'order-1', updated_at: '2026-08-23T07:01:00Z' },
-      { event_id: 'event-done', buyer_label: '买家D', stage: 'ticket_sent', updated_at: '2026-08-23T07:03:00Z' },
+      { event_id: 'event-quoted', buyer_label: '买家B', stage: 'quoted', updated_at: '2026-08-23T07:00:00Z' },
+      { event_id: 'event-paid', buyer_label: '买家D', stage: 'paid_manual_delivery', updated_at: '2026-08-23T07:03:00Z' },
     ],
-    orders: [{ order_id: 'order-1', platform_order_status_text: '已付款，等待发货', platform_payment_cents: 20000 }],
-    manualTasks: [{ task_id: 'manual-1', buyer_label: '买家C', status: 'open', priority: 'high', summary: '人工核价', updated_at: '2026-08-23T07:02:00Z' }],
+    orders: [
+      { order_id: 'order-normal', buyer_label: '买家E', stage: 'exception_review', exception_reason: 'paid_quote_unconfirmed_or_expired', updated_at: '2026-08-23T07:05:00Z' },
+      { order_id: 'order-old', buyer_label: '买家F', stage: 'exception_review', exception_reason: 'paid_amount_mismatch', updated_at: '2026-08-20T07:05:00Z' },
+    ],
   });
-  assert.equal(queue[0].kind, 'order-exception');
-  assert.equal(queue[0].severity, 'urgent');
+  assert.deepEqual(queue, []);
+});
+
+test('risk queue shows only recent concrete transaction risks in plain language', () => {
+  const queue = buildActionQueue({
+    now: Date.parse('2026-08-23T08:00:00Z'),
+    operations: [{ event_id: 'duplicate', order_id: 'order-1', exception_reason: 'paid_amount_mismatch', updated_at: '2026-08-23T07:01:00Z' }],
+    orders: [{ order_id: 'order-1', buyer_label: '买家A', exception_reason: 'paid_amount_mismatch', updated_at: '2026-08-23T07:02:00Z' }],
+    manualTasks: [{ task_id: 'manual-1', buyer_label: '买家C', status: 'open', priority: 'high', summary: '人工核价', updated_at: '2026-08-23T07:03:00Z' }],
+  });
+  assert.equal(queue.length, 2);
+  assert.equal(queue[0].kind, 'money-risk');
+  assert.equal(queue[0].title, '实付金额与确认金额不一致');
+  assert.equal(queue[0].detail, '先核对平台实付金额，不要继续自动处理。');
   assert.equal(queue[1].kind, 'manual-task');
-  assert.equal(queue.at(-1).kind, 'conversation');
   assert.equal(queue.filter((item) => item.orderId === 'order-1').length, 1);
-  assert.equal(queue.some((item) => item.buyerLabel === '买家D'), false);
 });
 
 test('blocker labels translate safety gate codes for operators', () => {
