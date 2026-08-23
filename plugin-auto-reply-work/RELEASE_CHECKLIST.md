@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产已部署源码候选 `c71975f3b94b9ba8f8db62d7cbe5b3a9eb5d8212`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime仍为 `wanda-agent-runtime-v31-release-fence-cleanup`。紧急关闭自动化时现在仍运行只读Shadow学习，并能通过生产 `remoteMessageId` 将已完成Shadow结果与人工卖家回复配对；生产自动回复、报价和改价继续关闭。
+> 当前生产已部署源码候选 `dfe52849cf0661eea19ffdd570f95139d1957e11`：V3契约为 `wanda-v3-v12-readonly-wplus-availability`，插件Runtime为 `wanda-agent-runtime-v32-source-time-context-wplus`。Agent任务持久化事件时点上下文，支持纯文字场次的只读W+全区域查询、有序影院候选引用及文字位置偏好；生产自动回复、报价和改价继续关闭。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 当前源码插件测试 497 项、V3 后端测试 205 项通过；新增关闭自动化仍调度Shadow、生产消息ID配对、等待完整结果及未审核对比刷新测试
+- [x] 当前源码插件测试 506 项、V3 后端测试 207 项通过；新增事件时点快照、未来状态隔离、人工卖家历史、上下文确认推理、纯文字W+查询、全排座位、候选序号及文字位置偏好测试
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -39,27 +39,29 @@
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `c71975f` 使用干净依赖执行插件497项测试和V3 205项测试；生产release再次执行插件497项测试通过
+- [x] 已在源码提交 `dfe5284` 使用干净依赖执行插件506项测试和V3 207项测试；生产release再次执行插件506项测试通过
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `c71975f3b94b9ba8f8db62d7cbe5b3a9eb5d8212` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/c71975f3b94b`
+- [x] 已为源码提交 `dfe52849cf0661eea19ffdd570f95139d1957e11` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/dfe52849cf06`
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [x] 已对牡丹江万达广场店17:15场次执行只读W+座位Smoke，8排返回6个实时可选座位；未创建临时订单
 - [x] 已确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、`conversation_agent_active_ready=false`、Active 0%、Canary关闭且kill switch开启
 - [ ] V31重新采集至少100轮自动安全审计和100轮图片样本；V30及更旧版本样本不得补门槛
 - [x] 已完成单座优惠修复release到前一V31 release回滚及恢复演练；两端健康、WorkingDirectory和队列恢复通过
+- [x] V32生产只读Smoke把“泉州晋江万达今天15:50奥德赛还有W座位吗”规划为 `resolve_ticket_identity → show_available_wplus_seats`，官方唯一匹配晋江万达广场激光IMAX店并返回7排9座、7排10座；未创建临时试价订单
+- [x] 已完成V32到前一V31 release的实际回滚及恢复演练；恢复后V12/V32契约匹配、两服务active且NRestarts=0
 - [x] 已修复候选包遗漏vendor SDK运行时的问题，并将SDK `dist/index.js`设为构建强制文件；首次失败切换已自动回滚，无买家交易状态迁移
 - [x] 插件systemd沙箱已显式允许写入当前 `DATA_DIR=/var/lib/ticket-system/wanda-ai-plugin-data`，V28历史评测队列已恢复持久化
 
 ## 当前生产候选包证据
 
-- V3 SHA-256：`ea221ad67b956eb57861053e12ae20682744cb449a5d5e422c30daceeedb2ba5`
-- 插件 SHA-256：`0b95565cbc322d83388792970e601c5142c85d354431c7c5c57fad3b842b0e8a`
-- Manifest SHA-256：`d63123185351ee7b9c16e5705ace54ef426296cf4968eb126a03cea3dc5cffbe`
+- V3 SHA-256：`c854f5fa06c7cc5d45aac3091978f309a08b4eee0d02347e7bd44002445602ba`
+- 插件 SHA-256：`c80a45645e028204eb691c3ebd29c2cbc14fc14ce850c086a7df6f9b11c69cbd`
+- Manifest SHA-256：`2d4b2d9a18200d53ed0edcefe34e9c913a8d46dd8c7121ace253ad33ae624169`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/c71975f3b94b`
-- 生产V3：`/opt/wanda-v3-backend/releases/v11-human-learning-c71975f3b94b`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v31-human-learning-c71975f3b94b`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/dfe52849cf06`
+- 生产V3：`/opt/wanda-v3-backend/releases/v12-source-time-wplus-dfe52849cf06`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v32-source-time-wplus-dfe52849cf06`
 
 ## 提交前由门户确认
 
