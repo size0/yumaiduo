@@ -77,7 +77,11 @@ export function createAgentHumanComparisonScanner({ conversationContextStore, ev
           for (let cursor = index - 1; cursor >= 0; cursor -= 1) if (['inbound', 'buyer'].includes(direction(messages[cursor]))) { buyer = messages[cursor]; break; }
           const buyerId = messageId(buyer); if (!buyerId) continue;
           const source = events.find((event) => String(event.envelope?.tenantId) === context.tenant_id
-            && String(event.envelope?.payload?.messageId ?? event.envelope?.payload?.message_id ?? '') === buyerId);
+            && String(event.envelope?.payload?.messageId
+              ?? event.envelope?.payload?.message_id
+              ?? event.envelope?.payload?.remoteMessageId
+              ?? event.envelope?.payload?.remote_message_id
+              ?? '') === buyerId);
           if (!source) continue;
           if (!runsByTenant.has(context.tenant_id)) runsByTenant.set(context.tenant_id, await agentRunStore.list({ tenantId: context.tenant_id, limit: 500 }));
           const run = runsByTenant.get(context.tenant_id).find((item) => item.mode === 'shadow' && item.event_key === source.key);

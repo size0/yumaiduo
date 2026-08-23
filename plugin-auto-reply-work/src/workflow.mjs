@@ -173,12 +173,28 @@ export function createWorkflow({
       if ((quotePreviewClient || replyPreviewClient || conversationAgentPlanner) && eventRoute.kind === EVENT_ROUTE_KIND.MESSAGE) {
         const settings = await loadRuntimeSettings(envelope);
         if (!settings.automation_enabled) {
+          let agentRunScheduled = false;
+          if (
+            settings.ai_reply_enabled === true
+            && settings.conversation_agent_mode === 'shadow'
+            && shadowAgentScheduler?.schedule
+          ) {
+            try {
+              const scheduled = await shadowAgentScheduler.schedule(envelope);
+              agentRunScheduled = scheduled?.created === true || Boolean(scheduled?.run);
+            } catch (error) {
+              logger.warn?.('[workflow] disabled-shop shadow scheduling failed without enabling buyer actions', {
+                eventId: String(envelope.id), error: String(error?.message ?? error),
+              });
+            }
+          }
           await eventStore.complete(record.key, record.leaseId, {
             mode: 'quote_preview_only',
             skipped: 'shop_automation_disabled',
+            ...(agentRunScheduled ? { agent_run_scheduled: true } : {}),
             actions: [],
           });
-          return { status: 'completed', mode: 'quote_preview_only', actions: [] };
+          return { status: 'completed', mode: 'quote_preview_only', agent_run_scheduled: agentRunScheduled, actions: [] };
         }
         const preMergeActions = Array.isArray(record.result?.actions) ? [...record.result.actions] : [];
         if (!preMergeActions.length) {

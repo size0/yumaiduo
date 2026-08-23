@@ -278,6 +278,28 @@ test('a message from another owned shop is ignored rather than treated as a buye
   assert.equal(calls.find(([name]) => name === 'complete').at(-1).skipped, 'owned_shop_peer');
 });
 
+test('a disabled shop still schedules shadow learning without sending or running transaction work', async () => {
+  const scheduled = [];
+  const { workflow, calls } = harness({
+    runtimeSettings: {
+      automation_enabled: false, ai_reply_enabled: true,
+      conversation_agent_mode: 'shadow', execution_owner: 'deterministic',
+    },
+    quotePreviewClient: {},
+    shadowAgentScheduler: { async schedule(envelope) { scheduled.push(envelope.id); return { created: true }; } },
+    autoReplyEnabled: true,
+  });
+  const result = await workflow.processClaimed(record({
+    id: 'evt-disabled-shadow', tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(),
+    payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '你好' },
+  }));
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(scheduled, ['evt-disabled-shadow']);
+  assert.equal(calls.some(([name]) => name === 'send'), false);
+  assert.equal(calls.find(([name]) => name === 'complete').at(-1).agent_run_scheduled, true);
+});
+
 test('a disabled shop does not trigger automatic message processing', async () => {
   const backendCalls = [];
   const backend = {
