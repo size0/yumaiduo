@@ -311,18 +311,19 @@ class RealtimeQuoteService:
             is_count_known = False
         exact_zones = {seat.zone_type for seat in selected} if is_exact else set()
         exact_uniform_selection = is_exact and len(exact_zones) == 1
-        offer_quantity = len(selected) if exact_uniform_selection else (1 if is_exact else (requested_count or 1))
+        # totalPayPrice is a per-seat-type payable amount. Probe one real seat
+        # and never divide that value by the buyer's requested ticket count.
+        offer_quantity = 1
         if exact_uniform_selection:
-            # A verified regular/discount/premium selection can expose the same
-            # named W+ member offer through available-offers. Probe those exact
-            # seats instead of requiring an unrelated available W+ area.
-            offer_seats = selected
+            # Seats of the same verified type share one deterministic unit
+            # cost even when the buyer's screenshot shows account discounts.
+            offer_seats = selected[:1]
         elif is_exact:
             # Mixed-zone selections retain the established single-offer probe;
             # never average a multi-zone available-offers total across seats.
             offer_seats = _wplus_probe_candidates(all_seats)[:offer_quantity]
         else:
-            offer_seats = selected
+            offer_seats = selected[:1]
         if len(offer_seats) != offer_quantity:
             error = HTTPException(status_code=422, detail="未找到足够的 W+座位用于临时锁座核价")
             raise _diagnostic_failure(error, step="select_offer_seats", recognition=recognition, match=match, realtime=realtime)

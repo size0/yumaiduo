@@ -2314,6 +2314,55 @@ def test_unselected_map_always_probes_wplus_and_asks_for_ticket_count() -> None:
     assert gateway.calls == ["for_quote", "match", "realtime_seats", "lock", "available_offers", "cancel", "realtime_seats"]
 
 
+def test_same_type_multi_seat_quote_probes_one_seat_and_never_divides_offer_price_by_ticket_count() -> None:
+    class PerSeatOfferGateway(FakeTicketGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.locked_seat_counts: list[int] = []
+
+        async def realtime_seats(self, showtime_id: str) -> dict[str, object]:
+            self.calls.append("realtime_seats")
+            return {"data": {"realtimeSeats": {"area": [{
+                "areaCode": "premium", "areaName": "优选区", "areaPrice": {"salesPrice": 6690},
+                "seat": [
+                    {"seatId": "p-21", "status": 1, "areaSalesPriceCents": 6690, "row": "12", "column": "21"},
+                    {"seatId": "p-22", "status": 1, "areaSalesPriceCents": 6690, "row": "12", "column": "22"},
+                ],
+            }]}}}
+
+        async def lock(self, payload: dict[str, object]) -> dict[str, object]:
+            self.calls.append("lock")
+            self.locked_seat_counts.append(len(payload["seat_ids"]))
+            return {"data": {"orderId": "temporary-order"}}
+
+        async def available_offers(self, **kwargs: str) -> dict[str, object]:
+            self.calls.append("available_offers")
+            return {"data": {"activities": [{
+                "name": "W+会员专享优惠", "able": True,
+                "allot_seat": {"totalPayPrice": 5846},
+            }]}}
+
+    gateway = PerSeatOfferGateway()
+    response = asyncio.run(RealtimeQuoteService(gateway).quote(
+        QuoteRealtimeRequest.model_validate({
+            "ticket_count": 2,
+            "recognition": {
+                "image_type": "ORDER_CONFIRM",
+                "official_selection": {
+                    "is_selected": True,
+                    "selected_seat_numbers": ["12排21座", "12排22座"],
+                    "selected_count": 2,
+                },
+            },
+        })
+    ))
+
+    assert gateway.locked_seat_counts == [1]
+    assert response.member_unit_price_cents == 5846
+    assert response.unit_quote_cents == 5950
+    assert response.total_quote_cents == 11900
+
+
 def test_realtime_quote_reads_wplus_price_from_locked_available_offers_and_releases() -> None:
     gateway = FakeTicketGateway()
 

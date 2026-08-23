@@ -86,6 +86,8 @@ def test_domain_quote_stays_between_member_floor_and_original_ceiling_and_requir
 
     offers = {"activities": [{
         "name": "W+会员专享优惠", "able": True,
-        "allot_seat": {"totalPayPrice": 11080},
+        "allot_seat": {"totalPayPrice": 5540},
     }]}
-    assert _locked_offer_unit_cents(offers, quantity=2, allow_friday=False) == 5540
+    assert _locked_offer_unit_cents(offers, quantity=1, allow_friday=False) == 5540
+    with pytest.raises(HTTPException):
+        _locked_offer_unit_cents(offers, quantity=2, allow_friday=False)

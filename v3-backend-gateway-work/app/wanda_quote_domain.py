@@ -224,6 +224,11 @@ def _partition(seats: Sequence[SeatFact]) -> str:
 
 
 def _locked_offer_unit_cents(response: Mapping[str, Any], *, quantity: int, allow_friday: bool) -> int:
+    # `allotSeat.totalPayPrice` is the payable price for the probed seat type,
+    # not an order total that can safely be divided by the buyer ticket count.
+    # Quotes therefore probe exactly one representative seat per type.
+    if quantity != 1:
+        raise HTTPException(status_code=422, detail="会员优惠单价只能通过单座试价读取")
     data = _data(response)
     activities = data.get("activities") or response.get("activities") or []
     if not isinstance(activities, Sequence) or isinstance(activities, (str, bytes)):
@@ -241,8 +246,8 @@ def _locked_offer_unit_cents(response: Mapping[str, Any], *, quantity: int, allo
         if not isinstance(allot, Mapping):
             continue
         total = _positive_int(allot.get("totalPayPrice"))
-        if total is not None and quantity > 0 and total % quantity == 0:
-            candidates.append(total // quantity)
+        if total is not None:
+            candidates.append(total)
     if len(set(candidates)) != 1:
         raise HTTPException(status_code=422, detail="未找到唯一可用的 W+会员专享优惠价")
     return candidates[0]
