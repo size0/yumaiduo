@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产仍是源码候选 `103a7b9bcc1e9b3d40650cda93f73d442af9dbb3`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime为 `wanda-agent-runtime-v28-pricing-evidence-gate`。当前main已移除外部advisory Provider并升级为V29，尚未部署；生产继续保持Shadow、确定性执行Owner和Active 0%。
+> 当前生产已部署源码候选 `a87a11b77c4644d18c590a5d33a2da5b094fd477`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime为 `wanda-agent-runtime-v29-primary-only`。外部Dify advisory Provider已移除；生产继续保持Shadow、确定性执行Owner和Active 0%。
 
 ## 已完成
 
@@ -25,34 +25,35 @@
 - [x] 万达官方直连具备创建状态、取消状态、实时座位释放、15/30秒后台复核、租约续期及最多3账号安全轮转契约
 - [x] 直接报价使用独立HMAC密钥生成 `pricing_account_ref`，并在报价确认和平台改价前强制校验证据
 - [x] 官方直连部署预检不会输出密钥、Token、手机号、账号标识或账号池路径
-- [x] 当前源码已移除未启用的外部Dify advisory Provider；V29仅保留主Agent与确定性交易引擎
+- [x] 生产已移除未启用的外部Dify advisory Provider；V29仅保留主Agent与确定性交易引擎
+- [x] 场次零命中但仅缺影片名时精确追问“影片：完整影片名”，买家补充后复用识图草稿且不重复识图
 
 ## 当前源码发布前必须完成
 
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `103a7b9` 使用官方registry干净安装的依赖执行插件494项测试和V3 185项测试；代码未发生变化
+- [x] 已在源码提交 `a87a11b` 使用干净依赖执行插件484项测试和V3 185项测试；生产release再次执行插件484项测试通过
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `103a7b9bcc1e9b3d40650cda93f73d442af9dbb3` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/103a7b9bcc1e`
+- [x] 已为源码提交 `a87a11b77c4644d18c590a5d33a2da5b094fd477` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/a87a11b77c46`
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [ ] 使用只读官方座位请求进行smoke；临时试价只能使用预先批准的受控场次，并必须确认取消和座位恢复
 - [x] 已确认 `conversation_agent_mode=shadow`、`execution_owner=deterministic`、`conversation_agent_active_ready=false`、Active 0%、Canary关闭且kill switch开启
-- [ ] V29部署后重新采集至少100轮自动安全审计和100轮图片样本；V28及更旧版本样本不得补门槛
-- [x] 已完成V10/V22回滚及V11/V28恢复演练；两端健康、WorkingDirectory和队列恢复通过
+- [ ] V29重新采集至少100轮自动安全审计和100轮图片样本；当前已有1轮文字、1轮图片evaluation和1轮实时Shadow，V28及更旧版本样本不得补门槛
+- [x] 已完成V29到V28回滚及V29恢复演练；两端健康、WorkingDirectory和队列恢复通过
 - [x] 已修复候选包遗漏vendor SDK运行时的问题，并将SDK `dist/index.js`设为构建强制文件；首次失败切换已自动回滚，无买家交易状态迁移
 - [x] 插件systemd沙箱已显式允许写入当前 `DATA_DIR=/var/lib/ticket-system/wanda-ai-plugin-data`，V28历史评测队列已恢复持久化
 
 ## 当前生产候选包证据
 
-- V3 SHA-256：`031bd41b07ab2decedb6f187a2828da6caf97581a8b0bbbc77842cf1c8768412`
-- 插件 SHA-256：`1049f0e54badc8a214bee3aed4af68aa613f19cb94beeaaeb6d38d40de5a0893`
-- Manifest SHA-256：`8639343072cca8cfe28832dc2d57073ca2e472d518f345169963f8660308f454`
+- V3 SHA-256：`1dacdc375323f1cd6725fe5bfbd980344758e51dbf9119843738d0fa2ec180d6`
+- 插件 SHA-256：`57e563932b8d22c233227583d6c861599fabe12edfa3d2742b1a003d98a19c90`
+- Manifest SHA-256：`07b22ef7177df033ff1b9632f3b679f4465738c5fafeb25a3ade64395ec97334`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/103a7b9bcc1e`
-- 生产V3：`/opt/wanda-v3-backend/releases/v11-pricing-account-evidence-103a7b9bcc1e`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v28-pricing-evidence-103a7b9bcc1e`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/a87a11b77c46`
+- 生产V3：`/opt/wanda-v3-backend/releases/v11-pricing-account-evidence-a87a11b77c46`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v29-primary-only-a87a11b77c46`
 
 ## 提交前由门户确认
 
