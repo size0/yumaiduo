@@ -37,7 +37,7 @@ from .wanda_quote_store import WandaQuoteSettingsStore
 COS_CLEANUP_INTERVAL_SECONDS = 30 * 60
 PREVIEW_VISION_RETRY_DELAY_SECONDS = 0.35
 QUOTE_SHUTDOWN_TIMEOUT_SECONDS = 65
-V3_RUNTIME_CONTRACT = "wanda-v3-v14-autoquote-safety-gates"
+V3_RUNTIME_CONTRACT = "wanda-v3-v15-content-hash-vision-cache"
 async def _run_storage_cleanup(app: FastAPI) -> None:
     cleanup = getattr(app.state.storage_service, "cleanup_expired_images", None)
     if cleanup is not None:
@@ -94,7 +94,9 @@ def create_app(
     configured_path = os.getenv("WANDA_SETTINGS_PATH")
     settings_path = Path(configured_path) if configured_path else Path(__file__).resolve().parents[1] / "data" / "model_config.json"
     app.state.settings_store = store or ModelSettingsStore(settings_path)
-    app.state.vision_service = vision_service or VisionService()
+    configured_vision_cache_path = os.getenv("WANDA_VISION_RECOGNITION_CACHE_PATH")
+    vision_cache_path = Path(configured_vision_cache_path) if configured_vision_cache_path else Path("/var/lib/ticket-system/wanda-ai-v2-data/vision-recognition-cache.json")
+    app.state.vision_service = vision_service or VisionService(cache_path=vision_cache_path)
     configured_cos_path = os.getenv("WANDA_COS_SETTINGS_PATH")
     cos_settings_path = Path(configured_cos_path) if configured_cos_path else Path(__file__).resolve().parents[1] / "data" / "cos_config.json"
     app.state.cos_store = cos_store or CosSettingsStore(cos_settings_path)

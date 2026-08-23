@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v14-autoquote-safety-gates",
+        "runtime_contract": "wanda-v3-v15-content-hash-vision-cache",
     }
 
 
@@ -598,7 +598,7 @@ def test_recognize_uses_configured_model_service(tmp_path: Path) -> None:
         json={"image_url": "https://example.com/ticket.png", "message_text": "我要两张"},
     )
     assert response.status_code == 200
-    assert response.json()["prompt_version"] == "wanda-vlm-recognition-v10"
+    assert response.json()["prompt_version"] == "wanda-vlm-recognition-v11-image-only-cache"
     assert response.json()["recognition"]["official_selection"]["selected_count"] == 2
 
 
@@ -662,6 +662,55 @@ def test_openai_compatible_vision_request_and_json_response(tmp_path: Path, monk
     assert "json" in captured["payload"]["messages"][0]["content"]
     image_input = captured["payload"]["messages"][1]["content"][1]["image_url"]["url"]
     assert image_input.startswith("data:image/png;base64,")
+
+
+def test_vision_reuses_image_facts_by_content_hash_across_conversations_and_restarts(tmp_path: Path, monkeypatch) -> None:
+    model_calls = 0
+    image_content = b"\x89PNG\r\n\x1a\nidentical-image"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal model_calls
+        if request.url.host in {"first.example", "second.example"}:
+            return httpx.Response(200, content=image_content, headers={"content-type": "image/png"})
+        model_calls += 1
+        provider_request = request.content.decode("utf-8")
+        assert "第一个会话" not in provider_request
+        assert "完全不同的买家文字" not in provider_request
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({
+            "image_type": "SEAT_MAP",
+            "cinema": f"第{model_calls}次模型结果",
+            "hand_drawn_circle": {"exists": True, "estimated_seat_count": 2},
+        }, ensure_ascii=False)}}]})
+
+    monkeypatch.setattr("app.vision._is_public_image_url", lambda _: True)
+    settings = {"base_url": "https://model.example/v1", "model": "vision", "api_key": "key", "temperature": 0, "max_tokens": 800}
+    cache_path = tmp_path / "vision-recognition-cache.json"
+    first_service = VisionService(httpx.MockTransport(handler), cache_path=cache_path)
+
+    async def recognize_concurrently() -> tuple[Recognition, Recognition]:
+        return await asyncio.gather(
+            first_service.recognize(
+                VisionRecognizeRequest(image_url="https://first.example/a.png", message_text="第一个会话"), settings,
+            ),
+            first_service.recognize(
+                VisionRecognizeRequest(image_url="https://second.example/renamed.png", message_text="完全不同的买家文字"), settings,
+            ),
+        )
+
+    first, second = asyncio.run(recognize_concurrently())
+    restarted_service = VisionService(httpx.MockTransport(handler), cache_path=cache_path)
+    after_restart = asyncio.run(restarted_service.recognize(
+        VisionRecognizeRequest(image_url="https://first.example/a.png", message_text="第三个会话"), settings,
+    ))
+
+    assert first == second == after_restart
+    assert first.cinema == "第1次模型结果"
+    assert model_calls == 1
+    stored = cache_path.read_text(encoding="utf-8")
+    assert "第一个会话" not in stored
+    assert "完全不同的买家文字" not in stored
+    assert "first.example" not in stored
+    assert "second.example" not in stored
 
 
 def test_json_mode_prompts_include_lowercase_json_for_compatible_providers() -> None:

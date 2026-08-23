@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import ipaddress
 import json
 import re
 import socket
 from collections.abc import Mapping
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -18,9 +20,10 @@ from pydantic import ValidationError
 
 from .schemas import Recognition, VisionRecognizeRequest
 from .storage import IMAGE_SIGNATURES, MAX_IMAGE_BYTES
+from .vision_recognition_cache import VisionRecognitionCache
 
 
-PROMPT_VERSION = "wanda-vlm-recognition-v10"
+PROMPT_VERSION = "wanda-vlm-recognition-v11-image-only-cache"
 MAX_RECOGNITION_CONCURRENCY: Final = 8
 QUEUE_WAIT_SECONDS: Final = 2
 IMAGE_DOWNLOAD_TIMEOUT: Final = httpx.Timeout(15, connect=5)
@@ -290,9 +293,16 @@ async def _resolve_public_image_url(client: httpx.AsyncClient, image_url: str) -
 
 
 class VisionService:
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        cache_path: Path | None = None,
+    ) -> None:
         self._transport = transport
         self._recognition_semaphore = asyncio.Semaphore(MAX_RECOGNITION_CONCURRENCY)
+        self._recognition_cache = VisionRecognitionCache(cache_path)
+        self._recognition_locks: dict[str, asyncio.Lock] = {}
 
     async def recognize(self, request: VisionRecognizeRequest, model_settings: Mapping[str, object], knowledge_rules: list[str] | None = None) -> Recognition:
         image_url = str(request.image_url)
@@ -317,49 +327,94 @@ class VisionService:
         image_url: str,
         knowledge_rules: list[str],
     ) -> Recognition:
-        # Qwen can fetch Fish-style chat images from Alibaba's immutable CDN
-        # directly. Avoiding an unnecessary proxy download/base64 upload removes
-        # several seconds from the interactive quote path. Other hosts retain
-        # the bounded download path and its content validation.
-        if _can_send_provider_direct_image_url(image_url):
-            inline_image_url, image_mime, image_bytes = image_url, None, None
-        else:
-            inline_image_url, image_mime, image_bytes = await self._load_inline_image(image_url)
+        image_content, image_mime = await self._download_image(image_url)
+        image_bytes = len(image_content)
+        inline_image_url = (
+            image_url
+            if _can_send_provider_direct_image_url(image_url)
+            else f"data:{image_mime};base64,{base64.b64encode(image_content).decode('ascii')}"
+        )
+        system_prompt = build_system_prompt(knowledge_rules=knowledge_rules)
+        cache_key = self._recognition_cache_key(
+            image_content,
+            system_prompt=system_prompt,
+            model_settings=model_settings,
+        )
+        cached = self._recognition_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
-        user_context = {
-            "message_text": request.message_text,
-            "received_at": request.received_at.isoformat() if request.received_at else None,
-            "context": request.context.model_dump(exclude_none=True),
-        }
+        lock = self._recognition_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            cached = self._recognition_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            recognition = await self._recognize_model(
+                model_settings,
+                inline_image_url=inline_image_url,
+                image_mime=image_mime,
+                image_bytes=image_bytes,
+                system_prompt=system_prompt,
+            )
+            self._recognition_cache.put(cache_key, recognition)
+            return recognition
+
+    @staticmethod
+    def _recognition_cache_key(
+        image_content: bytes,
+        *,
+        system_prompt: str,
+        model_settings: Mapping[str, object],
+    ) -> str:
+        configuration = json.dumps({
+            "prompt_version": PROMPT_VERSION,
+            "system_prompt": system_prompt,
+            "model": str(model_settings.get("model") or ""),
+            "base_url": str(model_settings.get("base_url") or ""),
+            "temperature": model_settings.get("temperature"),
+            "max_tokens": model_settings.get("max_tokens"),
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        digest = hashlib.sha256()
+        digest.update(image_content)
+        digest.update(b"\0")
+        digest.update(configuration)
+        return digest.hexdigest()
+
+    async def _recognize_model(
+        self,
+        model_settings: Mapping[str, object],
+        *,
+        inline_image_url: str,
+        image_mime: str,
+        image_bytes: int,
+        system_prompt: str,
+    ) -> Recognition:
+        # Buyer text and conversation identifiers are deliberately excluded.
+        # They are fused downstream and must not influence or poison a cache
+        # that is shared solely by immutable image content.
+        image_task = {"task": "extract_image_facts_only"}
         payload: dict[str, Any] = {
             "model": model_settings["model"],
             "temperature": model_settings["temperature"],
             "max_tokens": model_settings["max_tokens"],
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": build_system_prompt(knowledge_rules=knowledge_rules)}, 
+                {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": json.dumps(user_context, ensure_ascii=False)},
+                        {"type": "text", "text": json.dumps(image_task, ensure_ascii=False)},
                         {"type": "image_url", "image_url": {"url": inline_image_url}},
                     ],
                 },
             ],
         }
         if str(model_settings["model"]).lower().startswith("qwen3.5-flash"):
-            # DashScope Qwen3.5 Flash defaults to hybrid thinking. The seat-map
-            # contract is extraction, not chain-of-thought reasoning, so disable
-            # it to keep the interactive recognition path low-latency.
             payload["enable_thinking"] = False
 
         base_url = str(model_settings["base_url"]).rstrip("/")
         if not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
-        # The format-repair and transport retries share one bounded request
-        # budget. Nesting the two retry loops would turn a three-request limit
-        # into nine upstream calls on an invalid JSON response plus a transient
-        # provider failure.
         request_attempts = 0
         format_retries = 0
         while request_attempts < MODEL_REQUEST_ATTEMPTS:
@@ -490,7 +545,7 @@ class VisionService:
                 provider_content_type=response.headers.get("content-type", "").split(";", 1)[0].lower() or None,
             ) from error
 
-    async def _load_inline_image(self, image_url: str) -> tuple[str, str, int]:
+    async def _download_image(self, image_url: str) -> tuple[bytes, str]:
         try:
             async with httpx.AsyncClient(
                 timeout=IMAGE_DOWNLOAD_TIMEOUT,
@@ -528,8 +583,7 @@ class VisionService:
                         _, is_expected_type = signature
                         if not is_expected_type(content):
                             raise VisionFailure(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "image_content_mismatch")
-                        encoded_content = base64.b64encode(content).decode("ascii")
-                        return f"data:{content_type};base64,{encoded_content}", content_type, len(content)
+                        return content, content_type
         except VisionFailure:
             raise
         except httpx.TimeoutException as error:
@@ -538,3 +592,8 @@ class VisionService:
             raise VisionFailure(502, "image_fetch_failed") from error
 
         raise AssertionError("image redirect loop must return or raise")
+
+    async def _load_inline_image(self, image_url: str) -> tuple[str, str, int]:
+        content, content_type = await self._download_image(image_url)
+        encoded_content = base64.b64encode(content).decode("ascii")
+        return f"data:{content_type};base64,{encoded_content}", content_type, len(content)
