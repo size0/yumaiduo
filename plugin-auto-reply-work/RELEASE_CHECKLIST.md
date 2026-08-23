@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产已部署源码候选 `3d8fecaed95e82478a1097f22af95112c9ec142d`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime仍为 `wanda-agent-runtime-v31-release-fence-cleanup`。本次修复将单座类型试价的 `totalPayPrice` 误除以买家张数的问题；生产自动回复、报价和改价继续保持紧急关闭，待人工批准后再恢复。
+> 当前生产已部署源码候选 `c71975f3b94b9ba8f8db62d7cbe5b3a9eb5d8212`：V3契约为 `wanda-v3-v11-pricing-account-evidence`，插件Runtime仍为 `wanda-agent-runtime-v31-release-fence-cleanup`。紧急关闭自动化时现在仍运行只读Shadow学习，并能通过生产 `remoteMessageId` 将已完成Shadow结果与人工卖家回复配对；生产自动回复、报价和改价继续关闭。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 当前源码插件测试 495 项、V3 后端测试 205 项通过；新增苏州同类型双座回归，证明只锁一个代表座位且58.46元单座成本不再除以2
+- [x] 当前源码插件测试 497 项、V3 后端测试 205 项通过；新增关闭自动化仍调度Shadow、生产消息ID配对、等待完整结果及未审核对比刷新测试
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -39,9 +39,9 @@
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `3d8feca` 使用干净依赖执行插件495项测试和V3 205项测试；生产release再次执行插件495项测试通过
+- [x] 已在源码提交 `c71975f` 使用干净依赖执行插件497项测试和V3 205项测试；生产release再次执行插件497项测试通过
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `3d8fecaed95e82478a1097f22af95112c9ec142d` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/3d8fecaed95e`
+- [x] 已为源码提交 `c71975f3b94b9ba8f8db62d7cbe5b3a9eb5d8212` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/c71975f3b94b`
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖V10/V22历史release
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [x] 已对牡丹江万达广场店17:15场次执行只读W+座位Smoke，8排返回6个实时可选座位；未创建临时订单
@@ -53,13 +53,13 @@
 
 ## 当前生产候选包证据
 
-- V3 SHA-256：`64f9e345da8cdd1214536585de9b0739a79e9baa8e3d87867bb51d1d46ee01ca`
-- 插件 SHA-256：`4d11b571097f337f593d4e6f68b64c11247ae62077e8972de1d2c852e3286412`
-- Manifest SHA-256：`c2f69d0e3f7245a55140cf6dd742f6dc52a1e1196d56ce3e46a359b0d08742db`
+- V3 SHA-256：`ea221ad67b956eb57861053e12ae20682744cb449a5d5e422c30daceeedb2ba5`
+- 插件 SHA-256：`0b95565cbc322d83388792970e601c5142c85d354431c7c5c57fad3b842b0e8a`
+- Manifest SHA-256：`d63123185351ee7b9c16e5705ace54ef426296cf4968eb126a03cea3dc5cffbe`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/3d8fecaed95e`
-- 生产V3：`/opt/wanda-v3-backend/releases/v11-single-seat-offer-3d8fecaed95e`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v31-single-seat-offer-3d8fecaed95e`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/c71975f3b94b`
+- 生产V3：`/opt/wanda-v3-backend/releases/v11-human-learning-c71975f3b94b`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v31-human-learning-c71975f3b94b`
 
 ## 提交前由门户确认
 
