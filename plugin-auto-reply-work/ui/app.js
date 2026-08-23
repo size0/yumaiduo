@@ -73,6 +73,7 @@ import { createPluginSdk } from './sdk.js';
     reply_templates: {
       first_contact_notice: '您好，请发送已标记购买位置的完整选座页截图\n并说明需要几张\n\n收到报价后请回复“确认”\n再提交订单并保持待付款\n收到“价格已修改”后再付款',
       quote_confirmation_instruction: '接受本次报价请回复“确认”。',
+      quote_processing_notice: '收到，正在按当前信息核对万达实时场次和优惠，请稍等。',
       quote_replaced_by_official_selection: '您这次发送的是官方已选座截图，已按具体座位重新核价；上一版未选座试价已失效。',
       quote_exact: '※{城市标记}| {影院}\n电影：{影片}\n影厅：{影厅}\n场次：{日期} {场次}\n座位：{座位}\n\n{单价}元/张，{张数}张合计{合计}元。',
       quote_area: '※{城市标记}| {影院}\n电影：{影片}\n影厅：{影厅}\n场次：{日期} {场次}\n\n{单价}元/张，{张数}张合计{合计}元。\n出票时按您原图圈选的位置操作，无需提供具体座位号；若该位置届时不可选，会先联系您确认，不会擅自换座。',
@@ -89,6 +90,7 @@ import { createPluginSdk } from './sdk.js';
       cinema_catalog_not_unique: '请问这是哪个城市的万达影城？已识别的影片、日期、场次和座位信息会保留，无需重发截图。',
       showtime_not_unique: '截图信息无法唯一匹配场次，请补充影院和开场时间。',
       showtime_not_found: '当前万达官方场次中未找到该日期和开场时间，请刷新万达选座页后发送最新截图。',
+      official_selection_unverifiable: '截图中的官方已选座当前并非全部实时可选，请在购票平台重新选择当前可选座位后发送最新完整截图；请勿付款。',
       image_not_seat_map: '截图价格仅供参考，实际价格以万达实时核价结果为准。',
       order_paid: '订单已付款，后续由人工出票或售后处理，不会重新核价。',
       need_image: '请发送万达电影票座位图截图，并补充需要的张数。',
@@ -112,8 +114,8 @@ import { createPluginSdk } from './sdk.js';
 
   const REPLY_TEMPLATE_GROUPS = Object.freeze([
     { id: 'guide', title: '接待与信息补充', description: '首次接待、补图、补城市和识别失败时使用', keys: ['first_contact_notice', 'cinema_catalog_not_unique', 'showtime_not_unique', 'showtime_not_found', 'image_not_seat_map', 'need_image', 'text_quote_missing_fields', 'non_wanda_cinema', 'recognition_failed'] },
-    { id: 'quote', title: '报价与座位沟通', description: '权威核价完成后，根据座位范围和买家反馈选择', keys: ['quote_confirmation_instruction', 'quote_replaced_by_official_selection', 'quote_exact', 'quote_area', 'quote_need_count', 'quote_count_completed', 'quote_buyer_app_better_price', 'available_wplus_seats', 'manual_delivery_preference', 'wplus_area_unavailable', 'wplus_seats_unavailable', 'wplus_price_unavailable', 'quote_price_conflict', 'insufficient_available_seats'] },
-    { id: 'safety', title: '核验失败与安全停止', description: '账号、实时试价、释放复核或网关异常时停止自动链路', keys: ['ticket_count_conflict', 'wplus_account_unavailable', 'temporary_lock_failed', 'temporary_lock_release_unverified', 'wanda_gateway_unavailable', 'quote_verification_failed'] },
+    { id: 'quote', title: '报价与座位沟通', description: '权威核价完成后，根据座位范围和买家反馈选择', keys: ['quote_confirmation_instruction', 'quote_processing_notice', 'quote_replaced_by_official_selection', 'quote_exact', 'quote_area', 'quote_need_count', 'quote_count_completed', 'quote_buyer_app_better_price', 'available_wplus_seats', 'manual_delivery_preference', 'wplus_area_unavailable', 'wplus_seats_unavailable', 'wplus_price_unavailable', 'quote_price_conflict', 'insufficient_available_seats'] },
+    { id: 'safety', title: '核验失败与安全停止', description: '账号、实时试价、释放复核或网关异常时停止自动链路', keys: ['ticket_count_conflict', 'wplus_account_unavailable', 'temporary_lock_failed', 'temporary_lock_release_unverified', 'wanda_gateway_unavailable', 'quote_verification_failed', 'official_selection_unverifiable'] },
     { id: 'order', title: '下单、付款与人工处理', description: '报价确认后到付款核验及人工出票阶段使用', keys: ['order_paid', 'order_submit_before_payment', 'order_price_change_failed', 'price_change_authorization_failed', 'paid_amount_mismatch', 'paid_quote_unconfirmed', 'paid_manual_delivery'] },
   ]);
 
@@ -733,13 +735,13 @@ import { createPluginSdk } from './sdk.js';
   function renderReplyTemplateFields(templates) {
     const labels = {
       first_contact_notice: '首次进线流程说明', quote_confirmation_instruction: '完整报价后的确认指令',
-      quote_replaced_by_official_selection: '官方选座替换未选座试价',
+      quote_processing_notice: '实时核价进行中提示', quote_replaced_by_official_selection: '官方选座替换未选座试价',
       quote_exact: '官方已选座报价', quote_area: '标记位置/未选座完整报价', quote_need_count: '标记位置/未选座待补张数',
       quote_count_completed: '买家补充张数后的下单提示', quote_buyer_app_better_price: '买家APP价格更合适', available_wplus_seats: '指定排可选W+座位',
       manual_delivery_preference: '按原图圈选位置出票', wplus_area_unavailable: 'W+ 区域无法核验',
       wplus_seats_unavailable: 'W+ 可用座位为 0', wplus_price_unavailable: 'W+ 会员优惠不可用',
       quote_price_conflict: '会员优惠与原价冲突', insufficient_available_seats: '可用座位不足', cinema_catalog_not_unique: '官方影院库无法唯一匹配',
-      showtime_not_unique: '场次无法唯一匹配', showtime_not_found: '官方场次未找到', image_not_seat_map: '非座位图', order_paid: '订单已付款',
+      showtime_not_unique: '场次无法唯一匹配', showtime_not_found: '官方场次未找到', official_selection_unverifiable: '官方已选座当前不可用', image_not_seat_map: '非座位图', order_paid: '订单已付款',
       need_image: '缺少座位图', text_quote_missing_fields: '文字询价缺少购票信息', non_wanda_cinema: '非万达影院',
       ticket_count_conflict: '张数冲突', wplus_account_unavailable: 'W+ 账号不可用',
       temporary_lock_failed: '临时试价失败', temporary_lock_release_unverified: '临时试价释放未确认',
@@ -815,10 +817,17 @@ import { createPluginSdk } from './sdk.js';
     });
   }
 
+  function replyTemplateKeys() {
+    const backendTemplates = state.settings?.reply_templates;
+    return backendTemplates && typeof backendTemplates === 'object' && !Array.isArray(backendTemplates)
+      ? Object.keys(backendTemplates)
+      : Object.keys(defaultSettings.reply_templates);
+  }
+
   function currentReplyTemplateDrafts() {
-    return Object.fromEntries(Object.keys(defaultSettings.reply_templates).map((key) => {
+    return Object.fromEntries(replyTemplateKeys().map((key) => {
       const input = document.getElementById(`reply-template-${key}`);
-      return [key, input ? input.value : (state.settings.reply_templates?.[key] ?? defaultSettings.reply_templates[key])];
+      return [key, input ? input.value : (state.settings.reply_templates?.[key] ?? defaultSettings.reply_templates[key] ?? '')];
     }));
   }
 
@@ -879,7 +888,7 @@ import { createPluginSdk } from './sdk.js';
 
   async function removeReplyTemplateImage(key, button) {
     button.disabled = true;
-    const images = Object.fromEntries(Object.keys(defaultSettings.reply_templates).map((templateKey) => [
+    const images = Object.fromEntries(replyTemplateKeys().map((templateKey) => [
       templateKey,
       templateKey === key ? '' : String(state.settings.reply_template_images?.[templateKey] ?? ''),
     ]));
@@ -906,7 +915,7 @@ import { createPluginSdk } from './sdk.js';
       notify('请补全为空的回复文案后再保存。', 'error');
       return;
     }
-    const reply_templates = Object.fromEntries(Object.keys(defaultSettings.reply_templates).map((key) => [key, document.getElementById(`reply-template-${key}`).value.trim()]));
+    const reply_templates = Object.fromEntries(Object.entries(currentReplyTemplateDrafts()).map(([key, value]) => [key, String(value).trim()]));
     await saveSettings({ reply_templates }, elements['reply-templates-form'], elements['reply-templates-save-status']);
   }
 

@@ -93,6 +93,10 @@ test('dashboard consolidates settings and diagnostics without removing their con
   assert.match(script, /TAB_ALIASES/u);
   assert.match(script, /knowledgeBase:\s*'api\/knowledge-base'/u);
   assert.match(script, /wplus_seats_unavailable/u);
+  assert.match(script, /quote_processing_notice/u);
+  assert.match(script, /official_selection_unverifiable/u);
+  assert.match(script, /function replyTemplateKeys/u);
+  assert.match(script, /Object\.entries\(currentReplyTemplateDrafts\(\)\)/u);
   assert.match(script, /quote_count_completed/u);
   assert.match(script, /等待系统改价/u);
   assert.match(script, /非万达影院/u);
