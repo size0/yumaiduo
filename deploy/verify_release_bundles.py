@@ -12,7 +12,7 @@ from app.release_bundle import verify_component_archive
 
 EXPECTED_CONTRACTS = {
     "v3": "wanda-v3-v11-pricing-account-evidence",
-    "plugin": "wanda-agent-runtime-v30-semantic-context-city-gate",
+    "plugin": "wanda-agent-runtime-v31-release-fence-cleanup",
 }
 
 

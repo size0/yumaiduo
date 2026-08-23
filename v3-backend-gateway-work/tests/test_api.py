@@ -87,7 +87,8 @@ def test_structured_seat_failures_have_precise_defaults_without_false_manual_han
     assert "请勿付款" in unavailable
     assert "补充完整影院名" not in unavailable
     assert "已转人工" not in unavailable
-    assert "释放状态暂未确认" in release
+    assert "尚未在万达实时座位图中确认恢复" in release
+    assert "不代表该场会员座都不可售" in release
     assert "请勿付款" in release
     assert "已转人工" not in release
 
@@ -360,13 +361,18 @@ def test_plugin_bridge_runtime_merges_new_reply_templates_into_existing_settings
     assert set(templates) == set(DEFAULT_REPLY_TEMPLATES)
 
 
-def test_plugin_bridge_migrates_legacy_release_failure_false_handoff_copy(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy_copy", [
+    "临时试价座位未确认释放，已停止自动报价并转人工处理。",
+    "临时试价座位的释放状态暂未确认，已停止自动报价；请勿付款，并稍后刷新选座页后重试。",
+])
+def test_plugin_bridge_migrates_legacy_release_failure_copy(tmp_path: Path, legacy_copy: str) -> None:
     path = tmp_path / "plugin_bridge_settings.json"
     path.write_text(json.dumps({"runtime": {"reply_templates": {
-        "temporary_lock_release_unverified": "临时试价座位未确认释放，已停止自动报价并转人工处理。",
+        "temporary_lock_release_unverified": legacy_copy,
     }}}), encoding="utf-8")
     template = PluginBridgeStore(path).runtime()["reply_templates"]["temporary_lock_release_unverified"]
     assert template == DEFAULT_REPLY_TEMPLATES["temporary_lock_release_unverified"]
+    assert "不代表该场会员座都不可售" in template
     assert "转人工" not in template
 
 

@@ -87,6 +87,22 @@ class FakeClock:
         await asyncio.sleep(0)
 
 
+class BlockingBackgroundClock(FakeClock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.background_started = asyncio.Event()
+        self.allow_background = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds >= 15.0:
+            self.sleeps.append(seconds)
+            self.background_started.set()
+            await self.allow_background.wait()
+            self.advance(seconds)
+            return
+        await super().sleep(seconds)
+
+
 class FakeLogger:
     def __init__(self) -> None:
         self.records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
@@ -353,24 +369,73 @@ def test_delayed_release_recheck_window_is_strictly_bounded() -> None:
         )
 
 
-def test_same_account_cannot_create_two_temporary_orders_concurrently() -> None:
+def test_same_showtime_temporary_orders_are_serialized_even_with_multiple_accounts() -> None:
     contract = _contract()
 
     async def scenario() -> None:
-        client = FakeOfficialClient("only", block_create=True)
-        gateway, _clock, _logger, factory = build_gateway(contract, [account("only")], {"only": client})
+        first_client = FakeOfficialClient("first", block_create=True)
+        second_client = FakeOfficialClient("second")
+        gateway, _clock, _logger, factory = build_gateway(
+            contract,
+            [account("first"), account("second")],
+            {"first": first_client, "second": second_client},
+        )
         first = asyncio.create_task(probe(gateway))
-        await client.create_started.wait()
+        await first_client.create_started.wait()
+        second = asyncio.create_task(probe(gateway))
+        await asyncio.sleep(0)
 
-        with pytest.raises(contract.DirectGatewayError) as raised:
+        assert [event for event in first_client.events if event[1] == "create_order"] == [("first", "create_order")]
+        assert second_client.events == []
+
+        first_client.allow_create.set()
+        first_result, second_result = await asyncio.gather(first, second)
+        assert first_result["release_verified"] is True
+        assert second_result["release_verified"] is True
+        assert factory.created_for == ["first", "second"]
+
+    asyncio.run(scenario())
+
+
+def test_pending_release_blocks_same_showtime_retry_before_switching_accounts() -> None:
+    contract = _contract()
+
+    async def scenario() -> None:
+        clock = BlockingBackgroundClock()
+        first_client = FakeOfficialClient(
+            "first", cancel_succeeds=True,
+            release_snapshots=[False, False, False, True],
+        )
+        second_client = FakeOfficialClient("second")
+        gateway, _unused_clock, _logger, factory = build_gateway(
+            contract,
+            [account("first"), account("second")],
+            {"first": first_client, "second": second_client},
+            clock=clock,
+            lease_ttl_seconds=180.0,
+        )
+
+        with pytest.raises(contract.DirectGatewayError) as first_failure:
             await probe(gateway)
-        assert_error_code(raised.value, "account_lease_unavailable")
-        assert [event for event in client.events if event[1] == "create_order"] == [("only", "create_order")]
+        assert_error_code(first_failure.value, "temporary_lock_release_unverified")
+        await clock.background_started.wait()
 
-        client.allow_create.set()
-        result = await first
+        retry_with_other_seat = {
+            **REQUEST,
+            "seat_ids": ["other-seat-in-same-showtime"],
+            "partition": "other-area-other-seat-in-same-showtime",
+        }
+        with pytest.raises(contract.DirectGatewayError) as retry_failure:
+            await gateway.probe_activity_offers(retry_with_other_seat)
+        assert_error_code(retry_failure.value, "temporary_lock_release_unverified")
+        assert factory.created_for == ["first"]
+        assert second_client.events == []
+
+        clock.allow_background.set()
+        await gateway.wait_for_background_rechecks()
+        result = await probe(gateway)
         assert result["release_verified"] is True
-        assert factory.created_for == ["only"]
+        assert factory.created_for == ["first", "second"]
 
     asyncio.run(scenario())
 
@@ -555,9 +620,9 @@ def test_release_failure_stays_failed_while_background_recheck_confirms_late_res
             await probe(gateway)
         assert_error_code(raised.value, "temporary_lock_release_unverified")
 
-        with pytest.raises(contract.DirectGatewayError) as leased:
+        with pytest.raises(contract.DirectGatewayError) as pending_release:
             await probe(gateway)
-        assert_error_code(leased.value, "account_lease_unavailable")
+        assert_error_code(pending_release.value, "temporary_lock_release_unverified")
 
         await gateway.wait_for_background_rechecks()
         assert clock.sleeps == [2.0, 5.0, 15.0]

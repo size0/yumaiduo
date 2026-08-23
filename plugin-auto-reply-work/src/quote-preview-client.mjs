@@ -923,7 +923,7 @@ function quoteFailureReplyText(code, recognition = null) {
     return '暂未唯一匹配到官方实时场次，请确认影片名称是否有错字，或补发场次顶部截图。';
   }
   if (code === 'official_selection_unverifiable') return '截图中的官方已选座当前并非全部实时可选，请在购票平台重新选择当前可选座位后发送最新完整截图；请先不要付款。';
-  if (code === 'temporary_lock_release_unverified') return '临时试价座位的释放状态暂未确认，已停止自动报价；请勿付款，并稍后刷新选座页后重试。';
+  if (code === 'temporary_lock_release_unverified') return '本次临时试价已尝试取消，但试价座位尚未在万达实时座位图中确认恢复；这不代表该场会员座都不可售。为避免重复占座，本次已停止自动报价，请勿付款，稍后重新发送最新完整选座页。';
   if (code === 'wplus_area_unavailable') return '截图位置无法唯一对应当前 W+ 区域，已记录为人工出票位置偏好，请人工确认后处理；不锁座，余票以出票时为准。';
   if (code === 'wplus_price_unavailable') return '该场暂未查到可用的 W+ 会员优惠，请确认是否更换场次或座区。';
   if (code === 'quote_price_conflict') return '当前场次会员优惠不足，按当前规则暂无法形成安全报价，请人工确认。';

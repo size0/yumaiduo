@@ -13,7 +13,7 @@ sys.path.insert(0, str(REPOSITORY / "v3-backend-gateway-work"))
 from app.release_bundle import build_component_archive, require_release_files
 
 EXPECTED_V3_CONTRACT = "wanda-v3-v11-pricing-account-evidence"
-EXPECTED_AGENT_RUNTIME = "wanda-agent-runtime-v30-semantic-context-city-gate"
+EXPECTED_AGENT_RUNTIME = "wanda-agent-runtime-v31-release-fence-cleanup"
 
 
 def _git(*arguments: str) -> str:

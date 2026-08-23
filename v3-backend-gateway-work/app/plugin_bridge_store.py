@@ -37,7 +37,7 @@ DEFAULT_REPLY_TEMPLATES: dict[str, str] = {
     "ticket_count_conflict": "文字张数与官方已选座张数不一致，请人工确认。",
     "wplus_account_unavailable": "W+ 核价账号暂不可用，请稍后人工确认。",
     "temporary_lock_failed": "实时优惠核验暂未完成，请稍后人工确认。",
-    "temporary_lock_release_unverified": "临时试价座位的释放状态暂未确认，已停止自动报价；请勿付款，并稍后刷新选座页后重试。",
+    "temporary_lock_release_unverified": "本次临时试价已尝试取消，但试价座位尚未在万达实时座位图中确认恢复；这不代表该场会员座都不可售。为避免重复占座，本次已停止自动报价，请勿付款，稍后重新发送最新完整选座页。",
     "wanda_gateway_unavailable": "万达实时核价暂不可用，请稍后重试。",
     "quote_verification_failed": "暂未核到该场实时价格，请补充完整影院名、影片和开场时间。",
     "recognition_failed": "选座截图暂未识别成功，请重新发送清晰完整的选座图，并补充影院、影片、场次和需要张数。",
@@ -92,11 +92,19 @@ def _merged_runtime(value: Any) -> dict[str, Any]:
         "quote_need_count": "※{城市标记}| {影院}\n电影：{影片}\n影厅：{影厅}\n场次：{日期} {场次}\n\n实时单价{单价}元/张，请告诉我需要几张。\n图中标记仅作座位偏好，不代表对应座位可售；最终座位以出票时万达实时可用为准。",
     }
     legacy_safety_copies = {
-        "temporary_lock_release_unverified": "临时试价座位未确认释放，已停止自动报价并转人工处理。",
+        "temporary_lock_release_unverified": {
+            "临时试价座位未确认释放，已停止自动报价并转人工处理。",
+            "临时试价座位的释放状态暂未确认，已停止自动报价；请勿付款，并稍后刷新选座页后重试。",
+        },
     }
     for copies in (legacy_circle_copies, legacy_safety_copies):
         for key, legacy_copy in copies.items():
-            if runtime["reply_templates"].get(key) == legacy_copy:
+            matches_legacy = (
+                runtime["reply_templates"].get(key) in legacy_copy
+                if isinstance(legacy_copy, set)
+                else runtime["reply_templates"].get(key) == legacy_copy
+            )
+            if matches_legacy:
                 runtime["reply_templates"][key] = DEFAULT_REPLY_TEMPLATES[key]
     images = stored.get("reply_template_images")
     runtime["reply_template_images"] = {

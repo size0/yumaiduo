@@ -969,7 +969,7 @@ test('structured seat and release failures override a generic backend reply with
     },
     {
       code: 'temporary_lock_release_unverified',
-      expected: /释放状态暂未确认.*请勿付款.*稍后.*重试/u,
+      expected: /尚未在万达实时座位图中确认恢复.*不代表该场会员座都不可售.*请勿付款/u,
       rejected: /补充.*影院名|已转人工/u,
     },
   ]) {

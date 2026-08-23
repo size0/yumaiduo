@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Protocol
@@ -85,6 +87,38 @@ class AccountLeaseRegistry:
                 return False
             del self._leases[lease.account_id]
             return True
+
+
+class _AsyncKeyLockRegistry:
+    """Bounded keyed locks that serialize probes without retaining old showtimes."""
+
+    def __init__(self) -> None:
+        self._entries: dict[str, tuple[asyncio.Lock, int]] = {}
+        self._guard = Lock()
+
+    @asynccontextmanager
+    async def hold(self, key: str) -> AsyncIterator[None]:
+        normalized = str(key).strip()
+        if not normalized:
+            raise ValueError("lock key is required")
+        with self._guard:
+            lock, users = self._entries.get(normalized, (asyncio.Lock(), 0))
+            self._entries[normalized] = (lock, users + 1)
+        acquired = False
+        try:
+            await lock.acquire()
+            acquired = True
+            yield
+        finally:
+            if acquired:
+                lock.release()
+            with self._guard:
+                current = self._entries.get(normalized)
+                if current is not None and current[0] is lock:
+                    if current[1] <= 1:
+                        self._entries.pop(normalized, None)
+                    else:
+                        self._entries[normalized] = (lock, current[1] - 1)
 
 
 class _AccountSource(Protocol):
@@ -195,6 +229,8 @@ class WandaDirectGateway:
         self._release_recheck_delays = delays
         self._delayed_release_recheck_delays = delayed_delays
         self._background_release_rechecks: set[asyncio.Task[None]] = set()
+        self._pending_release_showtimes: set[str] = set()
+        self._showtime_locks = _AsyncKeyLockRegistry()
         self._max_account_attempts = max_account_attempts
         self._selection_lock = Lock()
         self._selection_cursor = 0
@@ -207,6 +243,12 @@ class WandaDirectGateway:
 
     async def probe_activity_offers(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         normalized = self._validate_request(request)
+        async with self._showtime_locks.hold(normalized["showtime_id"]):
+            return await self._probe_activity_offers_serialized(normalized)
+
+    async def _probe_activity_offers_serialized(self, normalized: Mapping[str, Any]) -> Mapping[str, Any]:
+        if normalized["showtime_id"] in self._pending_release_showtimes:
+            raise DirectGatewayError("temporary_lock_release_unverified")
         accounts = [item for item in await self._account_source.list_accounts() if isinstance(item, Mapping) and _eligible_account(item)]
         if not accounts:
             raise DirectGatewayError("wplus_account_unavailable")
@@ -301,6 +343,7 @@ class WandaDirectGateway:
     def _schedule_delayed_release_recheck(
         self, client: Any, lease: AccountLease, showtime_id: str, expected_seat_ids: set[str]
     ) -> None:
+        self._pending_release_showtimes.add(showtime_id)
         task = asyncio.create_task(
             self._delayed_release_recheck(client, lease, showtime_id, expected_seat_ids)
         )
@@ -308,7 +351,11 @@ class WandaDirectGateway:
         task.add_done_callback(self._background_release_rechecks.discard)
 
     async def _delayed_release_recheck(
-        self, client: Any, lease: AccountLease, showtime_id: str, expected_seat_ids: set[str]
+        self,
+        client: Any,
+        lease: AccountLease,
+        showtime_id: str,
+        expected_seat_ids: set[str],
     ) -> None:
         outcome = "release_still_unverified_after_background_recheck"
         attempts = 0
@@ -331,6 +378,7 @@ class WandaDirectGateway:
                     break
             self._log_delayed_release_outcome(outcome, attempts)
         finally:
+            self._pending_release_showtimes.discard(showtime_id)
             self._leases.release(lease)
 
     def _log_delayed_release_outcome(self, outcome: str, attempts: int) -> None:
@@ -409,4 +457,5 @@ def build_wanda_direct_gateway_from_env() -> WandaDirectGateway | None:
         client_factory=lambda account: WandaOfficialApiClient(account),
         lease_registry=AccountLeaseRegistry(ttl_seconds=180.0),
         pricing_ref_key=pricing_ref_key,
+        logger=logging.getLogger("wanda.direct_gateway"),
     )
