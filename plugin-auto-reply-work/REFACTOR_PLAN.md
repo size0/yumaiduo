@@ -92,6 +92,8 @@ Completed: storage, Agent runtime, lifecycle, operator presenters, and operator 
 
 Completed: `wanda_quote.py` no longer owns pure realtime-seat parsing, official-seat selection, area-probe selection, offer uniqueness, quote-boundary arithmetic, safe failure diagnostics, official showtime matching or the legacy local gateway adapter. These live in `wanda_quote_domain.py`, `wanda_quote_diagnostics.py`, `wanda_showtime_matcher.py` and `wanda_quote_gateway.py`, with compatibility imports preserved for existing callers. The main service now retains only read-only seat lookup, temporary-offer orchestration and quote response assembly; direct Wanda temporary-order safety remains unchanged.
 
+Completed: the V3 FastAPI composition root is reduced from roughly 950 lines to roughly 207 lines. Plugin Bridge administration, quote previews, Agent/reply endpoints, deterministic reply rendering and shared preview safety helpers now live in dedicated route/support modules. Existing paths, response models, authentication checks, fail-closed Active/Canary gates and compatibility imports remain unchanged.
+
 ## Parallel-work rules
 
 The following hotspots have one writer at a time:

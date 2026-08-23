@@ -52,7 +52,10 @@ V3 服务（FastAPI）
 
 ## 3. V3 服务职责
 
-- `app/main.py`：FastAPI组合根、鉴权路由和依赖装配。
+- `app/main.py`：FastAPI组合根、生命周期和依赖装配。
+- `app/routes/plugin_bridge.py`：插件Bridge鉴权、运行时设置、Canary审批、报价策略和知识库路由。
+- `app/routes/quote_preview.py`、`app/routes/agent_reply.py`：报价预览、Agent规划与回复草稿路由。
+- `app/quote_reply.py`、`app/quote_preview_support.py`：确定性回复渲染与报价预览共享安全辅助逻辑。
 - `app/schemas.py`：所有内部API与Agent工具的严格Schema。
 - `app/conversation_agent.py`：自然语言报价事实抽取和受限Agent规划。
 - `app/vision.py`：图片视觉Schema抽取与归一化。
@@ -112,7 +115,7 @@ Webhook验签并持久入队
 1. 拆分 `workflow.mjs`：只保留路由与事务顺序，图片、报价跟进、订单和首次回复继续下沉到现有 orchestrator。
 2. `quote-preview-client.mjs` 已从935行收敛至约365行，仅保留受控HTTP、识图并发与缓存协调；文字事实、识图融合、失败映射和回复展示已分别下沉到 `quote/quote-text-facts.mjs`、`quote/quote-recognition-fusion.mjs`、`quote/quote-failure-mapper.mjs` 和 `quote/quote-response-presenter.mjs`。
 3. `wanda_quote.py` 已从1124行收敛至约425行：实时座位、选座、W+活动和价格边界位于 `wanda_quote_domain.py`；脱敏失败结构位于 `wanda_quote_diagnostics.py`；旧本地出票网关传输适配位于 `wanda_quote_gateway.py`；城市硬边界、官方联合场次验证、15秒只读成功缓存和并发合并位于 `wanda_showtime_matcher.py`。主服务只保留只读座位查询、临时活动探测和报价响应编排。
-4. 拆分 `main.py`：路由模块化，组合根不再包含具体端点实现。
+4. `main.py` 已从约950行收敛至约207行：插件Bridge、报价预览、Agent与回复端点已模块化；组合根只保留依赖注入、生命周期、基础设置/存储/识图端点和路由装配。
 
 ### P2：存储与隐私
 
