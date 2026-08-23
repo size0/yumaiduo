@@ -8,6 +8,9 @@ const execFileAsync = promisify(execFile);
 const appPath = fileURLToPath(new URL('../ui/app.js', import.meta.url));
 const htmlPath = fileURLToPath(new URL('../ui/index.html', import.meta.url));
 const stylesPath = fileURLToPath(new URL('../ui/styles.css', import.meta.url));
+const workbenchHtmlPath = fileURLToPath(new URL('../ui/workbench.html', import.meta.url));
+const workbenchScriptPath = fileURLToPath(new URL('../ui/workbench.js', import.meta.url));
+const workbenchStylesPath = fileURLToPath(new URL('../ui/workbench.css', import.meta.url));
 
 test('dashboard consolidates settings and diagnostics without removing their controls', async () => {
   const html = await (await import('node:fs/promises')).readFile(htmlPath, 'utf8');
@@ -134,4 +137,25 @@ test('quote stages have distinct visual states', async () => {
 test('dashboard browser module has valid JavaScript syntax', async () => {
   const result = await execFileAsync(process.execPath, ['--check', appPath]);
   assert.equal(result.stderr, '');
+});
+
+test('isolated operations workbench is action-first and keeps settings outside the primary workflow', async () => {
+  const [html, script, styles] = await Promise.all([
+    (await import('node:fs/promises')).readFile(workbenchHtmlPath, 'utf8'),
+    (await import('node:fs/promises')).readFile(workbenchScriptPath, 'utf8'),
+    (await import('node:fs/promises')).readFile(workbenchStylesPath, 'utf8'),
+  ]);
+  assert.match(html, /运营工作台/u);
+  assert.match(html, /id="automation-rail"/u);
+  assert.match(html, /id="action-queue"/u);
+  assert.match(html, /id="sample-cards"/u);
+  assert.match(html, /待人工处理/u);
+  assert.match(html, /进入完整设置/u);
+  assert.match(script, /agent-canary-readiness/u);
+  assert.match(script, /agent-offline-evaluation/u);
+  assert.match(script, /agent-human-comparisons/u);
+  assert.match(script, /buildActionQueue/u);
+  assert.doesNotMatch(html, /API 密钥|提示词|报价调整值/u);
+  assert.match(styles, /@media\s*\(max-width:\s*720px\)/u);
+  assert.equal((await execFileAsync(process.execPath, ['--check', workbenchScriptPath])).stderr, '');
 });

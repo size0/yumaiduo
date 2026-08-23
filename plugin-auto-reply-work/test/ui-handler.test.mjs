@@ -85,6 +85,16 @@ test('local UI preview serves assets and tenant-scoped API without exposing a se
   assert.match(await slashScopedScript.text(), /createPluginSdk/u);
   const slashScopedSdk = await fetch(`http://127.0.0.1:${port}/ui/ui/sdk.js`);
   assert.equal(slashScopedSdk.status, 200);
+  const workbench = await fetch(`http://127.0.0.1:${port}/ui/workbench`);
+  assert.equal(workbench.status, 200);
+  assert.match(await workbench.text(), /运营工作台/u);
+  const nestedWorkbench = await fetch(`http://127.0.0.1:${port}/ui/ui/workbench`);
+  assert.equal(nestedWorkbench.status, 200);
+  for (const asset of ['workbench.js', 'workbench.css', 'workbench-model.js']) {
+    const response = await fetch(`http://127.0.0.1:${port}/ui/${asset}`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('cache-control'), /no-store/u);
+  }
   const retiredEvaluationAsset = await fetch(`http://127.0.0.1:${port}/ui/ui/evaluation-review.js`);
   assert.equal(retiredEvaluationAsset.status, 404);
 

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>万达电影票 · 运营工作台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./workbench.css">
+  <script type="module" src="./workbench.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workbench-main">跳到主要内容</a>
+  <div class="workbench-shell" id="workbench-shell" aria-busy="true">
+    <header class="workbench-header">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <div><p class="eyebrow">WANDA TICKET OPERATIONS</p><h1>运营工作台</h1><p>先处理风险与订单，再查看样本和设置。</p></div>
+      </div>
+      <div class="header-actions">
+        <span class="connection-pill" id="connection-status">正在连接</span>
+        <span class="last-updated" id="last-updated">尚未刷新</span>
+        <button class="button button-secondary" id="refresh-button" type="button">刷新</button>
+        <a class="button button-primary" href="#" data-settings-hash="automation">进入完整设置</a>
+      </div>
+    </header>
+
+    <div class="load-banner" id="loading-banner" role="status"><span class="spinner" aria-hidden="true"></span>正在汇总当前运行状态…</div>
+    <div class="error-banner" id="error-banner" role="alert" hidden><strong>工作台加载失败</strong><span id="error-message">请稍后重试。</span><button class="button button-secondary" id="retry-button" type="button">重试</button></div>
+
+    <main id="workbench-main">
+      <section class="hero-grid" aria-labelledby="today-title">
+        <article class="hero-card hero-card-primary">
+          <p class="eyebrow">TODAY</p>
+          <h2 id="today-title">今天先处理什么</h2>
+          <div class="hero-number"><strong id="urgent-count">0</strong><span>项需要优先关注</span></div>
+          <p id="urgent-summary">正在读取异常订单与人工任务。</p>
+        </article>
+        <article class="hero-card">
+          <div class="section-heading"><div><p class="eyebrow">RUNTIME SAFETY</p><h2>当前自动化边界</h2></div><span class="runtime-badge" id="runtime-mode">读取中</span></div>
+          <div class="automation-rail" id="automation-rail" aria-live="polite"></div>
+          <p class="card-note">红色关闭项表示安全策略，不等于服务故障。</p>
+        </article>
+      </section>
+
+      <section class="section-block" aria-labelledby="queue-title">
+        <div class="section-heading section-heading-actions">
+          <div><p class="eyebrow">ACTION QUEUE</p><h2 id="queue-title">待人工处理</h2><p>优先展示付款异常、履约异常和已打开的人工任务。</p></div>
+          <div class="segmented-filter" role="group" aria-label="筛选待处理事项">
+            <button class="filter-button is-active" type="button" data-filter="all">全部</button>
+            <button class="filter-button" type="button" data-filter="urgent">紧急</button>
+            <button class="filter-button" type="button" data-filter="orders">订单</button>
+            <button class="filter-button" type="button" data-filter="manual">人工任务</button>
+          </div>
+        </div>
+        <div class="queue-list" id="action-queue"><div class="empty-state">正在读取待处理事项。</div></div>
+      </section>
+
+      <section class="section-block" aria-labelledby="samples-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">SHADOW EVALUATION</p><h2 id="samples-title">当前Runtime样本</h2><p id="runtime-version">正在读取版本。</p></div>
+          <a class="text-link" href="#" data-settings-hash="ai-settings">打开评测详情 →</a>
+        </div>
+        <div class="sample-grid" id="sample-cards"></div>
+        <div class="blocker-panel">
+          <div><h3>尚未通过的门槛</h3><p>样本数量不等于可以上线，错误项必须归零。</p></div>
+          <div class="blocker-list" id="blocker-list"></div>
+        </div>
+      </section>
+
+      <section class="section-block compact-section" aria-labelledby="quick-links-title">
+        <div class="section-heading"><div><p class="eyebrow">QUICK ACCESS</p><h2 id="quick-links-title">快速入口</h2></div></div>
+        <div class="quick-link-grid">
+          <a href="#" data-settings-hash="order-management"><strong>订单管理</strong><span>查看付款、待发货和异常状态</span></a>
+          <a href="#" data-settings-hash="diagnostics"><strong>异常记录</strong><span>定位识图、核价、释放和改价失败</span></a>
+          <a href="#" data-settings-hash="ai-settings"><strong>Agent评测</strong><span>审核工具路径及人工回复对照</span></a>
+          <a href="#" data-settings-hash="reply-templates"><strong>回复文案</strong><span>维护确定性安全模板</span></a>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
