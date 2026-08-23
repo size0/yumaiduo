@@ -4,9 +4,11 @@ import path from 'node:path';
 import { BackendRequestError } from './backend-client.mjs';
 
 const ASSETS = new Map([
-  ['/ui', ['index.html', 'text/html; charset=utf-8']],
-  ['/ui/', ['index.html', 'text/html; charset=utf-8']],
-  ['/ui/index.html', ['index.html', 'text/html; charset=utf-8']],
+  ['/ui', ['workbench.html', 'text/html; charset=utf-8']],
+  ['/ui/', ['workbench.html', 'text/html; charset=utf-8']],
+  ['/ui/index.html', ['workbench.html', 'text/html; charset=utf-8']],
+  ['/ui/settings', ['index.html', 'text/html; charset=utf-8']],
+  ['/ui/settings.html', ['index.html', 'text/html; charset=utf-8']],
   ['/ui/workbench', ['workbench.html', 'text/html; charset=utf-8']],
   ['/ui/workbench/', ['workbench.html', 'text/html; charset=utf-8']],
   ['/ui/workbench.html', ['workbench.html', 'text/html; charset=utf-8']],

@@ -175,9 +175,10 @@ function sampleCard(definition) {
 }
 
 function settingsUrl(hash) {
-  let base = window.location.pathname.replace(/\/workbench(?:\.html)?\/?$/u, '/');
-  if (/\/ui\/ui\/$/u.test(base)) base = base.replace(/\/ui\/$/u, '/');
-  return `${base}#${encodeURIComponent(String(hash ?? ''))}`;
+  let base = window.location.pathname.replace(/\/ui\/workbench(?:\.html)?\/?$/u, '/ui');
+  base = base.replace(/\/workbench(?:\.html)?\/?$/u, '');
+  base = base.replace(/\/index\.html$/u, '').replace(/\/$/u, '');
+  return `${base}/settings#${encodeURIComponent(String(hash ?? ''))}`;
 }
 
 function kindLabel(kind) {

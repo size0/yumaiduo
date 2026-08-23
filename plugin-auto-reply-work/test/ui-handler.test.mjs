@@ -59,7 +59,13 @@ test('local UI preview serves assets and tenant-scoped API without exposing a se
   const page = await fetch(`http://127.0.0.1:${port}/ui`);
   assert.equal(page.status, 200);
   assert.doesNotMatch(page.headers.get('content-security-policy') ?? '', /frame-ancestors/u);
-  assert.doesNotMatch(await page.text(), /reference-run|待报价预览|闲鱼改价金额核验/u);
+  const pageHtml = await page.text();
+  assert.match(pageHtml, /人工回复，系统守住交易边界/u);
+  assert.doesNotMatch(pageHtml, /reference-run|待报价预览|闲鱼改价金额核验/u);
+
+  const settingsPage = await fetch(`http://127.0.0.1:${port}/ui/settings`);
+  assert.equal(settingsPage.status, 200);
+  assert.match(await settingsPage.text(), /返回工作台/u);
 
   const prefixedPage = await fetch(`http://127.0.0.1:${port}/__plugin__/ui`);
   assert.equal(prefixedPage.status, 200);

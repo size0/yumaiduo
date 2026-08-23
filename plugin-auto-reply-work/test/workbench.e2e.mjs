@@ -52,7 +52,7 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
     await new Promise((resolve) => server.close(resolve));
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  await page.goto(`http://127.0.0.1:${server.address().port}/ui/workbench`);
+  await page.goto(`http://127.0.0.1:${server.address().port}/ui`);
   t.diagnostic('workbench loaded');
   await page.getByText('本地预览').waitFor();
   t.diagnostic('workbench data rendered');
