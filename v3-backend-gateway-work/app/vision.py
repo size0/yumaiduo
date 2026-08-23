@@ -23,7 +23,7 @@ from .storage import IMAGE_SIGNATURES, MAX_IMAGE_BYTES
 from .vision_recognition_cache import VisionRecognitionCache
 
 
-PROMPT_VERSION = "wanda-vlm-recognition-v11-image-only-cache"
+PROMPT_VERSION = "wanda-vlm-recognition-v12-image-consistency"
 MAX_RECOGNITION_CONCURRENCY: Final = 8
 QUEUE_WAIT_SECONDS: Final = 2
 IMAGE_DOWNLOAD_TIMEOUT: Final = httpx.Timeout(15, connect=5)
@@ -156,12 +156,16 @@ def _normalize_recognition_payload(content: str) -> Recognition:
             estimated_count = int(circle.get("estimated_seat_count") or 0)
         except (TypeError, ValueError):
             estimated_count = 0
-        # A model-only `exists=true` is not sufficient evidence. Seat-map
-        # minimap viewports and built-in sold/W+ icons are frequently red and
-        # must not become a buyer hand-drawn preference. Require at least one
-        # bounded seat estimate; the estimate remains preference metadata and
-        # is never accepted as the requested ticket count.
-        if estimated_count <= 0:
+        row_hint = re.sub(r"\s+", "", str(circle.get("suspected_row_range") or ""))
+        rough_area = str(circle.get("rough_area") or "")
+        exact_single_row = re.fullmatch(r"(?:第)?\d{1,2}(?:排)?", row_hint) is not None
+        built_in_ui_area = any(token in rough_area for token in ("缩略", "导航", "预览", "上方", "图例"))
+        # A model-only `exists=true` is not sufficient evidence. Minimap
+        # viewports usually cover a row range or a top/navigation region. A
+        # marker tied to one exact row may still be retained as an artificial
+        # fulfillment preference when its enclosed seat count is unknown; that
+        # count remains unusable as the buyer's requested ticket quantity.
+        if estimated_count <= 0 and (not exact_single_row or built_in_ui_area):
             circle["exists"] = False
     return Recognition.model_validate(raw)
 

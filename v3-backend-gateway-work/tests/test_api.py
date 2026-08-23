@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v15-content-hash-vision-cache",
+        "runtime_contract": "wanda-v3-v16-vision-consistency-gates",
     }
 
 
@@ -598,7 +598,7 @@ def test_recognize_uses_configured_model_service(tmp_path: Path) -> None:
         json={"image_url": "https://example.com/ticket.png", "message_text": "我要两张"},
     )
     assert response.status_code == 200
-    assert response.json()["prompt_version"] == "wanda-vlm-recognition-v11-image-only-cache"
+    assert response.json()["prompt_version"] == "wanda-vlm-recognition-v12-image-consistency"
     assert response.json()["recognition"]["official_selection"]["selected_count"] == 2
 
 
@@ -775,6 +775,25 @@ def test_maoyan_minimap_viewport_is_not_accepted_as_a_hand_drawn_circle() -> Non
     }))
 
     assert recognition.hand_drawn_circle.exists is False
+    assert recognition.hand_drawn_circle.estimated_seat_count == 0
+
+
+def test_single_row_center_marker_is_kept_as_preference_even_when_count_is_unknown() -> None:
+    recognition = _normalize_recognition_payload(json.dumps({
+        "platform": "WANDA",
+        "image_type": "SEAT_MAP",
+        "hand_drawn_circle": {
+            "exists": True,
+            "color": "red",
+            "rough_area": "第8排中间区域",
+            "suspected_row_range": "8",
+            "suspected_zone_type": "未知",
+            "estimated_seat_count": 0,
+            "contains_wplus_icon": False,
+        },
+    }))
+
+    assert recognition.hand_drawn_circle.exists is True
     assert recognition.hand_drawn_circle.estimated_seat_count == 0
 
 
