@@ -186,7 +186,7 @@ def test_local_ticket_gateway_selects_only_available_phone_from_internal_wplus_a
             requests.append((url, kwargs))
             return Response()
 
-    monkeypatch.setattr("app.wanda_quote.httpx.AsyncClient", Client)
+    monkeypatch.setattr("app.wanda_quote_gateway.httpx.AsyncClient", Client)
     monkeypatch.setenv("WANDA_QUOTE_GATEWAY_KEY", "bridge-test-key")
     selected = asyncio.run(LocalTicketGateway("http://ticket-gateway").for_quote())
     assert selected.account_mobile() == "13800138000"

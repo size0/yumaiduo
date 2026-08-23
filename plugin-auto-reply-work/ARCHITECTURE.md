@@ -111,7 +111,7 @@ Webhook验签并持久入队
 
 1. 拆分 `workflow.mjs`：只保留路由与事务顺序，图片、报价跟进、订单和首次回复继续下沉到现有 orchestrator。
 2. `quote-preview-client.mjs` 已从935行收敛至约365行，仅保留受控HTTP、识图并发与缓存协调；文字事实、识图融合、失败映射和回复展示已分别下沉到 `quote/quote-text-facts.mjs`、`quote/quote-recognition-fusion.mjs`、`quote/quote-failure-mapper.mjs` 和 `quote/quote-response-presenter.mjs`。
-3. `wanda_quote.py` 已从1124行收敛至约770行：实时座位解析、官方选座逐座校验、区域试价候选、W+活动唯一性和价格边界已下沉到 `wanda_quote_domain.py`；失败码、脱敏场次/区域摘要和安全错误结构已下沉到 `wanda_quote_diagnostics.py`。下一步继续抽离官方场次匹配与旧网关适配器。
+3. `wanda_quote.py` 已从1124行收敛至约425行：实时座位、选座、W+活动和价格边界位于 `wanda_quote_domain.py`；脱敏失败结构位于 `wanda_quote_diagnostics.py`；旧本地出票网关传输适配位于 `wanda_quote_gateway.py`；城市硬边界、官方联合场次验证、15秒只读成功缓存和并发合并位于 `wanda_showtime_matcher.py`。主服务只保留只读座位查询、临时活动探测和报价响应编排。
 4. 拆分 `main.py`：路由模块化，组合根不再包含具体端点实现。
 
 ### P2：存储与隐私

@@ -90,7 +90,7 @@ Completed: storage, Agent runtime, lifecycle, operator presenters, and operator 
 
 ### Wave 7 — V3 quote-domain decomposition
 
-In progress: `wanda_quote.py` no longer owns pure realtime-seat parsing, official-seat selection, area-probe selection, offer uniqueness, quote-boundary arithmetic or safe failure diagnostics. These live in `wanda_quote_domain.py` and `wanda_quote_diagnostics.py`, with compatibility imports preserved for existing callers. The remaining V3 seam is official showtime matching and the legacy local gateway adapter; direct Wanda temporary-order safety remains unchanged.
+Completed: `wanda_quote.py` no longer owns pure realtime-seat parsing, official-seat selection, area-probe selection, offer uniqueness, quote-boundary arithmetic, safe failure diagnostics, official showtime matching or the legacy local gateway adapter. These live in `wanda_quote_domain.py`, `wanda_quote_diagnostics.py`, `wanda_showtime_matcher.py` and `wanda_quote_gateway.py`, with compatibility imports preserved for existing callers. The main service now retains only read-only seat lookup, temporary-offer orchestration and quote response assembly; direct Wanda temporary-order safety remains unchanged.
 
 ## Parallel-work rules
 
