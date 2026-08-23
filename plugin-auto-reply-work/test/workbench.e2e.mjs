@@ -13,6 +13,7 @@ const defaultBrowser = process.platform === 'win32'
 test('operator sees safety state, prioritized work and sample blockers on desktop and mobile', async (t) => {
   const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || defaultBrowser;
   await access(executablePath);
+  t.diagnostic('browser executable ready');
   const handler = createUiHandler({
     config: {
       projectRoot: fileURLToPath(new URL('..', import.meta.url)), coreUrl: 'https://core.example.com',
@@ -43,12 +44,18 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
   });
   const server = http.createServer((req, res) => void handler(req, res, new URL(req.url, 'http://localhost').pathname));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  t.diagnostic('fixture server ready');
   const browser = await chromium.launch({ executablePath, headless: true });
-  t.after(() => browser.close());
+  t.diagnostic('browser launched');
+  t.after(async () => {
+    await browser.close();
+    await new Promise((resolve) => server.close(resolve));
+  });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await page.goto(`http://127.0.0.1:${server.address().port}/ui/workbench`);
+  t.diagnostic('workbench loaded');
   await page.getByText('本地预览').waitFor();
+  t.diagnostic('workbench data rendered');
 
   assert.equal(await page.getByText('自动报价').locator('..').getByText('已关闭').count(), 1);
   assert.equal(await page.getByText('待付款改价').locator('..').getByText('已开启').count(), 1);
@@ -58,12 +65,14 @@ test('operator sees safety state, prioritized work and sample blockers on deskto
   assert.match(await page.locator('#blocker-list').textContent(), /工具选择正确率低于95%/u);
   assert.match(await page.locator('#action-queue').textContent(), /实付金额与确认金额不一致/u);
   assert.equal(await page.locator('.queue-item').count(), 2);
+  await page.screenshot({ path: '../.tmp/workbench-e2e-desktop.png', fullPage: true });
 
-  await page.getByRole('button', { name: '人工任务' }).click();
+  await page.getByRole('button', { name: '系统任务' }).click();
   assert.equal(await page.locator('.queue-item').count(), 1);
   assert.match(await page.locator('#action-queue').textContent(), /人工核价/u);
 
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: '../.tmp/workbench-e2e.png', fullPage: true });
+  t.diagnostic('responsive screenshot captured');
 });
