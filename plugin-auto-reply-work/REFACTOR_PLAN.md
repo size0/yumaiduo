@@ -33,7 +33,7 @@ event -> conversation facts -> Agent/deterministic router -> controlled tool -> 
 - Temporary Wanda probes always cancel and require realtime release evidence.
 - `application.mjs` remains the composition root until the extracted modules have characterization coverage.
 - Do not edit stable UI assets during this refactor.
-- `workflow.mjs` is frozen for new business behavior; changes there are limited to compatibility delegation into extracted modules.
+- `workflow.mjs` is frozen for new business behavior; changes there are limited to compatibility delegation into extracted modules. Forty stateless helpers now live in `workflow-support.mjs`, reducing the coordinator from roughly 1,635 to 1,176 lines without changing transaction ordering.
 - External advisory providers are not part of the production runtime; price, seats, order state, price change, sending and fulfillment remain within existing authoritative boundaries.
 
 ## Sequential waves

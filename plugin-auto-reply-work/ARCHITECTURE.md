@@ -38,7 +38,8 @@ V3 服务（FastAPI）
 
 ### 确定性业务编排
 
-- `src/workflow.mjs`：当前唯一总编排入口；仍是最大的迁移热点。
+- `src/workflow.mjs`：当前唯一总编排入口；负责路由与事务顺序。
+- `src/workflow-support.mjs`：消息地址、上下文图片、延迟通知、Agent快照、后端动作归一化、报价成本证据和安全重试等无状态支持逻辑。
 - `src/quote/quote-orchestrator.mjs`：识图预取、草稿融合、重复试价门禁和一次实时核价调用。
 - `src/orders/order-orchestrator.mjs`：订单创建、付款、改价和人工接管状态机。
 - `src/reply/reply-orchestrator.mjs`：买家回复的唯一策略边界。
@@ -112,7 +113,7 @@ Webhook验签并持久入队
 
 ### P1：降低大文件与双重职责
 
-1. 拆分 `workflow.mjs`：只保留路由与事务顺序，图片、报价跟进、订单和首次回复继续下沉到现有 orchestrator。
+1. `workflow.mjs` 已从约1635行收敛至约1176行：40个无状态支持函数已下沉到 `workflow-support.mjs`；下一步继续抽离图片上下文准备、Agent会话执行和首次回复协调器，使主文件只保留路由与事务顺序。
 2. `quote-preview-client.mjs` 已从935行收敛至约365行，仅保留受控HTTP、识图并发与缓存协调；文字事实、识图融合、失败映射和回复展示已分别下沉到 `quote/quote-text-facts.mjs`、`quote/quote-recognition-fusion.mjs`、`quote/quote-failure-mapper.mjs` 和 `quote/quote-response-presenter.mjs`。
 3. `wanda_quote.py` 已从1124行收敛至约425行：实时座位、选座、W+活动和价格边界位于 `wanda_quote_domain.py`；脱敏失败结构位于 `wanda_quote_diagnostics.py`；旧本地出票网关传输适配位于 `wanda_quote_gateway.py`；城市硬边界、官方联合场次验证、15秒只读成功缓存和并发合并位于 `wanda_showtime_matcher.py`。主服务只保留只读座位查询、临时活动探测和报价响应编排。
 4. `main.py` 已从约950行收敛至约207行：插件Bridge、报价预览、Agent与回复端点已模块化；组合根只保留依赖注入、生命周期、基础设置/存储/识图端点和路由装配。
