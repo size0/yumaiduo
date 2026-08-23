@@ -364,15 +364,20 @@ test('preview recognition, quote and AI reply switches independently block their
 
   await t.test('quote off', async () => {
     let quoted = 0;
-    const { workflow } = harness({
+    const { workflow, calls } = harness({
+      quoteProgressNoticeDelayMs: 1,
       runtimeSettings: { automation_enabled: true, recognition_enabled: true, quote_enabled: false, ai_reply_enabled: false },
       quotePreviewClient: {
-        async recognize() { return { status: 'recognized', recognition: { image_type: 'SEAT_MAP' } }; },
+        async recognize() {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { status: 'recognized', recognition: { image_type: 'SEAT_MAP' } };
+        },
         async quote() { quoted += 1; },
       },
     });
     await workflow.processClaimed(record(envelope));
     assert.equal(quoted, 0);
+    assert.equal(calls.some(([name]) => name === 'send'), false);
   });
 
   await t.test('AI reply off', async () => {

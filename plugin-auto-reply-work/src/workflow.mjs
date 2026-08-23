@@ -267,6 +267,7 @@ export function createWorkflow({
       || !firstImageUrl(envelope.payload)
       || runtimeSettings.ai_reply_enabled !== true
       || runtimeSettings.recognition_enabled !== true
+      || runtimeSettings.quote_enabled !== true
       || typeof conversationContextStore?.claimQuoteProcessingReceipt !== 'function'
     ) return null;
     if (await isOrderLinkedChat(envelope)) return null;
@@ -461,6 +462,8 @@ export function createWorkflow({
       }
     }
     const progressNoticeEligible = canUseTwoStageQuote
+      && runtimeSettings.ai_reply_enabled === true
+      && runtimeSettings.quote_enabled === true
       && !firstContactNoticeSent
       && (Boolean(firstImageUrl(envelope.payload)) || isQuoteDetailSupplement(envelope.payload) || isLocationQuoteSupplement(envelope.payload));
     const progressDelayMs = Math.max(1, Math.min(60_000, Number(quoteProgressNoticeDelayMs) || 3_000));
