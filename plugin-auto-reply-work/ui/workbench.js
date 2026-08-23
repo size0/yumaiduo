@@ -20,9 +20,6 @@ async function init() {
     elements[id] = document.getElementById(id);
   }
   elements.filters = [...document.querySelectorAll('[data-filter]')];
-  document.querySelectorAll('[data-settings-hash]').forEach((link) => {
-    link.href = settingsUrl(link.dataset.settingsHash);
-  });
   elements['refresh-button'].addEventListener('click', loadData);
   elements['retry-button'].addEventListener('click', loadData);
   elements.filters.forEach((button) => button.addEventListener('click', () => {
@@ -172,13 +169,6 @@ function sampleCard(definition) {
   progress.setAttribute('aria-valuemin', '0'); progress.setAttribute('aria-valuemax', String(definition.data.target)); progress.setAttribute('aria-valuenow', String(Math.min(definition.data.value, definition.data.target)));
   const bar = document.createElement('i'); bar.style.width = `${Math.min(100, definition.data.target ? definition.data.value / definition.data.target * 100 : 0)}%`; progress.append(bar);
   const note = document.createElement('p'); note.textContent = definition.note; card.append(header, value, progress, note); return card;
-}
-
-function settingsUrl(hash) {
-  let base = window.location.pathname.replace(/\/ui\/workbench(?:\.html)?\/?$/u, '/ui');
-  base = base.replace(/\/workbench(?:\.html)?\/?$/u, '');
-  base = base.replace(/\/index\.html$/u, '').replace(/\/$/u, '');
-  return `${base}/settings#${encodeURIComponent(String(hash ?? ''))}`;
 }
 
 function kindLabel(kind) {

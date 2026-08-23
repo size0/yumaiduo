@@ -153,7 +153,7 @@ test('isolated operations workbench is action-first and keeps settings outside t
   assert.match(html, /id="sample-cards"/u);
   assert.match(html, /确定性交易风险/u);
   assert.match(html, /人工回复、人工报价和人工出票属于正常工作，不计为异常/u);
-  assert.match(html, /完整设置/u);
+  assert.doesNotMatch(html, /完整设置|快速入口|返回工作台/u);
   assert.match(script, /agent-canary-readiness/u);
   assert.match(script, /agent-offline-evaluation/u);
   assert.match(script, /agent-human-comparisons/u);

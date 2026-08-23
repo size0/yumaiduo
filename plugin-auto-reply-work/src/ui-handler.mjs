@@ -7,11 +7,6 @@ const ASSETS = new Map([
   ['/ui', ['workbench.html', 'text/html; charset=utf-8']],
   ['/ui/', ['workbench.html', 'text/html; charset=utf-8']],
   ['/ui/index.html', ['workbench.html', 'text/html; charset=utf-8']],
-  ['/ui/settings', ['index.html', 'text/html; charset=utf-8']],
-  ['/ui/settings.html', ['index.html', 'text/html; charset=utf-8']],
-  ['/ui/workbench', ['workbench.html', 'text/html; charset=utf-8']],
-  ['/ui/workbench/', ['workbench.html', 'text/html; charset=utf-8']],
-  ['/ui/workbench.html', ['workbench.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/sdk.js', ['sdk.js', 'text/javascript; charset=utf-8']],
@@ -26,9 +21,6 @@ const ASSETS = new Map([
   ['/ui/workbench-model.js', ['workbench-model.js', 'text/javascript; charset=utf-8']],
   // The platform gateway may preserve or remove the trailing slash from /ui.
   // index.html uses ui/<asset>, so preserve the nested form as well.
-  ['/ui/ui/workbench', ['workbench.html', 'text/html; charset=utf-8']],
-  ['/ui/ui/workbench/', ['workbench.html', 'text/html; charset=utf-8']],
-  ['/ui/ui/workbench.html', ['workbench.html', 'text/html; charset=utf-8']],
   ['/ui/ui/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/ui/ui/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/ui/ui/sdk.js', ['sdk.js', 'text/javascript; charset=utf-8']],

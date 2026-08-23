@@ -63,9 +63,8 @@ test('local UI preview serves assets and tenant-scoped API without exposing a se
   assert.match(pageHtml, /人工回复，系统守住交易边界/u);
   assert.doesNotMatch(pageHtml, /reference-run|待报价预览|闲鱼改价金额核验/u);
 
-  const settingsPage = await fetch(`http://127.0.0.1:${port}/ui/settings`);
-  assert.equal(settingsPage.status, 200);
-  assert.match(await settingsPage.text(), /返回工作台/u);
+  const retiredSettingsPage = await fetch(`http://127.0.0.1:${port}/ui/settings`);
+  assert.equal(retiredSettingsPage.status, 404);
 
   const prefixedPage = await fetch(`http://127.0.0.1:${port}/__plugin__/ui`);
   assert.equal(prefixedPage.status, 200);
@@ -91,11 +90,10 @@ test('local UI preview serves assets and tenant-scoped API without exposing a se
   assert.match(await slashScopedScript.text(), /createPluginSdk/u);
   const slashScopedSdk = await fetch(`http://127.0.0.1:${port}/ui/ui/sdk.js`);
   assert.equal(slashScopedSdk.status, 200);
-  const workbench = await fetch(`http://127.0.0.1:${port}/ui/workbench`);
-  assert.equal(workbench.status, 200);
-  assert.match(await workbench.text(), /运营工作台/u);
-  const nestedWorkbench = await fetch(`http://127.0.0.1:${port}/ui/ui/workbench`);
-  assert.equal(nestedWorkbench.status, 200);
+  const retiredWorkbenchAlias = await fetch(`http://127.0.0.1:${port}/ui/workbench`);
+  assert.equal(retiredWorkbenchAlias.status, 404);
+  const retiredNestedWorkbenchAlias = await fetch(`http://127.0.0.1:${port}/ui/ui/workbench`);
+  assert.equal(retiredNestedWorkbenchAlias.status, 404);
   for (const asset of ['workbench.js', 'workbench.css', 'workbench-model.js']) {
     const response = await fetch(`http://127.0.0.1:${port}/ui/${asset}`);
     assert.equal(response.status, 200);
