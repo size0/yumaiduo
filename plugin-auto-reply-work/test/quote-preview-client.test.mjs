@@ -331,6 +331,21 @@ test('available seat lookup calls the read-only row endpoint and filters malform
   assert.equal(result.wplus_offer_available, true);
 });
 
+test('available seat lookup supports an all-row read-only W+ summary', async () => {
+  const client = createQuotePreviewClient({
+    quotePreview: { recognizeUrl: 'http://127.0.0.1:8010/api/quotes/preview-recognize', quoteUrl: 'http://127.0.0.1:8010/api/quotes/preview-quote', ingestKey: 'a'.repeat(32) },
+  }, {
+    fetchImpl: async (_url, input) => {
+      const body = JSON.parse(input.body);
+      assert.equal(body.row, null);
+      return new Response(JSON.stringify({ row: null, seats: ['8排10座', '9排11座', 'bad'], available_count: 2, wplus_offer_available: true }), { status: 200 });
+    },
+  });
+  const result = await client.availableSeats({ recognition: { movie: '奥德赛' } });
+  assert.equal(result.row, null);
+  assert.deepEqual(result.seats, ['8排10座', '9排11座']);
+});
+
 test('selected confirmation cards are eligible for realtime quote even if the redundant confirm-button flag is missed', async () => {
   const requests = [];
   const client = createQuotePreviewClient({

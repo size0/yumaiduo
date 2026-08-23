@@ -83,8 +83,8 @@ class RealtimeQuoteService:
         resolved = recognition.model_copy(update={"cinema": matched_cinema_name}) if matched_cinema_name else recognition
         return QuoteShowtimeResolveResponse(recognition=resolved, matched_cinema_name=matched_cinema_name)
 
-    async def available_wplus_seats(self, recognition: Recognition, row: int) -> AvailableWplusSeatsResponse:
-        """List current read-only W+ availability for one explicitly requested row."""
+    async def available_wplus_seats(self, recognition: Recognition, row: int | None = None) -> AvailableWplusSeatsResponse:
+        """List current read-only W+ availability for one row or all W+ rows."""
         recognition, joint_match_required = self._showtime_matcher.catalog_match_input(recognition)
         try:
             gateway = await self._gateway.for_quote()
@@ -104,10 +104,12 @@ class RealtimeQuoteService:
                 realtime=locals().get("realtime"),
             ) from error
         wplus_facts = [seat for seat in _seat_facts(realtime) if seat.zone_type is SeatZoneType.WPLUS]
-        row_prefix = f"{row}排"
+        row_prefix = f"{row}排" if row is not None else None
         labels = sorted(
-            {seat.label for seat in wplus_facts if seat.label.startswith(row_prefix)},
-            key=lambda label: int(re.search(r"排(\d{1,3})座", label).group(1)) if re.search(r"排(\d{1,3})座", label) else 10_000,
+            {seat.label for seat in wplus_facts if row_prefix is None or seat.label.startswith(row_prefix)},
+            key=lambda label: tuple(
+                int(value) for value in re.fullmatch(r"(\d{1,2})排(\d{1,3})座", label).groups()
+            ) if re.fullmatch(r"(\d{1,2})排(\d{1,3})座", label) else (10_000, 10_000),
         )
         return AvailableWplusSeatsResponse(
             row=row,

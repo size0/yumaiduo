@@ -88,6 +88,47 @@ export class ConversationContextStore {
       return true;
     });
   }
+  async recordCandidateSet(tenantId, payload, input = {}) {
+    const identityFields = ['city', 'cinema', 'movie', 'date', 'showtime', 'hall'];
+    const boundedIdentity = (value) => Object.fromEntries(identityFields.map((field) => [
+      field, String(value?.[field] ?? '').replace(/\s+/gu, ' ').trim().slice(0, field === 'date' || field === 'showtime' ? 32 : 160),
+    ]).filter(([, item]) => item));
+    const baseRecognition = boundedIdentity(input.baseRecognition);
+    const candidates = (Array.isArray(input.candidates) ? input.candidates : []).slice(0, 5)
+      .map((candidate, index) => ({ index: index + 1, ...boundedIdentity(candidate) }))
+      .filter((candidate) => Object.keys(candidate).length > 1);
+    if (!candidates.length) return false;
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key] ?? { facts: {}, messages: [] };
+      current.facts = { ...current.facts, candidate_set: { base_recognition: baseRecognition, candidates, observed_at: this.now() } };
+      state[key] = current;
+      return true;
+    });
+  }
+  async clearCandidateSet(tenantId, payload) {
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key];
+      if (!current?.facts?.candidate_set) return false;
+      const facts = { ...current.facts };
+      delete facts.candidate_set;
+      current.facts = facts;
+      state[key] = current;
+      return true;
+    });
+  }
+  async recordSeatPreference(tenantId, payload, value) {
+    const preference = String(value ?? '').replace(/https?:\/\/\S+/giu, '').replace(/\s+/gu, ' ').trim().slice(0, 120);
+    if (!preference) return false;
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key] ?? { facts: {}, messages: [] };
+      current.facts = { ...current.facts, seat_preference: preference, preference_recorded: true, seat_preference_updated_at: this.now() };
+      state[key] = current;
+      return true;
+    });
+  }
   async recordQuoteDraft(tenantId, payload, input = {}) {
     return this.#mutate((state) => {
       const key = conversationKey(tenantId, payload);

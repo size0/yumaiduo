@@ -64,6 +64,29 @@ test('typed same-row seat preferences retain every explicitly written seat', asy
 });
 
 
+test('bounded cinema candidates survive a follow-up ordinal reference without storing platform identifiers', async () => {
+  const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-candidate-set-')), 'context.json'));
+  await store.recordCandidateSet('tenant-1', message, {
+    baseRecognition: { city: '泉州', movie: '奥德赛', date: '2026-08-23', showtime: '15:50' },
+    candidates: [{ cinema: '晋江万达广场店' }, { cinema: '晋江万达影城SM广场店', secret_id: 'must-drop' }],
+  });
+  const candidateSet = (await store.get('tenant-1', message)).facts.candidate_set;
+  assert.deepEqual(candidateSet.candidates.map((item) => item.cinema), ['晋江万达广场店', '晋江万达影城SM广场店']);
+  assert.doesNotMatch(JSON.stringify(candidateSet), /must-drop|secret_id/u);
+  assert.equal(await store.clearCandidateSet('tenant-1', message), true);
+  assert.equal((await store.get('tenant-1', message)).facts.candidate_set, undefined);
+});
+
+test('semantic seat preferences are stored without turning them into official selected seats', async () => {
+  const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-semantic-seat-preference-')), 'context.json'));
+  await store.add('tenant-1', { ...message, content: '后面一点的位置' });
+  assert.equal(await store.recordSeatPreference('tenant-1', message, '后面一点的位置'), true);
+  const context = await store.get('tenant-1', message);
+  assert.equal(context.facts.seat_preference, '后面一点的位置');
+  assert.equal(context.facts.preference_recorded, true);
+  assert.equal(context.facts.official_selection, undefined);
+});
+
 test('purchase information confirmation is bound to the prompted image only', async () => {
   const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-purchase-confirmation-')), 'context.json'));
   const firstImage = 'https://img.alicdn.com/first.png';

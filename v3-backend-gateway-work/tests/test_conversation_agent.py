@@ -101,14 +101,14 @@ def test_agent_scene_classification_is_deterministic_and_prefers_transaction_sta
         assert classify_agent_scene(AgentTurnRequest.model_validate(payload)) == expected
 
 
-def test_agent_common_ticket_text_uses_fast_bounded_planning() -> None:
+def test_agent_common_ticket_text_keeps_reasoning_enabled_for_semantic_routing() -> None:
     common_payload = request_payload().model_dump(mode="json")
     common_payload.update({"latest_message": "两张多少钱", "history": [{"role": "buyer", "content": "两张多少钱", "source": "buyer"}]})
 
     def handler(http_request: httpx.Request) -> httpx.Response:
         body = json.loads(http_request.content)
-        assert body["enable_thinking"] is False
-        assert body["max_tokens"] == 400
+        assert body["enable_thinking"] is True
+        assert body["max_tokens"] == 800
         return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({
             "intent": "票价咨询", "confidence": 0.98, "goal": "取得截图", "action": "ask_for_image",
             "arguments": {}, "missing_fields": ["完整选座页截图"], "reply": "请发送完整选座页截图。", "needs_human": False, "reason": "缺少图片",
@@ -118,6 +118,32 @@ def test_agent_common_ticket_text_uses_fast_bounded_planning() -> None:
         "base_url": "https://model.example/v1", "model": "flash", "api_key": "secret", "temperature": 0, "max_tokens": 2000,
     }))
     assert result.action == "ask_for_image"
+
+
+def test_agent_contextual_acknowledgement_is_not_forced_into_the_low_risk_fast_path() -> None:
+    payload = request_payload().model_dump(mode="json")
+    payload.update({
+        "latest_message": "可以的",
+        "history": [
+            {"role": "seller", "content": "当前报价59元一张，是否接受？", "source": "external_seller"},
+            {"role": "buyer", "content": "可以的", "source": "buyer"},
+        ],
+        "state": {"stage": "quoted", "facts": {"quote_total_cents": 5900}},
+    })
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        body = json.loads(http_request.content)
+        assert body["enable_thinking"] is True
+        assert body["max_tokens"] == 800
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({
+            "intent": "补充信息", "confidence": 0.98, "goal": "读取有效报价后确认", "action": "confirm_quote",
+            "arguments": {}, "missing_fields": [], "reply": "", "needs_human": False, "reason": "承接上一轮报价",
+        }, ensure_ascii=False)}}]})
+
+    result = asyncio.run(ConversationAgentService(httpx.MockTransport(handler)).plan(AgentTurnRequest.model_validate(payload), {
+        "base_url": "https://model.example/v1", "model": "flash", "api_key": "secret", "temperature": 0, "max_tokens": 2000,
+    }))
+    assert result.action == "confirm_quote"
 
 
 def test_agent_image_first_step_disables_thinking_because_the_only_safe_action_is_recognition() -> None:

@@ -31,6 +31,31 @@ test('agent runs are idempotent, leased independently, and resume from durable c
   assert.equal((await store.get(first.run_id)).status, 'completed');
 });
 
+test('agent run persists a bounded source-time planner snapshot without transaction identifiers', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-context-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  await store.enqueue({
+    runId: 'shadow:context', eventKey: 'tenant-1:context', tenantId: 'tenant-1', mode: 'shadow',
+    contextSnapshot: {
+      facts: { stage: 'collecting_information', city: '泉州', order_id: 'platform-order-secret', ticket_count: 1 },
+      messages: [
+        { at: 100, role: 'seller', source: 'external_seller', content: '哪个店？' },
+        { at: 200, role: 'buyer', source: 'buyer', content: '第二个' },
+      ],
+    },
+  });
+
+  const run = await store.get('shadow:context');
+  assert.equal(run.context_snapshot.facts.city, '泉州');
+  assert.equal(run.context_snapshot.facts.has_linked_order, true);
+  assert.equal(run.context_snapshot.facts.order_id, undefined);
+  assert.deepEqual(run.context_snapshot.messages.map(({ role, content, source }) => ({ role, content, source })), [
+    { role: 'seller', content: '哪个店？', source: 'external_seller' },
+    { role: 'buyer', content: '第二个', source: 'buyer' },
+  ]);
+});
+
 test('historical evaluation runs enqueue in one idempotent bounded batch', async () => {
   const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-batch-')), 'runs.json');
   const store = new AgentRunStore(file);

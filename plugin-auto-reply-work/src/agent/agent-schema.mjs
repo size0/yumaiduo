@@ -4,6 +4,7 @@ const ACTIONS = new Set([
   'ask_for_city',
   'ask_for_missing_information',
   'start_quote',
+  'resolve_ticket_identity',
   'recognize_image',
   'resolve_showtime',
   'quote_realtime',

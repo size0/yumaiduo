@@ -180,7 +180,9 @@ export function createWorkflow({
             && shadowAgentScheduler?.schedule
           ) {
             try {
-              const scheduled = await shadowAgentScheduler.schedule(envelope);
+              const scheduled = await shadowAgentScheduler.schedule(envelope, {
+                contextSnapshot: await durableAgentContextSnapshot(envelope, null, settings),
+              });
               agentRunScheduled = scheduled?.created === true || Boolean(scheduled?.run);
             } catch (error) {
               logger.warn?.('[workflow] disabled-shop shadow scheduling failed without enabling buyer actions', {
@@ -322,7 +324,9 @@ export function createWorkflow({
       });
       if (canary.selected) {
         try {
-          await shadowAgentScheduler.schedule(envelope, { mode: 'active' });
+          await shadowAgentScheduler.schedule(envelope, {
+            mode: 'active', contextSnapshot: await durableAgentContextSnapshot(envelope, quoteContext, runtimeSettings),
+          });
           await eventStore.complete(record.key, record.leaseId, {
             mode: 'quote_preview_only', execution_owner: 'agent', agent_run_scheduled: true,
             agent_canary_bucket: canary.bucket, agent_canary_percentage: canary.percentage, actions: [],
@@ -335,7 +339,11 @@ export function createWorkflow({
       runtimeSettings = { ...runtimeSettings, conversation_agent_mode: 'shadow', execution_owner: 'deterministic' };
     }
     if (runtimeSettings.ai_reply_enabled && runtimeSettings.conversation_agent_mode === 'shadow' && shadowAgentScheduler?.schedule) {
-      try { await shadowAgentScheduler.schedule(envelope); }
+      try {
+        await shadowAgentScheduler.schedule(envelope, {
+          contextSnapshot: await durableAgentContextSnapshot(envelope, quoteContext, runtimeSettings),
+        });
+      }
       catch (error) { logger.warn?.('[workflow] durable shadow scheduling failed without blocking buyer flow', { eventId: String(envelope.id), error: String(error?.message ?? error) }); }
     }
     let replyHistoryPromise = null;
@@ -856,6 +864,23 @@ export function createWorkflow({
     };
   }
 
+  async function durableAgentContextSnapshot(envelope, knownState, settings) {
+    const state = knownState ?? (conversationContextStore
+      ? await conversationContextStore.get(envelope.tenantId, envelope.payload ?? {})
+      : { facts: {}, messages: [] });
+    let history = [];
+    try { history = await loadReplyHistory(envelope, settings); }
+    catch (error) {
+      logger.warn?.('[workflow] source-time seller history unavailable; using bounded buyer context', {
+        eventId: String(envelope.id), error: String(error?.message ?? error),
+      });
+    }
+    return {
+      facts: state?.facts ?? {},
+      messages: history.length ? history : Array.isArray(state?.messages) ? state.messages : [],
+    };
+  }
+
   async function planShadowConversation(envelope, quoteContext, settings, history = []) {
     const state = { ...(quoteContext ?? { facts: {} }), messages: Array.isArray(history) ? history : [] };
     const context = {
@@ -1023,11 +1048,13 @@ export function createWorkflow({
     const depth = boundedInteger(settings.ai_reply_memory_depth, 5, 50, 20);
     const historyHours = boundedInteger(settings.ai_reply_memory_hours, 1, 24, 24);
     const cutoff = Date.now() - historyHours * 60 * 60 * 1_000;
+    const sourceAt = Number(envelope.ts);
     const selected = (Array.isArray(page?.items) ? page.items : [])
       .slice(0, depth)
       .filter((item) => {
         const sentAt = Date.parse(String(item?.sentAt ?? item?.sent_at ?? ''));
-        return !Number.isFinite(sentAt) || sentAt >= cutoff;
+        return (!Number.isFinite(sentAt) || sentAt >= cutoff)
+          && (!Number.isFinite(sourceAt) || !Number.isFinite(sentAt) || sentAt <= sourceAt + 1_000);
       })
       .slice().reverse();
     return Promise.all(selected.map(async (message) => {

@@ -20,7 +20,7 @@ MODEL_TIMEOUT: Final = httpx.Timeout(60, connect=8)
 MAX_CONCURRENCY: Final = 8
 QUEUE_WAIT_SECONDS: Final = 2
 FORMAT_RETRY_PROMPT: Final = "上一次输出不符合契约。只输出合法 JSON，并且 action 必须来自允许列表。"
-FAST_PATH_PATTERN: Final = re.compile(r"图片|截图|选座|价格|报价|核价|多少|几张|张|排|座|付款|支付|订单|改价|出票|发货|退款|售后|人工|进度|W\+|确认|好的|谢谢|你好|您好|在吗|OK", re.IGNORECASE)
+LOW_RISK_FAST_PATH_PATTERN: Final = re.compile(r"^(?:你好|您好|在吗|谢谢|感谢|辛苦了|好的谢谢|不客气)[！!。,.，\s]*$", re.IGNORECASE)
 AFTERSALE_PATTERN: Final = re.compile(r"退款|退票|售后|投诉|赔付|纠纷", re.IGNORECASE)
 FULFILLMENT_PATTERN: Final = re.compile(r"出票|票码|取票|发货|收货", re.IGNORECASE)
 ORDER_PATTERN: Final = re.compile(r"订单|拍下|付款|支付|改价|改好", re.IGNORECASE)
@@ -69,7 +69,8 @@ SYSTEM_PROMPT: Final = """你是万达电影票代买店铺的会话编排器。
 21. request_price_change 只能表达无参数申请，arguments 和 reply 必须为空；模型不得提供金额或订单号，执行系统会自行读取关联订单和有效确认报价。当前工具被门禁拒绝时必须停止，不得换用其他动作绕过。
 22. create_manual_task 只创建人工处理事项，不代表已经出票、退款、发货或完成售后。
 23. 买家询问人工处理进度时选择 get_manual_task_status，arguments 和 reply 必须为空；resolved 只表示人工记录已更新，不得声称已经出票。
-24. 买家明确询问“X排”的W+可选座位，且state已有识图或报价artifact时选择 show_available_wplus_seats，arguments 和 reply 必须为空；排数由执行系统从当前买家文字提取，不得自行传入，不得声称已锁座或承诺库存。
+24. 买家通过纯文字给出影院、影片、日期、场次并询问W/W+实时座位时，先选择 resolve_ticket_identity，arguments 和 reply 必须为空；该只读工具唯一匹配场次后再选择 show_available_wplus_seats。买家可指定“X排”，也可不指定排数查询整个W+区域；排数和场次事实均由执行系统读取，模型不得传参、声称已锁座或承诺库存。
+25. 工具返回多个影院候选后，买家说“第二个/第2个”或补充分店名时仍选择 resolve_ticket_identity；必须使用会话中的候选集合解析指代，不得把序号当成张数、座位或普通闲聊。
 
 会话经验提炼：
 - 这不是训练模型。仅当 history 明确出现 source=external_seller 的非本插件卖家回复（可能来自人工或其他已接管工具），且之后买家明确表示理解、感谢或按要求继续提供资料时，才可给出 experience_candidate；否则必须为 null。
@@ -78,7 +79,7 @@ SYSTEM_PROMPT: Final = """你是万达电影票代买店铺的会话编排器。
 - experience_candidate 禁止包含任何数字、金额、价格、优惠、订单、付款、改价、库存、座位可售、出票、发货、退款、联系方式、链接或个人信息。
 - source=plugin 的历史回复绝不能作为人工经验来源。候选经验只会保存为停用草稿，不能自行生效。
 
-允许 action：respond、ask_for_image、ask_for_city、ask_for_missing_information、inspect_ticket_request、recognize_image、resolve_showtime、quote_realtime、read_active_quote、request_price_change、create_manual_task、get_manual_task_status、start_quote（仅兼容旧流程）、show_available_wplus_seats、record_seat_preference、confirm_quote、read_linked_order、get_order_status（仅兼容旧流程）、handoff、wait。
+允许 action：respond、ask_for_image、ask_for_city、ask_for_missing_information、inspect_ticket_request、resolve_ticket_identity、recognize_image、resolve_showtime、quote_realtime、read_active_quote、request_price_change、create_manual_task、get_manual_task_status、start_quote（仅兼容旧流程）、show_available_wplus_seats、record_seat_preference、confirm_quote、read_linked_order、get_order_status（仅兼容旧流程）、handoff、wait。
 
 只输出 JSON：
 {"intent":"票价咨询|选座核价|补充信息|订单进度|售后咨询|人工接管|其他","confidence":0.0,"goal":"本轮目标","action":"允许的 action","arguments":{},"missing_fields":[],"reply":"仅在本轮应该直接回复时填写，否则为空字符串","needs_human":false,"reason":"简短决策原因","experience_candidate":null}
@@ -182,7 +183,11 @@ class ConversationAgentService:
     async def _plan_limited(self, request: AgentTurnRequest, model_settings: Mapping[str, object], knowledge_rules: list[str]) -> AgentPlan:
         context = request.model_dump(mode="json", exclude={"event_id", "tenant_id"})
         continuation_step = bool(context.get("observations"))
-        fast_path = continuation_step or request.has_image or bool(FAST_PATH_PATTERN.search(request.latest_message))
+        # Only deterministic continuations, image-first turns and genuinely
+        # context-free pleasantries skip reasoning. Ticket, order, W+ and
+        # acknowledgement text must retain reasoning because its meaning
+        # depends on prior turns and authoritative state.
+        fast_path = continuation_step or request.has_image or bool(LOW_RISK_FAST_PATH_PATTERN.fullmatch(request.latest_message.strip()))
         payload: dict[str, Any] = {
             "model": model_settings["model"],
             "temperature": min(float(model_settings.get("temperature", 0)), 0.3),

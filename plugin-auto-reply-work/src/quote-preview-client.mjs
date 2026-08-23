@@ -290,16 +290,18 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
     } catch { return []; }
   }
 
-  async function availableSeats({ recognition, row }) {
-    const requestedRow = Number(row);
-    if (!recognition || typeof recognition !== 'object' || !Number.isInteger(requestedRow) || requestedRow < 1 || requestedRow > 99) {
-      throw new TypeError('valid recognition and row are required');
+  async function availableSeats({ recognition, row = null }) {
+    const requestedRow = row == null ? null : Number(row);
+    if (!recognition || typeof recognition !== 'object'
+      || (requestedRow !== null && (!Number.isInteger(requestedRow) || requestedRow < 1 || requestedRow > 99))) {
+      throw new TypeError('valid recognition and optional row are required');
     }
     const url = preview.quoteUrl.replace(/\/preview-quote(?:\?.*)?$/u, '/preview-available-seats');
     if (url === preview.quoteUrl) throw new Error('available seat endpoint is unavailable');
     const result = await fetchJson(url, { recognition, row: requestedRow }, 'W+ available seat lookup');
+    const seatPattern = requestedRow === null ? /^\d{1,2}排\d{1,3}座$/u : new RegExp(`^${requestedRow}排\\d{1,3}座$`, 'u');
     const seats = Array.isArray(result.seats)
-      ? result.seats.map((seat) => text(seat, 80)).filter((seat) => new RegExp(`^${requestedRow}排\\d{1,3}座$`, 'u').test(seat)).slice(0, 30)
+      ? result.seats.map((seat) => text(seat, 80)).filter((seat) => seatPattern.test(seat)).slice(0, 30)
       : [];
     return Object.freeze({
       row: requestedRow,
@@ -351,7 +353,7 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
     return result;
   }
 
-  return Object.freeze({ recognize, resolveShowtime, quote, availableSeats, capture });
+  return Object.freeze({ recognize, resolveShowtime, resolveCandidates: resolveMatchCandidates, quote, availableSeats, capture });
 }
 
 function previewHeaders(ingestKey) {

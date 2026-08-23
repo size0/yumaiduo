@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v11-pricing-account-evidence",
+        "runtime_contract": "wanda-v3-v12-readonly-wplus-availability",
     }
 
 
@@ -2124,6 +2124,27 @@ def test_available_wplus_seats_lists_only_current_wplus_seats_in_the_requested_r
         "/api/quotes/preview-available-seats",
         json={"row": 8, "recognition": {"image_type": "SEAT_MAP", "cinema": "测试万达影城"}},
     ).status_code == 401
+
+
+def test_available_wplus_seats_can_summarize_all_rows_for_a_text_only_wplus_question(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WANDA_PREVIEW_INGEST_KEY", "test-preview-key")
+    client = TestClient(create_app(
+        ModelSettingsStore(tmp_path / "model_config.json"),
+        quote_service=RealtimeQuoteService(FakeTicketGateway()),
+    ))
+    response = client.post(
+        "/api/quotes/preview-available-seats",
+        headers={"X-Wanda-Preview-Key": "test-preview-key"},
+        json={"recognition": {"image_type": "SEAT_MAP", "cinema": "测试万达影城"}},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "row": None,
+        "seats": ["8排10座"],
+        "available_count": 1,
+        "wplus_offer_available": True,
+        "matched_cinema_name": None,
+    }
 
 
 def test_hand_drawn_marks_do_not_override_the_live_wplus_member_quote() -> None:

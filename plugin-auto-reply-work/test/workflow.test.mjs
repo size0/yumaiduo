@@ -286,7 +286,7 @@ test('a disabled shop still schedules shadow learning without sending or running
       conversation_agent_mode: 'shadow', execution_owner: 'deterministic',
     },
     quotePreviewClient: {},
-    shadowAgentScheduler: { async schedule(envelope) { scheduled.push(envelope.id); return { created: true }; } },
+    shadowAgentScheduler: { async schedule(envelope, options) { scheduled.push([envelope.id, options]); return { created: true }; } },
     autoReplyEnabled: true,
   });
   const result = await workflow.processClaimed(record({
@@ -295,7 +295,8 @@ test('a disabled shop still schedules shadow learning without sending or running
   }));
 
   assert.equal(result.status, 'completed');
-  assert.deepEqual(scheduled, ['evt-disabled-shadow']);
+  assert.equal(scheduled[0][0], 'evt-disabled-shadow');
+  assert.ok(scheduled[0][1].contextSnapshot);
   assert.equal(calls.some(([name]) => name === 'send'), false);
   assert.equal(calls.find(([name]) => name === 'complete').at(-1).agent_run_scheduled, true);
 });
@@ -2145,7 +2146,9 @@ test('durable active owner schedules a low-risk turn and completes the business 
   });
   const result = await workflow.processClaimed(record({ id: eventId, tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(), payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '图片怎么发' } }));
   assert.equal(result.status, 'completed');
-  assert.deepEqual(scheduled, [[eventId, { mode: 'active' }]]);
+  assert.equal(scheduled[0][0], eventId);
+  assert.equal(scheduled[0][1].mode, 'active');
+  assert.deepEqual(scheduled[0][1].contextSnapshot, { facts: {}, messages: [] });
   assert.equal(calls.some(([name]) => name === 'send'), false);
   const completion = calls.find(([name]) => name === 'complete')[3];
   assert.equal(completion.execution_owner, 'agent');
@@ -2163,7 +2166,9 @@ test('durable active owner may schedule an order-status turn only when a linked 
     autoReplyEnabled: true,
   });
   await workflow.processClaimed(record({ id: eventId, tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(), payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '订单付款了吗' } }));
-  assert.deepEqual(scheduled, [[eventId, { mode: 'active' }]]);
+  assert.equal(scheduled[0][0], eventId);
+  assert.equal(scheduled[0][1].mode, 'active');
+  assert.equal(scheduled[0][1].contextSnapshot.facts.order_id, 'system-linked-order');
   assert.equal(calls.some(([name]) => name === 'send'), false);
   assert.equal(calls.find(([name]) => name === 'complete')[3].execution_owner, 'agent');
 });
@@ -2178,7 +2183,8 @@ test('durable active canary defaults to zero and keeps the deterministic owner',
     autoReplyEnabled: true,
   });
   await workflow.processClaimed(record({ id: 'evt-canary-default-zero', tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(), payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '图片怎么发' } }));
-  assert.deepEqual(scheduled, [['evt-canary-default-zero', null]]);
+  assert.equal(scheduled[0][0], 'evt-canary-default-zero');
+  assert.deepEqual(scheduled[0][1].contextSnapshot, { facts: {}, messages: [] });
   assert.equal(calls.find(([name]) => name === 'send')[1].text, '确定性链路继续回复');
   assert.equal(calls.find(([name]) => name === 'complete')[3].execution_owner, 'deterministic');
 });

@@ -60,6 +60,9 @@ export function guardAgentPlan(plan, context = {}) {
   let action = declaredNextAction ?? plan.action;
   const hasLinkedOrder = Boolean(stateFacts.order_id || stateFacts.has_linked_order);
   const hasReusableRecognition = Boolean(stateFacts.quote_draft?.recognition_artifact || stateFacts.recognition_draft || stateFacts.quote_draft_recognition);
+  const hasCandidateReference = Array.isArray(stateFacts.candidate_set?.candidates)
+    && (/^第?[一二三四五1-5]个(?:店)?$/u.test(message)
+      || stateFacts.candidate_set.candidates.some((candidate) => String(candidate?.cinema ?? '').replace(/\s+/gu, '').includes(message)));
   const hasValidActiveQuote = activeQuote(stateFacts, now);
   const confirmation = /^(?:确认|确定|可以|行|好|好的|ok|OK|就这个|就这样)$/u.test(message);
   const activeQuoteFollowUp = /^(?:这个呢|(?:不是|不是说|怎么不是)\d+(?:\.\d{1,2})?(?:元|块)?(?:吗|嘛)?[？?]?|(?:你这|这个|这边)?(?:多少钱|多少|什么价)[？?]?)$/u.test(message);
@@ -67,13 +70,17 @@ export function guardAgentPlan(plan, context = {}) {
   const manualTaskQuestion = /(?:人工|客服).{0,12}(?:处理|任务|进度|状态|结果|好了吗)|(?:处理|任务).{0,8}(?:进度|状态|结果|好了吗)/u.test(message);
   const seatPreference = /\d{1,2}排.{0,24}\d{1,2}(?:座|号)?/u.test(message)
     || /(?:红点|绿点|圈出|圈的|画的|标出).{0,16}(?:位置|座位|两个|两位置)/u.test(message)
-    || /(?:已经|已)?(?:圈好|圈了|圈过|标好|标了)(?:位置|座位)?/u.test(message);
+    || /(?:已经|已)?(?:圈好|圈了|圈过|标好|标了)(?:位置|座位)?/u.test(message)
+    || /(?:靠后|后面一点|往后一点|靠中间|中间一点|连座|挨着|相邻).{0,12}(?:位置|座位)?/u.test(message);
   if (declaredNextAction) {
     // A validated tool contract with one legal next action is deterministic;
     // do not spend another tool call following a contradictory model choice.
   } else if (context.has_image === true && !imageObserved && !quoteObserved) action = 'recognize_image';
   else if (context.has_image === true && ticketImageObserved && !showtimeObserved && !quoteObserved && action !== 'quote_realtime') action = 'resolve_showtime';
   else if (context.has_image === true && ticketImageObserved && showtimeObserved && !quoteObserved) action = 'quote_realtime';
+  else if (hasCandidateReference) action = 'resolve_ticket_identity';
+  else if (context.mode === 'active' && action === 'show_available_wplus_seats' && !hasReusableRecognition
+    && !observations.some((item) => item?.tool === 'resolve_ticket_identity' && item?.status === 'success')) action = 'resolve_ticket_identity';
   else if (hasValidActiveQuote && activeQuoteFollowUp) action = 'read_active_quote';
   else if (hasValidActiveQuote && confirmation) action = 'confirm_quote';
   else if (seatPreference) action = 'record_seat_preference';
@@ -106,6 +113,11 @@ export function authorizeAgentPlan(plan, context = {}) {
   }
 
   if (plan.action === 'inspect_ticket_request') return allowed('inspect_ticket_request', 'bounded_request_inspection');
+  if (plan.action === 'resolve_ticket_identity') {
+    return context.settings?.recognition_enabled === true
+      ? allowed('resolve_ticket_identity', 'text_ticket_identity_resolution_requested')
+      : denied('recognition_feature_disabled');
+  }
   if (plan.action === 'start_quote') {
     if (context.settings?.recognition_enabled !== true || context.settings?.quote_enabled !== true) return denied('quote_feature_disabled');
     const hasReusableFacts = Boolean(stateFacts.recognition_draft || stateFacts.quote_draft_recognition || stateFacts.quote_draft);
@@ -140,8 +152,13 @@ export function authorizeAgentPlan(plan, context = {}) {
   }
   if (plan.action === 'get_manual_task_status') return allowed('get_manual_task_status', 'manual_task_status_requested');
   if (plan.action === 'show_available_wplus_seats') {
-    if (context.settings?.quote_enabled !== true) return denied('quote_feature_disabled');
-    return allowed('list_available_wplus_seats', 'seat_query_requested');
+    if (context.mode !== 'active') return allowed('list_available_wplus_seats', 'read_only_wplus_snapshot_evaluation');
+    const identityResolved = Array.isArray(context.observations)
+      && context.observations.some((item) => item?.tool === 'resolve_ticket_identity' && item?.status === 'success');
+    const hasReusableFacts = Boolean(stateFacts.quote_draft?.recognition_artifact || stateFacts.recognition_draft || stateFacts.quote_draft_recognition);
+    return identityResolved || hasReusableFacts
+      ? allowed('list_available_wplus_seats', 'read_only_wplus_availability_requested')
+      : denied('ticket_identity_resolution_required');
   }
   if (plan.action === 'record_seat_preference') return allowed('record_seat_preference', 'circled_delivery_instruction_or_typed_seat');
   if (plan.action === 'confirm_quote') {
@@ -154,7 +171,7 @@ export function authorizeAgentPlan(plan, context = {}) {
     return valid ? allowed('confirm_active_quote', 'active_quote_confirmable') : denied('active_quote_missing_or_expired');
   }
   if (['get_order_status', 'read_linked_order'].includes(plan.action)) {
-    return stateFacts.order_id ? allowed('read_linked_order', 'linked_order_available') : denied('linked_order_missing');
+    return hasLinkedOrder ? allowed('read_linked_order', 'linked_order_available') : denied('linked_order_missing');
   }
   if (['respond', 'ask_for_image', 'ask_for_city', 'ask_for_missing_information', 'wait'].includes(plan.action)) {
     return allowed(null, 'conversation_only');

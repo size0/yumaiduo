@@ -343,13 +343,13 @@ class AvailableWplusSeatsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     recognition: Recognition
-    row: Annotated[int, Field(ge=1, le=99)]
+    row: Annotated[int | None, Field(default=None, ge=1, le=99)]
 
 
 class AvailableWplusSeatsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    row: int
+    row: int | None
     seats: list[str] = Field(default_factory=list, max_length=30)
     available_count: int = Field(ge=0)
     wplus_offer_available: bool
@@ -467,6 +467,7 @@ AgentAction = Literal[
     "ask_for_city",
     "ask_for_missing_information",
     "start_quote",
+    "resolve_ticket_identity",
     "recognize_image",
     "resolve_showtime",
     "quote_realtime",

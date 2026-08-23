@@ -4,11 +4,79 @@ import { dirname } from 'node:path';
 
 const STORE_VERSION = 1;
 const CLAIMABLE = new Set(['queued', 'retry']);
+const SNAPSHOT_FACT_KEYS = new Set([
+  'stage', 'city', 'cinema', 'movie', 'date', 'showtime', 'hall', 'seat_numbers', 'seat_preference', 'preference_recorded',
+  'ticket_count', 'quote_ticket_count', 'quote_unit_cents', 'quote_total_cents', 'quote_expires_at', 'quote_scope',
+  'quote_confirmed', 'available_wplus_seats', 'failure_code', 'has_linked_order', 'has_active_quote', 'paid', 'fulfilled',
+  'requested_ticket_count', 'known_identity_fields', 'missing_identity_fields', 'candidate_set', 'quote_draft',
+]);
 
 function emptyState() { return { version: STORE_VERSION, revision: 0, runs: {} }; }
 function clone(value) { return structuredClone(value); }
 function bounded(value, length) { return String(value ?? '').trim().slice(0, length); }
 function modePriority(mode) { return ({ active: 0, shadow: 1, evaluation: 2 })[mode] ?? 3; }
+
+function safeSnapshotValue(value, depth = 0) {
+  if (value == null || depth > 3) return null;
+  if (typeof value === 'string') return bounded(value.replace(/https?:\/\/\S+/giu, '[链接]'), 500);
+  if (typeof value === 'boolean') return value;
+  if (Number.isFinite(value)) return Number(value);
+  if (Array.isArray(value)) return value.slice(0, 30).map((item) => safeSnapshotValue(item, depth + 1)).filter((item) => item !== null);
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).slice(0, 30)
+      .map(([key, item]) => [bounded(key, 64), safeSnapshotValue(item, depth + 1)])
+      .filter(([key, item]) => key && item !== null));
+  }
+  return null;
+}
+
+function safeQuoteDraft(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const recognition = value?.recognition_artifact?.recognition;
+  const safeRecognition = recognition && typeof recognition === 'object' && !Array.isArray(recognition)
+    ? Object.fromEntries(['city', 'cinema', 'movie', 'date', 'showtime', 'hall']
+      .map((key) => [key, safeSnapshotValue(recognition[key])])
+      .filter(([, item]) => item !== null && item !== ''))
+    : null;
+  const fields = value?.fields && typeof value.fields === 'object' && !Array.isArray(value.fields)
+    ? Object.fromEntries(['city', 'cinema', 'movie', 'date', 'showtime', 'hall', 'ticket_count']
+      .map((key) => [key, safeSnapshotValue(value.fields[key]?.value ?? value.fields[key])])
+      .filter(([, item]) => item !== null && item !== ''))
+    : null;
+  const result = {};
+  if (safeRecognition && Object.keys(safeRecognition).length) {
+    result.recognition_artifact = {
+      status: value.recognition_artifact?.status === 'resolved' ? 'resolved' : 'recognized',
+      tenant_id: bounded(value.recognition_artifact?.tenant_id, 128),
+      recognition: safeRecognition,
+      ...(Number.isSafeInteger(Number(value.recognition_artifact?.ticket_count)) ? { ticket_count: Number(value.recognition_artifact.ticket_count) } : {}),
+      ...(value.recognition_artifact?.text_quote === true ? { text_quote: true } : {}),
+    };
+  }
+  if (fields && Object.keys(fields).length) result.fields = fields;
+  return Object.keys(result).length ? result : null;
+}
+
+function sanitizeContextSnapshot(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const inputFacts = value.facts && typeof value.facts === 'object' && !Array.isArray(value.facts) ? value.facts : {};
+  const facts = {};
+  for (const [key, fact] of Object.entries(inputFacts)) {
+    if (!SNAPSHOT_FACT_KEYS.has(key)) continue;
+    const safe = key === 'quote_draft' ? safeQuoteDraft(fact) : safeSnapshotValue(fact);
+    if (safe !== null) facts[key] = safe;
+  }
+  if (inputFacts.order_id) facts.has_linked_order = true;
+  const messages = (Array.isArray(value.messages) ? value.messages : []).slice(-50).map((item) => {
+    const role = item?.role === 'seller' ? 'seller' : 'buyer';
+    const requestedSource = bounded(item?.source, 32);
+    const source = role === 'buyer' ? 'buyer' : ['plugin', 'external_seller', 'unknown'].includes(requestedSource) ? requestedSource : 'unknown';
+    const content = bounded(String(item?.content ?? item?.text ?? '').replace(/https?:\/\/\S+/giu, '[链接]'), 1_000);
+    const at = Number(item?.at);
+    return { role, source, content, ...(Number.isFinite(at) && at >= 0 ? { at } : {}) };
+  }).filter((item) => item.content);
+  return { facts, messages };
+}
 
 function sanitizeTrace(value) {
   if (!Array.isArray(value) || value.length > 8) throw new TypeError('too many agent trace steps');
@@ -43,6 +111,7 @@ function external(record) {
     run_id: record.runId, event_key: record.eventKey, tenant_id: record.tenantId, mode: record.mode,
     status: record.status, attempts: record.attempts, available_at: record.availableAt,
     lease_id: record.leaseId, lease_until: record.leaseUntil, deadline_at: Number(record.deadlineAt) || null,
+    context_snapshot: clone(record.contextSnapshot ?? null),
     trace: clone(record.trace ?? []), observations: clone(record.observations ?? []), tool_calls: clone(toolCalls), result: clone(record.result),
     last_error: clone(record.lastError), created_at: record.createdAt, updated_at: record.updatedAt,
   });
@@ -76,7 +145,7 @@ export class AgentRunStore {
     catch (error) { if (error?.code !== 'ENOENT') throw error; this.#state = emptyState(); await this.#write(this.#state); }
   }
 
-  async enqueue({ runId, eventKey, tenantId, mode = 'shadow', deadlineMs = 180_000 }) {
+  async enqueue({ runId, eventKey, tenantId, mode = 'shadow', deadlineMs = 180_000, contextSnapshot = null }) {
     const id = bounded(runId, 240); const event = bounded(eventKey, 240); const tenant = bounded(tenantId, 128);
     const deadline = Number(deadlineMs);
     if (!id || !event || !tenant || !['shadow', 'active', 'evaluation'].includes(mode)) throw new TypeError('invalid agent run');
@@ -85,7 +154,7 @@ export class AgentRunStore {
       if (state.runs[id]) return { created: false, run: external(state.runs[id]) };
       const now = this.#now();
       const timestamp = new Date(now).toISOString();
-      state.runs[id] = { runId: id, eventKey: event, tenantId: tenant, mode, status: 'queued', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, deadlineAt: now + deadline, trace: [], observations: [], toolCalls: {}, result: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
+      state.runs[id] = { runId: id, eventKey: event, tenantId: tenant, mode, status: 'queued', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, deadlineAt: now + deadline, contextSnapshot: sanitizeContextSnapshot(contextSnapshot), trace: [], observations: [], toolCalls: {}, result: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
       return { created: true, run: external(state.runs[id]) };
     });
   }

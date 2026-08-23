@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v31-release-fence-cleanup';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v32-source-time-context-wplus';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -22,6 +22,28 @@ function hasImage(payload = {}) {
 function latestSourceImageUrl(payload = {}) {
   const values = Array.isArray(payload.imageUrls) ? payload.imageUrls.filter((value) => typeof value === 'string' && value.trim()) : [];
   return text(values.at(-1), 2_000);
+}
+
+function messageTime(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function sourceTimeState(envelope, conversationContextStore) {
+  const payload = envelope?.payload ?? {};
+  const state = await conversationContextStore.get(envelope.tenantId, payload);
+  const sourceAt = messageTime(envelope.ts) ?? Date.now();
+  const fallbackMessages = (Array.isArray(state?.messages) ? state.messages : [])
+    .filter((item) => (messageTime(item?.at) ?? sourceAt) <= sourceAt)
+    .map((item) => ({
+      at: messageTime(item?.at) ?? sourceAt,
+      role: item?.role === 'seller' ? 'seller' : 'buyer',
+      source: item?.role === 'seller' ? text(item?.source, 32) || 'unknown' : 'buyer',
+      content: text(item?.content ?? item?.text, 1_000) || (item?.image === true ? '[图片]' : ''),
+    })).filter((item) => item.content);
+  return { facts: state?.facts ?? {}, messages: fallbackMessages };
 }
 
 function sourceSnapshot(source) {
@@ -97,6 +119,64 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
         status: 'success', tool: 'inspect_ticket_request', summary: '已完成有界票务请求检查',
         facts: inspectTicketRequest({ message: payload.content ?? payload.text, hasImage: hasImage(payload), facts: state?.facts }),
         next_actions: hasImage(payload) ? ['recognize_image'] : ['respond', 'ask_for_image'],
+      };
+    },
+    async resolve_ticket_identity() {
+      if (mode !== 'active') {
+        const complete = ['cinema', 'movie', 'date', 'showtime'].every((key) => identityFacts[key]);
+        return complete
+          ? { status: 'success', tool: 'resolve_ticket_identity', summary: '已读取事件时点的文字场次事实', facts: identityFacts, next_actions: ['show_available_wplus_seats'] }
+          : { status: 'warning', tool: 'resolve_ticket_identity', summary: '事件时点缺少可唯一匹配的文字场次事实', facts: identityFacts, next_actions: ['ask_for_missing_information'] };
+      }
+      if (typeof quotePreviewClient?.recognize !== 'function' || typeof quotePreviewClient?.resolveShowtime !== 'function') {
+        return { status: 'error', tool: 'resolve_ticket_identity', summary: '文字场次解析工具不可用', facts: {}, next_actions: ['handoff'], stop_reason: 'ticket_identity_tool_unavailable' };
+      }
+      const envelope = source.envelope;
+      const candidateSet = state?.facts?.candidate_set;
+      const candidateIndex = candidateIndexFromMessage(envelope?.payload?.content ?? envelope?.payload?.text);
+      const selectedCandidate = candidateIndex && Array.isArray(candidateSet?.candidates)
+        ? candidateSet.candidates.find((candidate) => Number(candidate?.index) === candidateIndex)
+        : null;
+      let recognized;
+      if (selectedCandidate && candidateSet?.base_recognition) {
+        recognized = {
+          status: 'recognized', tenant_id: String(envelope.tenantId), text_quote: true,
+          recognition: { ...boundedIdentity(candidateSet.base_recognition), ...boundedIdentity(selectedCandidate) },
+        };
+      } else {
+        recognized = await quotePreviewClient.recognize(envelope);
+      }
+      if (recognized?.status !== 'recognized') {
+        return { status: 'warning', tool: 'resolve_ticket_identity', summary: '买家文字尚不足以唯一匹配影院场次', facts: {}, next_actions: ['ask_for_missing_information'] };
+      }
+      let resolved;
+      try { resolved = await quotePreviewClient.resolveShowtime(recognized); }
+      catch (error) {
+        const candidates = typeof quotePreviewClient.resolveCandidates === 'function'
+          ? await quotePreviewClient.resolveCandidates(recognized)
+          : [];
+        if (candidates.length && typeof conversationContextStore?.recordCandidateSet === 'function') {
+          await conversationContextStore.recordCandidateSet(envelope.tenantId, envelope.payload ?? {}, {
+            baseRecognition: recognized.recognition, candidates,
+          });
+          const labels = candidates.map((candidate, index) => `${index + 1}.${text(candidate.cinema, 160) || '候选影院'}`);
+          return {
+            status: 'warning', tool: 'resolve_ticket_identity', summary: '官方场次匹配返回多个安全候选',
+            facts: { ...boundedIdentity(recognized.recognition), candidate_count: candidates.length, candidate_labels: labels },
+            authoritative_reply: `匹配到多个影院候选：${labels.join('；')}。请回复序号或完整分店名。`, next_actions: ['respond'],
+          };
+        }
+        return { status: 'warning', tool: 'resolve_ticket_identity', summary: '影院或场次尚未唯一匹配', facts: boundedIdentity(recognized.recognition), next_actions: ['ask_for_missing_information'] };
+      }
+      if (resolved?.status !== 'resolved') {
+        return { status: 'warning', tool: 'resolve_ticket_identity', summary: '影院或场次尚未唯一匹配', facts: boundedIdentity(recognized.recognition), next_actions: ['ask_for_missing_information'] };
+      }
+      if (selectedCandidate) await conversationContextStore?.clearCandidateSet?.(envelope.tenantId, envelope.payload ?? {});
+      quoteInput = compactQuoteInput(resolved);
+      showtimeResolved = true;
+      return {
+        status: 'success', tool: 'resolve_ticket_identity', summary: '已从买家文字唯一匹配影院、影片、日期和场次',
+        facts: { ...boundedIdentity(resolved.recognition), _quote_input: quoteInput }, next_actions: ['show_available_wplus_seats'],
       };
     },
     async recognize_image() {
@@ -175,10 +255,8 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
     async list_available_wplus_seats() {
       if (mode !== 'active') return sourceObservation(source, 'list_available_wplus_seats');
       const message = text(source?.envelope?.payload?.content ?? source?.envelope?.payload?.text, 1_000);
-      const row = Number(message.match(/(?:^|\D)([1-9]\d?)\s*排/u)?.[1]);
-      if (!Number.isInteger(row) || row < 1 || row > 99) {
-        return { status: 'error', tool: 'list_available_wplus_seats', summary: '缺少需要查询的明确排数', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_row_required' };
-      }
+      const rowMatch = message.match(/(?:^|\D)([1-9]\d?)\s*排/u);
+      const row = rowMatch ? Number(rowMatch[1]) : null;
       const recognition = quoteInput?.recognition;
       if (!recognition || typeof recognition !== 'object' || Array.isArray(recognition)) {
         return { status: 'error', tool: 'list_available_wplus_seats', summary: '缺少已识别的影院场次事实', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_lookup_artifact_missing' };
@@ -187,17 +265,19 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
         return { status: 'error', tool: 'list_available_wplus_seats', summary: '只读实时座位工具不可用', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_reader_unavailable' };
       }
       const result = await quotePreviewClient.availableSeats({ recognition, row });
+      const seatPattern = row === null ? /^\d{1,2}排\d{1,3}座$/u : new RegExp(`^${row}排\\d{1,3}座$`, 'u');
       const seats = Array.isArray(result?.seats)
-        ? result.seats.map((seat) => text(seat, 80)).filter((seat) => new RegExp(`^${row}排\\d{1,3}座$`, 'u').test(seat)).slice(0, 30)
+        ? result.seats.map((seat) => text(seat, 80)).filter((seat) => seatPattern.test(seat)).slice(0, 30)
         : [];
       const availableCount = Number.isSafeInteger(result?.available_count) && result.available_count >= seats.length
         ? result.available_count
         : seats.length;
       const offerAvailable = result?.wplus_offer_available === true;
       const cinema = text(result?.matched_cinema_name ?? recognition.cinema, 160);
+      const scopeLabel = row === null ? 'W+区域' : `${row}排`;
       const authoritativeReply = offerAvailable && seats.length
-        ? `当前万达实时座位图中，${row}排可选W+座位：${seats.join('、')}。座位状态可能变化，请以提交订单时页面为准。`
-        : `当前万达实时座位图中，${row}排暂未确认到可选W+优惠座位。`;
+        ? `当前万达实时座位图中，${scopeLabel}可选座位：${seats.join('、')}。座位状态可能变化，请以提交订单时页面为准。`
+        : `当前万达实时座位图中，${scopeLabel}暂未确认到可选W+优惠座位。`;
       return {
         status: 'success', tool: 'list_available_wplus_seats', summary: '已完成只读实时W+座位查询',
         facts: { requested_row: row, available_count: availableCount, seat_numbers: seats, wplus_offer_available: offerAvailable, ...(cinema ? { cinema } : {}) },
@@ -206,10 +286,32 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
     },
     async record_seat_preference() {
       const snapshot = source?.result?.agent_reply_snapshot;
-      const authoritativeReply = mode !== 'active' && snapshot?.kind === 'conversation_follow_up' ? text(snapshot.text, 1_000) : '';
+      const shadowReply = mode !== 'active' && snapshot?.kind === 'conversation_follow_up' ? text(snapshot.text, 1_000) : '';
+      if (mode !== 'active') {
+        return {
+          status: 'success', tool: 'record_seat_preference', summary: '影子模式仅评估记录指令，不写入业务状态',
+          facts: { preference_recorded: false }, ...(shadowReply ? { authoritative_reply: shadowReply } : {}), next_actions: ['respond'],
+        };
+      }
+      const envelope = source?.envelope ?? {};
+      const message = text(envelope.payload?.content ?? envelope.payload?.text, 120);
+      const circled = /(?:红点|绿点|圈出|圈的|画的|标出|圈好|圈了|标好|标了)/u.test(message);
+      if (circled && typeof conversationContextStore?.recordCircledDeliveryInstruction === 'function') {
+        await conversationContextStore.recordCircledDeliveryInstruction(envelope.tenantId, envelope.payload ?? {}, latestSourceImageUrl(envelope.payload));
+        return {
+          status: 'success', tool: 'record_seat_preference', summary: '已记录按买家原图圈选位置出票的履约指令',
+          facts: { circled_delivery_instruction_recorded: true },
+          authoritative_reply: '已记录：出票时按您原图圈选的位置操作。若该位置届时不可选，会先联系您确认，不会擅自换座。', next_actions: ['respond'],
+        };
+      }
+      if (typeof conversationContextStore?.recordSeatPreference !== 'function'
+        || !await conversationContextStore.recordSeatPreference(envelope.tenantId, envelope.payload ?? {}, message)) {
+        return { status: 'error', tool: 'record_seat_preference', summary: '位置偏好未能安全保存', facts: {}, next_actions: ['handoff'], stop_reason: 'seat_preference_store_unavailable' };
+      }
       return {
-        status: 'success', tool: 'record_seat_preference', summary: '影子模式仅评估记录指令，不写入业务状态',
-        facts: { preference_recorded: false }, ...(authoritativeReply ? { authoritative_reply: authoritativeReply } : {}), next_actions: ['respond'],
+        status: 'success', tool: 'record_seat_preference', summary: '已保存买家文字位置偏好，但未形成官方选座',
+        facts: { preference_recorded: true },
+        authoritative_reply: '已记录您的位置偏好，具体座位仍以出票时官方实时可选情况为准；当前未替您选座或锁座。', next_actions: ['respond'],
       };
     },
     async confirm_active_quote() {
@@ -286,7 +388,13 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       };
     },
     async read_linked_order() {
-      const orderId = text(state?.facts?.order_id, 128);
+      let orderId = text(state?.facts?.order_id, 128);
+      if (!orderId && mode !== 'evaluation' && typeof conversationContextStore?.get === 'function') {
+        const envelope = source?.envelope ?? {};
+        const liveState = await conversationContextStore.get(envelope.tenantId, envelope.payload ?? {});
+        orderId = text(liveState?.facts?.order_id, 128);
+        if (orderId && state?.facts && typeof state.facts === 'object') state.facts.order_id = orderId;
+      }
       if (!orderId) return { status: 'error', tool: 'read_linked_order', summary: '未找到系统关联订单', facts: {}, next_actions: ['create_manual_task'], stop_reason: 'linked_order_missing' };
       if (typeof coreFor !== 'function') return { status: 'error', tool: 'read_linked_order', summary: '权威订单读取工具不可用', facts: {}, next_actions: ['create_manual_task'], stop_reason: 'order_reader_unavailable' };
       const core = coreFor(String(source?.envelope?.tenantId ?? ''));
@@ -317,6 +425,14 @@ function compactQuoteInput(value = {}) {
   if (!candidate.tenant_id || !candidate.recognition) throw new TypeError('invalid recognition artifact');
   if (JSON.stringify(candidate).length > 5_000) throw new TypeError('recognition artifact exceeds durable bound');
   return candidate;
+}
+
+function candidateIndexFromMessage(value) {
+  const message = text(value, 80).replace(/\s+/gu, '');
+  const chinese = { '第一个': 1, '第一个店': 1, '第二个': 2, '第二个店': 2, '第三个': 3, '第三个店': 3, '第四个': 4, '第四个店': 4, '第五个': 5, '第五个店': 5 };
+  if (chinese[message]) return chinese[message];
+  const matched = message.match(/^第?([1-5])个(?:店)?$/u);
+  return matched ? Number(matched[1]) : null;
 }
 
 function safePositiveInteger(value) {
@@ -390,11 +506,14 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
   if (!runStore || !eventStore || !conversationContextStore || !planner || typeof getSettings !== 'function') throw new TypeError('shadow agent runtime dependencies are required');
   const activeControllers = new Set();
 
-  async function schedule(envelope, { mode = 'shadow' } = {}) {
+  async function schedule(envelope, { mode = 'shadow', contextSnapshot = null } = {}) {
     if (envelope?.event !== 'im.message.received') return { created: false, run: null };
     if (!['shadow', 'active', 'evaluation'].includes(mode)) throw new TypeError('invalid durable agent mode');
     if (mode === 'active' && !replyOutboxStore) throw new TypeError('active agent reply outbox is required');
-    return runStore.enqueue({ runId: runIdFor(envelope, mode), eventKey: eventKey(envelope), tenantId: envelope.tenantId, mode, deadlineMs });
+    const sourceContext = mode === 'evaluation'
+      ? null
+      : contextSnapshot ?? await sourceTimeState(envelope, conversationContextStore);
+    return runStore.enqueue({ runId: runIdFor(envelope, mode), eventKey: eventKey(envelope), tenantId: envelope.tenantId, mode, deadlineMs, contextSnapshot: sourceContext });
   }
 
   async function tick() {
@@ -445,12 +564,11 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         return { status: 'completed', run_id: run.run_id, result: persistedResult };
       }
       const payload = source.envelope?.payload ?? {};
-      const [state, settings] = await Promise.all([
-        run.mode === 'evaluation'
-          ? Promise.resolve(sourceStateSnapshot(source))
-          : conversationContextStore.get(source.envelope.tenantId, payload),
-        getSettings(source.envelope.tenantId),
-      ]);
+      const settings = await getSettings(source.envelope.tenantId);
+      const state = run.mode === 'evaluation'
+        ? sourceStateSnapshot(source)
+        : run.context_snapshot ?? await sourceTimeState(source.envelope, conversationContextStore);
+      const executionState = state;
       const context = {
         event_id: String(source.envelope.id), tenant_id: String(source.envelope.tenantId),
         latest_message: text(payload.content ?? payload.text) || '[图片或非文本消息]', has_image: hasImage(payload),
@@ -460,7 +578,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         human_takeover: false, signal: controller.signal,
       };
       const agent = createConversationAgent({
-        planner, tools: runtimeTools(source, context.state, run.mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, run.observations),
+        planner, tools: runtimeTools(source, executionState, run.mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, run.observations),
         maxSteps, mode: run.mode, allowWriteSimulation: run.mode !== 'active',
       });
       const outcome = await agent.runTurn(context, {

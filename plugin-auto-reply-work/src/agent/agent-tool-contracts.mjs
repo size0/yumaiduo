@@ -1,7 +1,7 @@
 const ACTIONS = Object.freeze([
   'respond', 'ask_for_image', 'ask_for_city', 'ask_for_missing_information',
-  'inspect_ticket_request', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'request_price_change',
-  'create_manual_task', 'get_manual_task_status', 'record_seat_preference', 'confirm_quote', 'handoff', 'wait',
+  'inspect_ticket_request', 'resolve_ticket_identity', 'recognize_image', 'resolve_showtime', 'quote_realtime', 'read_active_quote', 'request_price_change',
+  'create_manual_task', 'get_manual_task_status', 'show_available_wplus_seats', 'record_seat_preference', 'confirm_quote', 'handoff', 'wait',
 ]);
 
 function contract({ effect = 'read', facts = [], next = [], authoritativeReply = false }) {
@@ -24,7 +24,11 @@ const SOURCE_RESULT = ['status', 'failure_code', 'quote_succeeded'];
 export const AGENT_TOOL_CONTRACTS = Object.freeze({
   inspect_ticket_request: contract({
     facts: ['has_image', 'requested_ticket_count', 'has_typed_seat_instruction', 'has_linked_order', 'has_active_quote', 'known_identity_fields', 'missing_identity_fields'],
-    next: ['recognize_image', 'respond', 'ask_for_image', 'handoff'],
+    next: ['resolve_ticket_identity', 'recognize_image', 'respond', 'ask_for_image', 'handoff'],
+  }),
+  resolve_ticket_identity: contract({
+    facts: [...IDENTITY, '_quote_input', 'candidate_count', 'candidate_labels'],
+    next: ['show_available_wplus_seats', 'ask_for_missing_information', 'respond', 'handoff'], authoritativeReply: true,
   }),
   recognize_image: contract({
     facts: [...IDENTITY, 'status', 'image_type', 'requested_ticket_count', '_quote_input'],

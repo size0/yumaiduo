@@ -11,6 +11,66 @@ const envelope = {
   payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '两张多少钱', imageUrls: ['https://img.alicdn.com/a.png'] },
 };
 
+test('scheduling persists a workflow-projected source-time buyer and seller history', async () => {
+  const enqueued = [];
+  const sourceEnvelope = { ...envelope, ts: Date.parse('2026-08-23T04:00:02Z'), payload: { ...envelope.payload, imageUrls: [], remoteMessageId: 'buyer-current' } };
+  const runtime = createShadowAgentRuntime({
+    runStore: { async enqueue(input) { enqueued.push(input); return { created: true, run: { run_id: input.runId } }; } },
+    eventStore: {
+      async wasSentMessage(_tenantId, _chatId, messageId) { return messageId === 'seller-plugin'; },
+    },
+    conversationContextStore: { async get() { return {
+      facts: { city: '泉州', stage: 'collecting_information', order_id: 'must-not-reach-planner' },
+      messages: [{ at: sourceEnvelope.ts, role: 'buyer', text: '第二个' }, { at: sourceEnvelope.ts + 10_000, role: 'buyer', text: '未来消息' }],
+    }; } },
+    coreFor() { return { im: { async listMessages() { return { items: [
+      { direction: 'outbound', messageId: 'seller-human', content: '哪个店？', sentAt: '2026-08-23T04:00:00Z' },
+      { direction: 'inbound', messageId: 'buyer-current', content: '第二个', sentAt: '2026-08-23T04:00:02Z' },
+      { direction: 'outbound', messageId: 'seller-plugin', content: '未来插件回复', sentAt: '2026-08-23T04:00:03Z' },
+    ] }; } } }; },
+    planner: { async plan() { throw new Error('not used'); } },
+    getSettings: async () => ({}),
+  });
+
+  await runtime.schedule(sourceEnvelope, { contextSnapshot: {
+    facts: { city: '泉州', stage: 'collecting_information', order_id: 'must-not-reach-planner' },
+    messages: [
+      { at: Date.parse('2026-08-23T04:00:00Z'), role: 'seller', source: 'external_seller', content: '哪个店？' },
+      { at: sourceEnvelope.ts, role: 'buyer', source: 'buyer', content: '第二个' },
+    ],
+  } });
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0].contextSnapshot.facts.city, '泉州');
+  assert.deepEqual(enqueued[0].contextSnapshot.messages.map((item) => [item.role, item.content, item.source]), [
+    ['seller', '哪个店？', 'external_seller'],
+    ['buyer', '第二个', 'buyer'],
+  ]);
+});
+
+test('live shadow planning uses the durable source-time snapshot instead of mutable future state', async () => {
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-shadow-snapshot-')), 'runs.json'));
+  await store.initialize();
+  let state = { facts: { stage: 'collecting_information', city: '泉州' }, messages: [{ at: 1, role: 'buyer', text: '还有W座位吗' }] };
+  const planned = [];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: { ...envelope, payload: { ...envelope.payload, imageUrls: [], content: '还有W座位吗' } }, result: {} }; } },
+    conversationContextStore: { async get() { return structuredClone(state); } },
+    planner: { async plan(input) {
+      planned.push(input);
+      return { intent: '其他', confidence: 0.99, goal: '安全结束', action: 'wait', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '测试快照' };
+    } },
+    getSettings: async () => ({}),
+  });
+  await runtime.schedule({ ...envelope, payload: { ...envelope.payload, imageUrls: [], content: '还有W座位吗' } });
+  state = { facts: { stage: 'paid_manual_delivery', paid: true }, messages: [{ at: 2, role: 'buyer', text: '未来已付款' }] };
+  await runtime.tick();
+
+  assert.equal(planned[0].state.facts.stage, 'collecting_information');
+  assert.equal(planned[0].state.facts.paid, undefined);
+  assert.equal(planned[0].state.messages.some((item) => item.content === '未来已付款' || item.text === '未来已付款'), false);
+});
+
 test('shadow agent fails closed when a successful source quote lacks its authoritative reply snapshot', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-shadow-runtime-')), 'runs.json'));
   await store.initialize();
@@ -205,6 +265,30 @@ test('historical evaluation runs are versioned, side-effect-free, and independen
   assert.equal(run.result.reason, 'missing_authoritative_reply_snapshot');
   assert.equal(run.result.reply_queued, undefined);
   assert.deepEqual(run.tool_calls.map((call) => call.tool), ['recognize_image', 'resolve_showtime', 'quote_realtime']);
+});
+
+test('Active semantic seat preference is persisted without claiming an official seat selection', async () => {
+  const preferenceEnvelope = { ...envelope, payload: { ...envelope.payload, content: '后面一点的位置', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-semantic-preference-')), 'runs.json'));
+  await store.initialize();
+  const recorded = []; const queued = [];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: preferenceEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: {
+      async get() { return { facts: {}, messages: [] }; },
+      async recordSeatPreference(tenantId, payload, value) { recorded.push([tenantId, payload.peerUnb, value]); return true; },
+    },
+    planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '记录位置偏好', action: 'record_seat_preference', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家描述靠后偏好' }; } },
+    getSettings: async () => ({}),
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(preferenceEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.deepEqual(recorded, [['tenant-1', 'buyer-1', '后面一点的位置']]);
+  assert.match(queued[0].text, /位置偏好/u);
+  assert.doesNotMatch(queued[0].text, /已选座|已锁座/u);
 });
 
 test('shadow and evaluation write-shaped plans remain externally side-effect-free', async (t) => {
@@ -451,7 +535,73 @@ test('Active W+ seat lookup uses the read-only realtime endpoint with a system-p
   });
 });
 
-test('Active W+ seat lookup fails closed without a row and never calls realtime seats', async () => {
+test('Active ordinal follow-up resolves the persisted cinema candidate before reading W+ seats', async () => {
+  const ordinalEnvelope = { ...envelope, payload: { ...envelope.payload, content: '第二个', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-candidate-reference-')), 'runs.json'));
+  await store.initialize();
+  const resolvedCinemas = []; const queued = [];
+  const baseRecognition = { city: '泉州', movie: '奥德赛', date: '2026-08-23', showtime: '15:50' };
+  const contextStore = {
+    async get() { return { facts: { candidate_set: { base_recognition: baseRecognition, candidates: [{ index: 1, cinema: '晋江万达广场店' }, { index: 2, cinema: '晋江万达影城SM广场店' }] } }, messages: [] }; },
+    async clearCandidateSet() { return true; },
+  };
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: ordinalEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: contextStore,
+    planner: { async plan(input) {
+      const action = input.observations.length === 0 ? 'resolve_ticket_identity' : 'show_available_wplus_seats';
+      return { intent: '补充信息', confidence: 0.99, goal: '解析上一轮影院候选', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '序号指代候选' };
+    } },
+    getSettings: async () => ({ recognition_enabled: true }),
+    quotePreviewClient: {
+      async recognize() { throw new Error('ordinal reference must reuse the candidate set'); },
+      async resolveShowtime(input) { resolvedCinemas.push(input.recognition.cinema); return { ...input, status: 'resolved' }; },
+      async availableSeats() { return { row: null, seats: ['9排9座'], available_count: 1, wplus_offer_available: true, matched_cinema_name: '晋江万达影城SM广场店' }; },
+    },
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(ordinalEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.deepEqual(resolvedCinemas, ['晋江万达影城SM广场店']);
+  assert.match(queued[0].text, /9排9座/u);
+});
+
+test('Active text-only W+ question resolves identity then reads all current W+ seats without price probes', async () => {
+  const textEnvelope = { ...envelope, payload: { ...envelope.payload, content: '泉州晋江万达今天15:50奥德赛还有W座位吗', imageUrls: [] } };
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-text-wplus-')), 'runs.json'));
+  await store.initialize();
+  const calls = []; const queued = [];
+  const recognition = { cinema: '晋江万达广场店', city: '泉州', movie: '奥德赛', date: '2026-08-23', showtime: '15:50' };
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: textEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner: { async plan(input) {
+      const action = input.observations.length === 0 ? 'resolve_ticket_identity' : 'show_available_wplus_seats';
+      return { intent: '选座核价', confidence: 0.99, goal: '查询实时W+库存', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '纯文字场次信息完整' };
+    } },
+    getSettings: async () => ({ recognition_enabled: true }),
+    quotePreviewClient: {
+      async recognize(input) { calls.push(['recognize', input.payload.content]); return { status: 'recognized', tenant_id: 'tenant-1', recognition, text_quote: true }; },
+      async resolveShowtime(input) { calls.push(['resolve', input.recognition]); return { ...input, status: 'resolved', recognition }; },
+      async availableSeats(input) { calls.push(['seats', input]); return { row: null, seats: ['8排10座', '8排11座'], available_count: 2, wplus_offer_available: true, matched_cinema_name: '晋江万达广场店' }; },
+      async quote() { throw new Error('availability lookup must not create a temporary price probe'); },
+    },
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(textEnvelope, { mode: 'active' });
+  await runtime.tick();
+
+  assert.deepEqual(calls.map(([name]) => name), ['recognize', 'resolve', 'seats']);
+  assert.equal(calls[2][1].row, null);
+  assert.match(queued[0].text, /8排10座、8排11座/u);
+  const run = await store.get('active:tenant-1:event-1');
+  assert.deepEqual(run.tool_calls.map((call) => call.tool), ['resolve_ticket_identity', 'list_available_wplus_seats']);
+});
+
+test('Active W+ seat lookup with reusable identity may list all rows when no row is requested', async () => {
   const seatEnvelope = { ...envelope, payload: { ...envelope.payload, content: '还有W+位置吗', imageUrls: [] } };
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-seat-row-missing-')), 'runs.json'));
   await store.initialize();
@@ -462,14 +612,14 @@ test('Active W+ seat lookup fails closed without a row and never calls realtime 
     conversationContextStore: { async get() { return { facts: { quote_draft: { recognition_artifact: { status: 'recognized', tenant_id: 'tenant-1', recognition: { cinema: '测试万达' } } } }, messages: [] }; } },
     planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '查询W+座位', action: 'show_available_wplus_seats', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '座位咨询' }; } },
     getSettings: async () => ({ quote_enabled: true }),
-    quotePreviewClient: { async availableSeats() { calls += 1; return {}; } },
+    quotePreviewClient: { async availableSeats(input) { calls += 1; assert.equal(input.row, null); return { row: null, seats: ['8排10座'], available_count: 1, wplus_offer_available: true, matched_cinema_name: '测试万达' }; } },
     replyOutboxStore: { async enqueue() { return { created: true }; } },
   });
   await runtime.schedule(seatEnvelope, { mode: 'active' });
   await runtime.tick();
   const run = await store.get('active:tenant-1:event-1');
-  assert.equal(calls, 0);
-  assert.equal(run.result.reason, 'seat_row_required');
+  assert.equal(calls, 1);
+  assert.equal(run.result.reason, 'authoritative_tool_response');
 });
 
 test('durable active image turn invokes real recognition, read-only resolution, and realtime quote tools in order', async () => {
