@@ -60,7 +60,7 @@ Create `reply/reply-orchestrator.mjs` as the only interface allowed to submit bu
 
 ### Wave 3 — quote orchestration
 
-Create `quote/quote-orchestrator.mjs` owning image receipt, quote draft fusion, recognition, showtime resolution, quote result persistence and quote follow-ups. It receives stores, clients and the single reply port through explicit dependencies. Wanda pricing and lock rules remain in V3.
+Completed: `quote/quote-orchestrator.mjs` owns recognition prefetch, bounded quote-draft persistence, duplicate-attempt claiming and the single realtime quote invocation. `quote-preview-client.mjs` has been reduced from935 lines to约365 lines and now delegates pure responsibilities to `quote-text-facts.mjs`, `quote-recognition-fusion.mjs`, `quote-failure-mapper.mjs` and `quote-response-presenter.mjs`. The compatibility export for `parseTextQuoteRequest` remains stable. Wanda pricing and lock rules remain inV3.
 
 ### Wave 4 — order orchestration
 
