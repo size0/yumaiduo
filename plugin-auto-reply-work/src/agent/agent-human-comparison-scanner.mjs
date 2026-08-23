@@ -84,7 +84,9 @@ export function createAgentHumanComparisonScanner({ conversationContextStore, ev
               ?? '') === buyerId);
           if (!source) continue;
           if (!runsByTenant.has(context.tenant_id)) runsByTenant.set(context.tenant_id, await agentRunStore.list({ tenantId: context.tenant_id, limit: 500 }));
-          const run = runsByTenant.get(context.tenant_id).find((item) => item.mode === 'shadow' && item.event_key === source.key);
+          const run = runsByTenant.get(context.tenant_id).find((item) => (
+            item.mode === 'shadow' && item.event_key === source.key && item.status === 'completed' && item.result
+          ));
           if (!run) continue;
           const trace = Array.isArray(run.result?.trace) ? run.result.trace : [];
           const plan = trace[0] ?? {}; const humanExpected = expectedActionFor(sellerReply);

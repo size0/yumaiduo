@@ -45,8 +45,19 @@ export class AgentHumanComparisonStore {
     return this.#mutate((state) => {
       const existing = state[candidate.id];
       if (existing) {
-        existing.outcome = candidate.outcome; existing.quote_order_state = candidate.quote_order_state; existing.updated_at = this.now();
-        return { created: false, record: structuredClone(existing) };
+        if (existing.review?.status === 'unreviewed') {
+          state[candidate.id] = {
+            ...candidate,
+            created_at: existing.created_at,
+            review: existing.review,
+            updated_at: this.now(),
+          };
+        } else {
+          existing.outcome = candidate.outcome;
+          existing.quote_order_state = candidate.quote_order_state;
+          existing.updated_at = this.now();
+        }
+        return { created: false, record: structuredClone(state[candidate.id]) };
       }
       state[candidate.id] = candidate;
       return { created: true, record: structuredClone(candidate) };

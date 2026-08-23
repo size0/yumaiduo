@@ -19,10 +19,15 @@ const input = {
 test('human comparison is tenant isolated, idempotent, and review remains explicit', async () => {
   const store = new AgentHumanComparisonStore(join(await mkdtemp(join(tmpdir(), 'human-comparison-')), 'comparisons.json'), { now: () => 123 });
   assert.equal((await store.capture(input)).created, true);
-  assert.equal((await store.capture({ ...input, outcome: { stage: 'paid', paid: true } })).created, false);
+  assert.equal((await store.capture({
+    ...input,
+    agent: { intent: '核价', action: 'ask_for_image', proposed_reply: '请补一张完整选座图。' },
+    outcome: { stage: 'paid', paid: true },
+  })).created, false);
   assert.deepEqual(await store.list({ tenantId: 'other' }), []);
   const [record] = await store.list({ tenantId: '107' });
   assert.equal(record.outcome.stage, 'paid');
+  assert.equal(record.agent.action, 'ask_for_image');
   assert.equal(record.review.status, 'unreviewed');
   assert.doesNotMatch(JSON.stringify(record), /seller-message-1/u);
   const reviewed = await store.review('107', record.id, { label: 'needs_policy', target: 'business_rule', note: '先形成规则草稿' });
