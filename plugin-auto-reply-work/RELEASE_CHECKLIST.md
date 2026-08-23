@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产V3来自 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4`，插件release来自 `187ad21120d24a926c4379329fd725816eec15c9`：V3契约为 `wanda-v3-v13-shadow-evaluation-switch`，插件Runtime为 `wanda-agent-runtime-v33-shadow-evaluation-switch`。因生产审计发现圈选误判和混合座位类型核价缺口，自动报价已紧急关闭；确定性待付款改价保持开启，防止已确认报价订单漏改。自由生成AI回复保持关闭，独立只读Shadow评测继续积累事件时点样本。
+> 当前生产V3来自 `b92d6d5ba8129c1a9173afcee797dbfb44ffd3a4`，插件release来自 `1bfbdf3fe4fec0613b5724632331c08e7babd7f4`：V3契约为 `wanda-v3-v13-shadow-evaluation-switch`，插件Runtime为 `wanda-agent-runtime-v33-shadow-evaluation-switch`。因生产审计发现圈选误判和混合座位类型核价缺口，自动报价已紧急关闭；确定性待付款改价保持开启，防止已确认报价订单漏改。自由生成AI回复保持关闭，独立只读Shadow评测继续积累事件时点样本。
 
 ## 已完成
 
@@ -39,13 +39,14 @@
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `187ad21` 使用干净依赖执行插件513项测试；生产release再次执行插件513项测试通过；V3 207项保持通过
+- [x] 已在源码提交 `1bfbdf3` 使用干净依赖执行插件513项测试；生产release再次执行插件513项测试通过；V3 207项保持通过
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `187ad21120d24a926c4379329fd725816eec15c9` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/187ad21120d2`
+- [x] 已为源码提交 `1bfbdf3fe4fec0613b5724632331c08e7babd7f4` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/1bfbdf3fe4fe`
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖历史release
 - [x] 新运营工作台以 `/ui/workbench` 隔离上线；Playwright使用本机Edge完成桌面、390px移动端、状态卡、队列筛选、样本门槛及横向溢出E2E，生产静态资源Smoke和实际回滚恢复通过
 - [x] 运营工作台完成视觉重构：简化中文层级、统一蓝灰状态体系、压缩移动端长度、增加一致图标和响应式双栏；桌面/移动截图检查及实际回滚恢复通过
 - [x] `/ui`已成为唯一工作台首页，不再区分新版/旧版；详细配置移至`/ui/settings`并通过“完整设置”进入，旧工作台URL仅保留兼容
+- [x] 工作台CSS/JS固定解析到插件`/ui`挂载目录，已补`/__plugin__/ui`浏览器E2E，避免鱼麦多网关把相对资源请求错误发送到插件挂载目录之外
 - [x] 人工模式不再把人工回复、人工报价、正常付款/履约或缺少自动报价当作异常；生产745条历史操作和198条订单只留下近24小时2条有明确张数冲突证据的风险
 - [x] `quote_enabled=false`或`ai_reply_enabled=false`时不再发送“正在核对实时场次和优惠”；独立开关回归、生产release测试及实际回滚恢复通过
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
@@ -61,12 +62,12 @@
 ## 当前生产候选包证据
 
 - V3 SHA-256：`ed07d72e97cfb1a1f82f0c3f2ba23b411d12d95594eb6eee068911fc32fcf71f`
-- 插件 SHA-256：`09f55ebd7803109ff33f03d348834d9b4bb6f059290371619d3ceb7dc5983465`
-- Manifest SHA-256：`16877b3763d7c2818544244da334f3afce203f83a0b622d1365ff86cd43e35d7`
+- 插件 SHA-256：`e11ce3d5f0c14fbff0d11cb98442aafbb066ee73e45a9a369ad64cdc25f7f762`
+- Manifest SHA-256：`9134aae118abe77ae419f0b0c1cd7600594396713b05e5967438e152cca01dd0`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/187ad21120d2`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/1bfbdf3fe4fe`
 - 生产V3：`/opt/wanda-v3-backend/releases/v13-shadow-switch-b92d6d5ba812`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v33-single-workbench-187ad21120d2`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v33-ui-asset-prefix-1bfbdf3fe4fe`
 
 ## 提交前由门户确认
 
