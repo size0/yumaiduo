@@ -57,6 +57,7 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
     "quote_enabled": True,
     "auto_price_change": False,
     "ai_reply_enabled": False,
+    "shadow_evaluation_enabled": False,
     "conversation_agent_mode": "shadow",
     "agent_canary_enabled": False,
     "agent_canary_kill_switch": True,

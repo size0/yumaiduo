@@ -56,6 +56,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
             "quote_enabled",
             "auto_price_change",
             "ai_reply_enabled",
+            "shadow_evaluation_enabled",
             "conversation_agent_mode",
             "ai_reply_system_prompt",
             "ai_reply_shop_background",

@@ -175,7 +175,7 @@ export function createWorkflow({
         if (!settings.automation_enabled) {
           let agentRunScheduled = false;
           if (
-            settings.ai_reply_enabled === true
+            (settings.ai_reply_enabled === true || settings.shadow_evaluation_enabled === true)
             && settings.conversation_agent_mode === 'shadow'
             && shadowAgentScheduler?.schedule
           ) {
@@ -338,7 +338,7 @@ export function createWorkflow({
       }
       runtimeSettings = { ...runtimeSettings, conversation_agent_mode: 'shadow', execution_owner: 'deterministic' };
     }
-    if (runtimeSettings.ai_reply_enabled && runtimeSettings.conversation_agent_mode === 'shadow' && shadowAgentScheduler?.schedule) {
+    if ((runtimeSettings.ai_reply_enabled || runtimeSettings.shadow_evaluation_enabled) && runtimeSettings.conversation_agent_mode === 'shadow' && shadowAgentScheduler?.schedule) {
       try {
         await shadowAgentScheduler.schedule(envelope, {
           contextSnapshot: await durableAgentContextSnapshot(envelope, quoteContext, runtimeSettings),
@@ -351,7 +351,7 @@ export function createWorkflow({
       replyHistoryPromise ??= loadReplyHistory(envelope, runtimeSettings);
       return replyHistoryPromise;
     };
-    const shadowAgentResultPromise = runtimeSettings.ai_reply_enabled
+    const shadowAgentResultPromise = (runtimeSettings.ai_reply_enabled || runtimeSettings.shadow_evaluation_enabled)
       && runtimeSettings.conversation_agent_mode === 'shadow'
       && !shadowAgentScheduler
       && conversationAgentPlanner
@@ -1165,6 +1165,7 @@ export function createWorkflow({
       quote_enabled: settings.quote_enabled ?? settings.shop_features?.quote_enabled ?? settings.automation_enabled === true,
       price_change_enabled: settings.price_change_enabled ?? settings.shop_features?.price_change_enabled ?? settings.auto_price_change === true,
       ai_reply_enabled: settings.ai_reply_enabled === true,
+      shadow_evaluation_enabled: settings.shadow_evaluation_enabled === true,
       conversation_agent_mode: requestedAgentMode === 'active' && executionOwner !== 'agent' ? 'shadow' : requestedAgentMode,
       execution_owner: executionOwner,
       agent_canary_enabled: settings.agent_canary_enabled === true,

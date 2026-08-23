@@ -301,6 +301,34 @@ test('a disabled shop still schedules shadow learning without sending or running
   assert.equal(calls.find(([name]) => name === 'complete').at(-1).agent_run_scheduled, true);
 });
 
+test('quote automation can keep durable shadow sampling while generic AI replies are disabled', async () => {
+  const scheduled = [];
+  let genericReplies = 0;
+  const { workflow, calls } = harness({
+    runtimeSettings: {
+      automation_enabled: true, recognition_enabled: true, quote_enabled: true,
+      auto_price_change: true, ai_reply_enabled: false, shadow_evaluation_enabled: true,
+      conversation_agent_mode: 'shadow', execution_owner: 'deterministic',
+    },
+    quotePreviewClient: {
+      async capture() { return { status: 'preview_ready', reply_text: '权威报价80元' }; },
+    },
+    replyPreviewClient: { async capture() { genericReplies += 1; return { status: 'preview_ready', autoSend: true, draft: { reply: '不得发送' } }; } },
+    shadowAgentScheduler: { async schedule(envelope, options) { scheduled.push([envelope.id, options]); return { created: true }; } },
+    autoReplyEnabled: true,
+  });
+  const result = await workflow.processClaimed(record({
+    id: 'evt-quote-shadow-ai-off', tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(),
+    payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '两张多少钱', imageUrls: ['https://img.alicdn.com/a.png'] },
+  }));
+
+  assert.equal(result.status, 'completed');
+  assert.equal(scheduled.length, 1);
+  assert.ok(scheduled[0][1].contextSnapshot);
+  assert.equal(genericReplies, 0);
+  assert.equal(calls.find(([name]) => name === 'send')[1].text, '权威报价80元');
+});
+
 test('a disabled shop does not trigger automatic message processing', async () => {
   const backendCalls = [];
   const backend = {

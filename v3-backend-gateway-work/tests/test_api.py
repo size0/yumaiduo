@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v12-readonly-wplus-availability",
+        "runtime_contract": "wanda-v3-v13-shadow-evaluation-switch",
     }
 
 
@@ -508,6 +508,7 @@ def test_plugin_bridge_updates_runtime_model_and_quote_policy_without_returning_
             "quote_enabled": True,
             "auto_price_change": False,
             "ai_reply_enabled": True,
+            "shadow_evaluation_enabled": True,
             "ai_reply_shop_background": "万达电影票代买；仅在事实充分时答复。",
             "ai_reply_precautions": "不引导站外交易，不承诺退改。",
             "ai_reply_style": "两句以内，礼貌自然，不使用夸张承诺。",
@@ -524,6 +525,7 @@ def test_plugin_bridge_updates_runtime_model_and_quote_policy_without_returning_
     assert body["automation_enabled"] is True
     assert body["recognition_enabled"] is False
     assert body["quote_enabled"] is True
+    assert body["shadow_evaluation_enabled"] is True
     assert body["ai_reply_model"] == "new-vision"
     assert body["ai_reply_key_configured"] is True
     assert body["ai_reply_shop_background"] == "万达电影票代买；仅在事实充分时答复。"
