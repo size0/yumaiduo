@@ -88,6 +88,10 @@ Extract from `application.mjs`:
 
 Completed: storage, Agent runtime, lifecycle, operator presenters, and operator API now live behind these seams; `application.mjs` is the composition root only. Compatibility re-exports remain temporarily for existing tests and callers.
 
+### Wave 7 — V3 quote-domain decomposition
+
+In progress: `wanda_quote.py` no longer owns pure realtime-seat parsing, official-seat selection, area-probe selection, offer uniqueness, quote-boundary arithmetic or safe failure diagnostics. These live in `wanda_quote_domain.py` and `wanda_quote_diagnostics.py`, with compatibility imports preserved for existing callers. The remaining V3 seam is official showtime matching and the legacy local gateway adapter; direct Wanda temporary-order safety remains unchanged.
+
 ## Parallel-work rules
 
 The following hotspots have one writer at a time:

@@ -13,27 +13,28 @@ import httpx
 from fastapi import HTTPException, status
 
 from .local_catalog import LocalWandaCatalog
+from .wanda_quote_diagnostics import (
+    _diagnostic_failure,
+    _match_diagnostics,
+    _quote_failure_code,
+    _quote_failure_message,
+)
+from .wanda_quote_domain import (
+    REGULAR_SEAT_MARKUP_CENTS, SeatFact, _all_seats_released, _bounded_quote_for_seat,
+    _data, _identifier, _locked_offer_unit_cents, _partition, _positive_int, _requested_zone,
+    _round_quote_cents_to_tenth, _seat_facts, _select_seats, _text, _unit_quote_cents,
+    _wplus_probe_candidates,
+)
 from .wanda_direct_gateway import DirectGatewayError, build_wanda_direct_gateway_from_env
 from .schemas import AvailableWplusSeatsResponse, QuoteRealtimeRequest, QuoteRealtimeResponse, QuoteShowtimeResolveResponse, Recognition, SeatQuote, SeatZoneType
 
 
-WPLUS_STANDARD_NAME: Final = "W+会员专享优惠"
-WPLUS_FRIDAY_NAME: Final = "W+周五会员日专享"
-REGULAR_SEAT_MARKUP_CENTS: Final = 100
 RELEASE_RECHECK_DELAYS_SECONDS: Final = (0.0, 2.0, 5.0)
 _SHOWTIME_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _showtime_lock(showtime_id: str) -> asyncio.Lock:
     return _SHOWTIME_LOCKS.setdefault(showtime_id, asyncio.Lock())
-
-
-def _positive_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
-
-
-def _text(value: Any) -> str:
-    return value.strip() if isinstance(value, str) else ""
 
 
 def _showtime_start(value: str | None) -> str | None:
@@ -59,17 +60,6 @@ def _gateway_auth_headers() -> dict[str, str]:
     """Authenticate V3-to-ticket-gateway calls without exposing an operator session."""
     key = os.getenv("WANDA_QUOTE_GATEWAY_KEY", "").strip()
     return {"X-Plugin-Bridge-Key": key} if key else {}
-
-
-@dataclass(frozen=True)
-class SeatFact:
-    seat_id: str
-    area_code: str
-    original_price_cents: int
-    wplus_member_price_cents: int | None
-    channel_fee_cents: int
-    label: str
-    zone_type: SeatZoneType
 
 
 @dataclass(frozen=True)
@@ -210,32 +200,6 @@ class LocalTicketGateway:
         return result.get("code") in (None, 0, "0") or result.get("success") is True
 
 
-def _data(body: Mapping[str, Any]) -> Mapping[str, Any]:
-    nested = body.get("data")
-    return nested if isinstance(nested, Mapping) else body
-
-
-def _identifier(value: Any) -> str:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
-    return ""
-
-
-def _zone_from_text(value: Any) -> SeatZoneType:
-    text = _text(value)
-    if "W+" in text:
-        return SeatZoneType.WPLUS
-    if "普通" in text:
-        return SeatZoneType.REGULAR
-    if "特惠" in text:
-        return SeatZoneType.DISCOUNT
-    if "优选" in text:
-        return SeatZoneType.PREMIUM
-    return SeatZoneType.UNKNOWN
-
-
 def _match_has_cinema(match: Mapping[str, Any]) -> bool:
     data = _data(match)
     cinema = data.get("cinema")
@@ -257,65 +221,6 @@ def _showtime_and_cinema(match: Mapping[str, Any]) -> tuple[str, str, str | None
     return showtime_id, cinema_id, cinema_name
 
 
-def _seat_facts(payload: Mapping[str, Any]) -> list[SeatFact]:
-    root = _data(payload)
-    realtime = root.get("realtimeSeats") or root.get("realtime_seats") or root
-    realtime = realtime if isinstance(realtime, Mapping) else {}
-    areas = realtime.get("area") or realtime.get("areas") or []
-    if not isinstance(areas, Sequence) or isinstance(areas, (str, bytes)):
-        return []
-    facts: list[SeatFact] = []
-    for area in areas:
-        if not isinstance(area, Mapping):
-            continue
-        area_code = _identifier(area.get("areaCode") or area.get("areaId") or area.get("code"))
-        area_price = area.get("areaPrice")
-        area_price = area_price if isinstance(area_price, Mapping) else {}
-        zone = _zone_from_text(
-            area.get("areaName") or area.get("name") or area.get("label") or area_price.get("areaName")
-        )
-        raw_default_price = (
-            area.get("areaSalesPriceCents") or area.get("areaPrice")
-            if not isinstance(area.get("areaPrice"), Mapping)
-            else area_price.get("salesPrice")
-        )
-        default_price = _positive_int(raw_default_price)
-        wplus_activity = area.get("wPlusActivity") or area_price.get("wPlusActivity")
-        wplus_activity = wplus_activity if isinstance(wplus_activity, Mapping) else {}
-        wplus_member_price = _positive_int(wplus_activity.get("price"))
-        channel_fee = area_price.get("channelFee", area.get("areaChannelFeeCents", 0))
-        channel_fee = channel_fee if isinstance(channel_fee, int) and not isinstance(channel_fee, bool) and channel_fee >= 0 else 0
-        seats = area.get("seat") or area.get("seats") or []
-        if not isinstance(seats, Sequence) or isinstance(seats, (str, bytes)):
-            continue
-        for seat in seats:
-            if not isinstance(seat, Mapping) or seat.get("status") not in (1, "1", "可选"):
-                continue
-            seat_id = _identifier(seat.get("seatId") or seat.get("id"))
-            price = _positive_int(seat.get("areaSalesPriceCents") or seat.get("areaPrice") or seat.get("price")) or default_price
-            if not seat_id or not area_code or price is None:
-                continue
-            row = _text(seat.get("row") or seat.get("rowNum"))
-            column = _text(seat.get("column") or seat.get("colNum"))
-            label = _text(seat.get("name") or seat.get("label")) or (f"{row}排{column}座" if row and column else "")
-            facts.append(SeatFact(seat_id, area_code, price, wplus_member_price, channel_fee, label, zone))
-    return facts
-
-
-def _match_diagnostics(match: Mapping[str, Any]) -> dict[str, Any]:
-    """Return only operator-safe match facts; never echo gateway payloads."""
-    root = _data(match)
-    showtime = root.get("showtime") if isinstance(root.get("showtime"), Mapping) else {}
-    cinema = root.get("cinema") if isinstance(root.get("cinema"), Mapping) else {}
-    candidates = root.get("matches") or root.get("showtimes") or root.get("items")
-    count = len(candidates) if isinstance(candidates, Sequence) and not isinstance(candidates, (str, bytes)) else (1 if _identifier(showtime.get("showtimeId") or showtime.get("id") or root.get("showtime_id")) else 0)
-    return {
-        "result_count": count,
-        "cinema": _text(cinema.get("cinemaName") or cinema.get("name") or root.get("cinemaName")),
-        "showtime": _text(showtime.get("showTime") or showtime.get("startTime") or showtime.get("showtime") or root.get("showtime")),
-    }
-
-
 def _city_identity(value: Any) -> str:
     return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]+", "", _text(value)).removesuffix("市")
 
@@ -329,269 +234,11 @@ def _matched_city_identity(match: Mapping[str, Any]) -> tuple[str, str]:
     return _city_identity(city_name), _city_identity(cinema_name)
 
 
-def _requested_match_diagnostics(recognition: Recognition) -> dict[str, str]:
-    """Keep bounded, non-sensitive identity facts needed to debug zero matches."""
-    showtime = _text(recognition.showtime).split("-", 1)[0][:5]
-    date_text = recognition.date.isoformat() if recognition.date is not None else ""
-    return {
-        "city": _text(recognition.city)[:80],
-        "cinema": _text(recognition.cinema)[:160],
-        "movie": _text(recognition.movie)[:160],
-        "date": date_text,
-        "showtime": showtime,
-        "hall": _text(recognition.hall)[:80],
-    }
-
-
-def _realtime_area_diagnostics(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
-    root = _data(payload)
-    realtime = root.get("realtimeSeats") or root.get("realtime_seats") or root
-    areas = realtime.get("area") or realtime.get("areas") or [] if isinstance(realtime, Mapping) else []
-    if not isinstance(areas, Sequence) or isinstance(areas, (str, bytes)):
-        return []
-    summaries: list[dict[str, Any]] = []
-    for area in areas[:20]:
-        if not isinstance(area, Mapping):
-            continue
-        area_price = area.get("areaPrice") if isinstance(area.get("areaPrice"), Mapping) else {}
-        activity = area.get("wPlusActivity") or area_price.get("wPlusActivity")
-        activity = activity if isinstance(activity, Mapping) else {}
-        seats = area.get("seat") or area.get("seats") or []
-        available = sum(1 for seat in seats if isinstance(seat, Mapping) and seat.get("status") in (1, "1", "可选")) if isinstance(seats, Sequence) and not isinstance(seats, (str, bytes)) else 0
-        summaries.append({
-            "area_code": _identifier(area.get("areaCode") or area.get("areaId") or area.get("code")),
-            "label": _text(area.get("areaName") or area.get("name") or area.get("label") or area_price.get("areaName"))[:80],
-            "sales_price_cents": _positive_int(area.get("areaSalesPriceCents") or (area.get("areaPrice") if not isinstance(area.get("areaPrice"), Mapping) else area_price.get("salesPrice"))),
-            "wplus_member_price_cents": _positive_int(activity.get("price")),
-            "available_seat_count": available,
-        })
-    return summaries
-
-
-def _quote_failure_code(error: HTTPException, step: str) -> str:
-    detail = _text(error.detail)
-    if "官方影院库" in detail:
-        return "cinema_catalog_not_unique"
-    if "仅支持万达" in detail:
-        return "non_wanda_cinema"
-    if "张数" in detail and "不一致" in detail:
-        return "ticket_count_conflict"
-    if "官方已选座" in detail and "实时" in detail:
-        return "official_selection_unverifiable"
-    if "没有可用的 W+座位" in detail:
-        return "wplus_seats_unavailable"
-    if "唯一匹配" in detail or "场次" in detail or "匹配" in detail:
-        return "showtime_not_unique"
-    if "足够" in detail and "座位" in detail:
-        return "insufficient_available_seats"
-    if "原价与W+会员价" in detail and "冲突" in detail:
-        return "quote_price_conflict"
-    if "W+区域" in detail:
-        return "wplus_area_unavailable"
-    if "W+会员价" in detail or "W+会员专属优惠价" in detail or "W+会员专享优惠价" in detail or "W+ 优惠" in detail:
-        return "wplus_price_unavailable"
-    if "临时锁座未确认释放" in detail:
-        return "temporary_lock_release_unverified"
-    if "临时锁座" in detail:
-        return "temporary_lock_failed"
-    if "账号池" in detail or "会员账号" in detail:
-        return "wplus_account_unavailable"
-    if error.status_code >= 500:
-        return "wanda_gateway_unavailable"
-    return f"quote_{step}_failed"
-
-
-def _quote_failure_message(code: str) -> str:
-    return {
-        "cinema_catalog_not_unique": "影院无法在官方影院库唯一匹配",
-        "non_wanda_cinema": "仅支持万达影院实时核价",
-        "ticket_count_conflict": "文字张数与官方已选座张数不一致，请人工确认",
-        "official_selection_unverifiable": "官方已选座无法在实时座位图逐座核验，请人工确认",
-        "showtime_not_unique": "未能唯一匹配万达场次",
-        "insufficient_available_seats": "实时座位图中没有足够的同类可用座位",
-        "wplus_seats_unavailable": "当前场次没有可用的 W+座位",
-        "wplus_area_unavailable": "实时座位图未找到可核验的 W+区域，请人工复核",
-        "wplus_price_unavailable": "实时座位图未返回可用的 W+会员专属优惠价",
-        "quote_price_conflict": "实时会员优惠不低于原价，按当前规则无法形成安全报价",
-        "wplus_account_unavailable": "W+ 核价账号暂不可用",
-        "temporary_lock_failed": "万达临时锁座核价未完成",
-        "temporary_lock_release_unverified": "临时核价座位未确认释放，已停止自动报价",
-        "wanda_gateway_unavailable": "万达实时核价服务暂不可用",
-    }.get(code, "实时核价未通过")
-
-
-def _diagnostic_failure(error: HTTPException, *, step: str, recognition: Recognition | None = None, match: Mapping[str, Any] | None = None, realtime: Mapping[str, Any] | None = None) -> HTTPException:
-    # Do not return raw gateway messages, account data, request payloads, or
-    # seat IDs. The bounded summary is safe for event logs and UI diagnostics.
-    code = _quote_failure_code(error, step)
-    diagnostics: dict[str, Any] = {
-        "failure_step": step,
-        "safe_error_code": code,
-        "upstream_status": error.status_code,
-    }
-    if recognition is not None:
-        diagnostics["requested_match"] = _requested_match_diagnostics(recognition)
-    if match is not None:
-        diagnostics["match"] = _match_diagnostics(match)
-    if realtime is not None:
-        diagnostics["realtime_areas"] = _realtime_area_diagnostics(realtime)
-    return HTTPException(status_code=error.status_code, detail={"code": code, "message": _quote_failure_message(code), "diagnostics": diagnostics})
-
-
 WANDA_CINEMA_ALIASES = frozenset({"万达"})
 
 
 def is_wanda_cinema_name(cinema: str | None) -> bool:
     return bool(cinema and any(alias in cinema for alias in WANDA_CINEMA_ALIASES))
-
-
-def _requested_zone(recognition: Recognition) -> SeatZoneType:
-    # Hand-drawn marks are not a quote instruction. Without a confirmed
-    # platform selection, the buyer flow always probes W+ and asks the count.
-    # Official selections are verified exactly later and never fall back to
-    # an unrelated area probe when a selected seat cannot be found.
-    visible_zones = set(recognition.seat_zone_types)
-    if recognition.official_selection.is_selected and visible_zones == {SeatZoneType.REGULAR}:
-        return SeatZoneType.REGULAR
-    return SeatZoneType.UNKNOWN
-
-
-def _round_quote_cents_to_tenth(value: int) -> int:
-    """Round positive cents half-up to a 0.1-yuan quote increment."""
-    if not isinstance(value, int) or value < 0:
-        raise ValueError("quote cents must be a non-negative integer")
-    return ((value + 5) // 10) * 10
-
-
-def _unit_quote_cents(zone: SeatZoneType, original_price_cents: int, member_price_cents: int | None, *, wplus_adjustment_cents: int, wplus_member_price_threshold_cents: int = 6000, regular_adjustment_cents: int) -> int:
-    """Apply the merchant policy using only verified real-time prices."""
-    if zone is SeatZoneType.WPLUS:
-        # W+专享 is only a seat-area label. A negative merchant adjustment is
-        # safe only when Wanda explicitly returns a realtime wPlusActivity
-        # offer; otherwise salesPrice may equal the seller's actual cost.
-        if member_price_cents is None:
-            raise HTTPException(status_code=422, detail="实时座位图未返回可核验的 W+会员专属优惠价")
-        adjusted_original_price = original_price_cents + wplus_adjustment_cents
-        price = member_price_cents if member_price_cents > wplus_member_price_threshold_cents else max(adjusted_original_price, member_price_cents)
-    else:
-        if member_price_cents is None:
-            raise HTTPException(status_code=422, detail="实时座位图未返回可核验的 W+会员价")
-        price = member_price_cents + regular_adjustment_cents
-    if price <= 0:
-        raise HTTPException(status_code=422, detail="报价规则计算结果必须大于零")
-    return price
-
-
-def _bounded_quote_for_seat(
-    seat: SeatFact,
-    zone: SeatZoneType,
-    *,
-    wplus_adjustment_cents: int,
-    wplus_member_price_threshold_cents: int,
-    regular_adjustment_cents: int,
-) -> int:
-    raw_quote = _unit_quote_cents(
-        zone,
-        seat.original_price_cents,
-        seat.wplus_member_price_cents,
-        wplus_adjustment_cents=wplus_adjustment_cents,
-        wplus_member_price_threshold_cents=wplus_member_price_threshold_cents,
-        regular_adjustment_cents=regular_adjustment_cents,
-    )
-    rounded_member_floor = (
-        ((seat.wplus_member_price_cents + 9) // 10) * 10
-        if seat.wplus_member_price_cents is not None else 0
-    )
-    quote = max(_round_quote_cents_to_tenth(raw_quote), rounded_member_floor)
-    rounded_original_ceiling = (seat.original_price_cents // 10) * 10
-    if rounded_member_floor > rounded_original_ceiling:
-        raise HTTPException(status_code=422, detail="实时原价与W+会员价在十分位报价规则下冲突，不能自动报价")
-    # The buyer must never be quoted above Wanda's current original price. If
-    # the configured adjustment has no room but the original still covers the
-    # authoritative member-price floor, quote the rounded original directly.
-    return min(quote, rounded_original_ceiling)
-
-
-def _wplus_probe_candidates(all_seats: list[SeatFact]) -> list[SeatFact]:
-    """Return only verified real-time W+ candidates for an area probe.
-
-    Screenshot prices must not select, cap, or otherwise influence a quote.
-    The deterministic sample is chosen solely from the current Wanda seat map.
-    """
-    return [
-        seat
-        for seat in all_seats
-        if seat.zone_type is SeatZoneType.WPLUS
-    ]
-
-
-def _select_seats(recognition: Recognition, all_seats: list[SeatFact], quantity: int) -> tuple[list[SeatFact], bool, SeatZoneType]:
-    labels = set(recognition.official_selection.selected_seat_numbers)
-    if recognition.official_selection.is_selected and labels:
-        selected = [seat for seat in all_seats if seat.label in labels]
-        if len(selected) == len(labels) == quantity:
-            zones = {seat.zone_type for seat in selected}
-            zone = next(iter(zones)) if len(zones) == 1 else SeatZoneType.UNKNOWN
-            return selected, True, zone
-        # Official selected-seat evidence must be verified seat by seat against
-        # the current Wanda map. Never replace a failed exact verification with
-        # an unrelated W+ area sample.
-        raise HTTPException(status_code=422, detail="官方已选座无法在实时座位图逐座核验")
-
-    # When the platform selection is absent, probe an actually available W+
-    # live map, probe an actually available W+ seat. The result is explicitly
-    # an area price, never a claim that this is the buyer's exact seat.
-    zone = SeatZoneType.WPLUS
-    # W+ eligibility comes from the verified wPlusActivity price, not from an
-    # operator-defined area name such as “特惠区” or “普通区”.
-    candidates = _wplus_probe_candidates(all_seats)
-    if not candidates:
-        raise HTTPException(status_code=422, detail="当前场次没有可用的 W+座位")
-    if len(candidates) < quantity:
-        raise HTTPException(status_code=422, detail="未找到足够的同类可用座位用于核价")
-    # Choose a deterministic realtime sample. Random probes could quote two
-    # different W+ areas for the same unchanged buyer conversation. This does
-    # not reserve seats; it only makes the area-probe price reproducible until
-    # the live seat map itself changes.
-    ordered = sorted(candidates, key=lambda seat: (seat.area_code, seat.original_price_cents, seat.wplus_member_price_cents or 0, seat.seat_id))
-    return ordered[:quantity], False, zone
-
-
-def _partition(seats: Sequence[SeatFact]) -> str:
-    groups: dict[str, list[str]] = {}
-    for seat in seats:
-        groups.setdefault(seat.area_code, []).append(seat.seat_id)
-    return "|".join(f"{area}-{','.join(ids)}" for area, ids in groups.items())
-
-
-def _locked_offer_unit_cents(response: Mapping[str, Any], *, quantity: int, allow_friday: bool) -> int:
-    data = _data(response)
-    activities = data.get("activities") or response.get("activities") or []
-    if not isinstance(activities, Sequence) or isinstance(activities, (str, bytes)):
-        raise HTTPException(status_code=502, detail="万达优惠接口未返回活动列表")
-    candidates: list[int] = []
-    for item in activities:
-        if not isinstance(item, Mapping) or item.get("able") is not True:
-            continue
-        name = _text(item.get("name"))
-        standard = WPLUS_STANDARD_NAME in name
-        friday = WPLUS_FRIDAY_NAME in name
-        if not standard and not (allow_friday and friday):
-            continue
-        allot = item.get("allot_seat") or item.get("allotSeat")
-        if not isinstance(allot, Mapping):
-            continue
-        total = _positive_int(allot.get("totalPayPrice"))
-        if total is not None and quantity > 0 and total % quantity == 0:
-            candidates.append(total // quantity)
-    if len(set(candidates)) != 1:
-        raise HTTPException(status_code=422, detail="未找到唯一可用的 W+会员专享优惠价")
-    return candidates[0]
-
-
-def _all_seats_released(payload: Mapping[str, Any], expected: Sequence[SeatFact]) -> bool:
-    available_ids = {seat.seat_id for seat in _seat_facts(payload)}
-    return bool(expected) and all(seat.seat_id in available_ids for seat in expected)
 
 
 class RealtimeQuoteService:
