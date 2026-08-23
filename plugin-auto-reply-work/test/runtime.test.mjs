@@ -107,6 +107,7 @@ test('quote preview configuration uses the V3 recognize and quote endpoints', as
     manifest,
   });
   assert.equal(config.quotePreview.recognizeUrl, 'http://127.0.0.1:8010/api/quotes/preview-recognize');
+  assert.equal(config.quotePreview.textFactUrl, 'http://127.0.0.1:8010/api/quotes/preview-extract-text');
   assert.equal(config.quotePreview.quoteUrl, 'http://127.0.0.1:8010/api/quotes/preview-quote');
   assert.equal('ingestUrl' in config.quotePreview, false);
   assert.equal(config.conversationAgent.url, 'http://127.0.0.1:8010/api/agents/turn');

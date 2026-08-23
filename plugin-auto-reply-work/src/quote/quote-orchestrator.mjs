@@ -56,7 +56,9 @@ export function createQuoteOrchestrator({ quotePreviewClient = null, conversatio
           circledDeliveryInstructionImage = firstImageUrl(quoteEnvelope?.payload) ?? '';
         }
         quoteAttemptDeduplicated = recognizedForQuote?.status === 'quote_deduplicated';
-        if (recognizedForQuote?.status === 'recognized' && typeof conversationContextStore?.recordQuoteDraft === 'function') {
+        const persistableDraft = ['recognized', 'needs_confirmation'].includes(recognizedForQuote?.status)
+          && recognizedForQuote?.recognition && typeof recognizedForQuote.recognition === 'object';
+        if (persistableDraft && typeof conversationContextStore?.recordQuoteDraft === 'function') {
           await conversationContextStore.recordQuoteDraft(envelope.tenantId, quoteEnvelope?.payload ?? {}, {
             recognition: recognizedForQuote.recognition,
             ticketCount: recognizedForQuote.ticket_count,
@@ -64,9 +66,11 @@ export function createQuoteOrchestrator({ quotePreviewClient = null, conversatio
             fieldSources: recognizedForQuote.field_sources,
             recognitionArtifact: recognizedForQuote,
           });
-          quoteAttemptDeduplicated = typeof conversationContextStore?.claimQuoteDraftAttempt === 'function'
-            ? !(await conversationContextStore.claimQuoteDraftAttempt(envelope.tenantId, quoteEnvelope?.payload ?? {}))
-            : false;
+          if (recognizedForQuote.status === 'recognized') {
+            quoteAttemptDeduplicated = typeof conversationContextStore?.claimQuoteDraftAttempt === 'function'
+              ? !(await conversationContextStore.claimQuoteDraftAttempt(envelope.tenantId, quoteEnvelope?.payload ?? {}))
+              : false;
+          }
         }
         const quoteStartedAt = now();
         const quoteOperation = quoteAttemptDeduplicated

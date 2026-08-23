@@ -243,7 +243,7 @@ test('a complete buyer text remains eligible for realtime matching when its atta
   assert.equal(recognized.status, 'recognized');
   assert.equal(recognized.text_quote, true);
   assert.deepEqual(recognized.recognition, {
-    image_type: 'UNKNOWN', cinema: '十堰万达影城', movie: '欢迎来龙餐馆', date: '2026-08-19', showtime: '19:10', hall: '7号厅',
+    image_type: 'UNKNOWN', city: '十堰', cinema: '十堰万达影城', movie: '欢迎来龙餐馆', date: '2026-08-19', showtime: '19:10', hall: '7号厅',
     official_selection: { is_selected: false, selected_seat_numbers: ['6排8座', '6排9座'], selected_count: 0 },
   });
 });
@@ -271,8 +271,9 @@ test('a seat-map recognition is completed with explicit buyer text without repla
   assert.equal(recognized.status, 'recognized');
   assert.equal(recognized.text_quote, undefined);
   assert.deepEqual(recognized.recognition, {
-    platform: 'WANDA', image_type: 'SEAT_MAP', cinema: '十堰万达影城', movie: '欢迎来龙餐馆', date: '2026-08-19', showtime: '19:10', hall: '7号厅',
+    platform: 'WANDA', image_type: 'SEAT_MAP', cinema: '十堰万达影城',
     official_selection: { is_selected: true, selected_seat_numbers: ['6排8座', '6排9座'], selected_count: 2 },
+    city: '十堰', movie: '欢迎来龙餐馆', date: '2026-08-19', showtime: '19:10', hall: '7号厅',
   });
 });
 
@@ -467,7 +468,7 @@ test('zero authoritative showtime matches asks for a refreshed official screensh
   const client = createQuotePreviewClient({ quotePreview: { recognizeUrl: 'http://127.0.0.1:8010/api/quotes/preview-recognize', quoteUrl: 'http://127.0.0.1:8010/api/quotes/preview-quote', ingestKey: 'a'.repeat(32) } }, {
     fetchImpl: async (url) => String(url).endsWith('/preview-recognize')
       ? new Response(JSON.stringify({ recognition: { image_type: 'SEAT_MAP', cinema: '宣城万达影城杜比高新店', movie: '奥德赛', date: '2026-08-21', showtime: '22:30', official_selection: { is_selected: false, selected_seat_numbers: [], selected_count: 0 } } }), { status: 200 })
-      : new Response(JSON.stringify({ detail: { code: 'showtime_not_unique', diagnostics: { requested_match: { cinema: '宣城万达影城杜比高新店', movie: '奥德赛', date: '2026-08-21', showtime: '22:30' }, match: { result_count: 0 } } } }), { status: 422 }),
+      : new Response(JSON.stringify({ detail: { code: 'showtime_not_unique', reply_text: '截图信息无法唯一匹配场次，请补充影院和开场时间。', diagnostics: { requested_match: { cinema: '宣城万达影城杜比高新店', movie: '奥德赛', date: '2026-08-21', showtime: '22:30' }, match: { result_count: 0 } } } }), { status: 422 }),
   });
   const result = await client.capture({ id: 'zero-showtime-match', tenantId: 'tenant-1', payload: { imageUrls: ['https://img.alicdn.com/seat.png'] } });
   assert.equal(result.failure_code, 'showtime_not_found');
@@ -554,6 +555,86 @@ test('a short text supplement deterministically fuses the active quote draft wit
   assert.deepEqual(result.field_sources, {
     cinema: 'image', movie: 'buyer_text', date: 'buyer_text', showtime: 'buyer_text', hall: 'buyer_text', ticket_count: 'typed_seats',
   });
+});
+
+test('AI semantic facts are the primary natural-language input while image evidence remains authoritative', async () => {
+  const calls = [];
+  const client = createQuotePreviewClient({
+    quotePreview: {
+      recognizeUrl: 'http://127.0.0.1/preview-recognize', textFactUrl: 'http://127.0.0.1/preview-extract-text',
+      quoteUrl: 'http://127.0.0.1/preview-quote', ingestKey: 'a'.repeat(32),
+    },
+  }, {
+    async fetchImpl(url, input) {
+      calls.push(String(url));
+      if (String(url).endsWith('/preview-extract-text')) {
+        const body = JSON.parse(input.body);
+        assert.match(body.message_text, /济南世贸万达影城/u);
+        assert.doesNotMatch(body.message_text, /https?:\/\//u);
+        return new Response(JSON.stringify({ status: 'extracted', extractor_version: 'wanda-quote-fact-extractor-v1', facts: {
+          quote_intent: true, city: '济南', cinema: '济南世贸万达影城', movie: '奥德赛', date: '2026-08-23', showtime: '12:35', hall: null,
+          ticket_count: 2, seat_numbers: [], requested_row: null, refers_to_image_positions: true, confidence: 0.99,
+        } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ recognition: {
+        image_type: 'SEAT_MAP', platform: 'MAOYAN', cinema: '万达影城（世茂杜比影院店）', movie: '奥德赛',
+        date: '2026-08-23', showtime: '12:35-15:27', hall: '8号杜比全景声激光巨幕厅',
+        official_selection: { is_selected: true, selected_seat_numbers: ['9排14座', '9排15座'], selected_count: 2 },
+      } }), { status: 200 });
+    },
+  });
+  const result = await client.recognize({
+    id: 'ai-semantic-jinan', tenantId: '107', ts: Date.parse('2026-08-23T02:31:18.221Z'),
+    payload: {
+      content: 'https://img.alicdn.com/seat.jpg\n您好 请问济南世贸万达影城今日12:35开场的奥德赛这两个位置还有票吗？',
+      imageUrls: ['https://img.alicdn.com/seat.jpg'],
+    },
+  });
+
+  assert.deepEqual(calls.sort(), ['http://127.0.0.1/preview-extract-text', 'http://127.0.0.1/preview-recognize']);
+  assert.equal(result.status, 'recognized');
+  assert.equal(result.recognition.city, '济南');
+  assert.equal(result.recognition.cinema, '万达影城（世茂杜比影院店）');
+  assert.equal(result.recognition.hall, '8号杜比全景声激光巨幕厅');
+  assert.equal(result.ticket_count, 2);
+  assert.equal(result.field_sources.city, 'ai_text');
+  assert.equal(result.semantic_source, 'wanda-quote-fact-extractor-v1');
+  assert.deepEqual(result.recognition.official_selection.selected_seat_numbers, ['9排14座', '9排15座']);
+});
+
+test('an image keeps the explicit city from the preceding partial text draft', async () => {
+  const client = createQuotePreviewClient({
+    quotePreview: { recognizeUrl: 'http://127.0.0.1/recognize', quoteUrl: 'http://127.0.0.1/quote', ingestKey: 'a'.repeat(32) },
+  }, {
+    async fetchImpl() {
+      return new Response(JSON.stringify({ recognition: {
+        image_type: 'SEAT_MAP', platform: 'MAOYAN', cinema: '万达影城（世茂杜比影院店）', movie: '奥德赛',
+        date: '2026-08-23', showtime: '12:35-15:27', hall: '8号厅',
+        official_selection: { is_selected: true, selected_seat_numbers: ['9排14座', '9排15座'], selected_count: 2 },
+      } }), { status: 200 });
+    },
+  });
+  const result = await client.recognize({
+    id: 'jinan-context-image', tenantId: 'tenant-1', payload: {
+      content: '您好 请问济南世贸万达影城今日12:35开场的奥德赛这两个位置还有票吗？',
+      imageUrls: ['https://img.alicdn.com/seat.png'],
+      quote_draft: { fields: {
+        city: { value: '济南', source: 'buyer_text', confidence: 1 },
+        cinema: { value: '济南世贸万达影城', source: 'buyer_text', confidence: 0.9 },
+        movie: { value: '奥德赛', source: 'buyer_text', confidence: 1 },
+        date: { value: '2026-08-23', source: 'buyer_text', confidence: 1 },
+        showtime: { value: '12:35', source: 'buyer_text', confidence: 1 },
+        ticket_count: { value: 2, source: 'buyer_text', confidence: 0.9 },
+      }, expires_at: Date.now() + 60_000 },
+    },
+  });
+
+  assert.equal(result.status, 'recognized');
+  assert.equal(result.recognition.city, '济南');
+  assert.equal(result.recognition.cinema, '万达影城（世茂杜比影院店）');
+  assert.equal(result.recognition.movie, '奥德赛');
+  assert.equal(result.ticket_count, 2);
+  assert.deepEqual(result.recognition.official_selection.selected_seat_numbers, ['9排14座', '9排15座']);
 });
 
 test('an explicit movie-name reply completes an active image quote draft without another vision request', async () => {
@@ -971,7 +1052,7 @@ test('structured buyer text is parsed into a non-exact realtime quote request', 
   assert.equal(parsed.text_quote, true);
   assert.equal(parsed.ticket_count, 2);
   assert.deepEqual(parsed.recognition, {
-    image_type: 'UNKNOWN', cinema: '上海闵行颛桥万达', movie: '奥德赛', date: '2026-08-22', showtime: '16:25',
+    image_type: 'UNKNOWN', city: '上海', cinema: '上海闵行颛桥万达', movie: '奥德赛', date: '2026-08-22', showtime: '16:25',
     official_selection: { is_selected: false, selected_seat_numbers: ['7排14座', '7排15座'], selected_count: 0 },
   });
 });
@@ -982,7 +1063,7 @@ test('a compact one-line showtime strips the inline hall from the movie while re
   assert.equal(parsed.status, 'recognized');
   assert.equal(parsed.ticket_count, 2);
   assert.deepEqual(parsed.recognition, {
-    image_type: 'UNKNOWN', cinema: '十堰万达影城', movie: '欢迎来龙餐馆', date: '2026-08-19', showtime: '19:10', hall: '7号厅',
+    image_type: 'UNKNOWN', city: '十堰', cinema: '十堰万达影城', movie: '欢迎来龙餐馆', date: '2026-08-19', showtime: '19:10', hall: '7号厅',
     official_selection: { is_selected: false, selected_seat_numbers: ['6排8座', '6排9座'], selected_count: 0 },
   });
 });
@@ -1030,12 +1111,28 @@ test('compact province-city cinema date movie time-range and typed seat are pars
 });
 
 
+test('a natural today request preserves explicit city and identity while requiring the referenced-seat image', () => {
+  const result = parseTextQuoteRequest(
+    '您好 请问济南世贸万达影城今日12:35开场的奥德赛这两个位置还有票吗？',
+    new Date('2026-08-23T02:31:18.221Z'),
+  );
+  assert.equal(result.status, 'needs_confirmation');
+  assert.equal(result.failure_code, 'text_quote_missing_fields');
+  assert.deepEqual(result.missing_fields, ['这几个位置的完整选座截图']);
+  assert.equal(result.ticket_count, 2);
+  assert.deepEqual(result.recognition, {
+    image_type: 'UNKNOWN', city: '济南', cinema: '济南世贸万达影城', movie: '奥德赛',
+    date: '2026-08-23', showtime: '12:35',
+    official_selection: { is_selected: false, selected_seat_numbers: [], selected_count: 0 },
+  });
+});
+
 test('natural Chinese date, night time, and format suffixes are parsed for a text quote', async () => {
   const parsed = parseTextQuoteRequest('西安大明宫万达，8.20日晚上10.40那场奥德赛imax多少钱一张老板', new Date('2026-08-18T10:00:00Z'));
   assert.equal(parsed.status, 'recognized');
   assert.equal(parsed.ticket_count, null);
   assert.deepEqual(parsed.recognition, {
-    image_type: 'UNKNOWN', cinema: '西安大明宫万达', movie: '奥德赛', date: '2026-08-20', showtime: '22:40',
+    image_type: 'UNKNOWN', city: '西安', cinema: '西安大明宫万达', movie: '奥德赛', date: '2026-08-20', showtime: '22:40',
     official_selection: { is_selected: false, selected_seat_numbers: [], selected_count: 0 },
   });
 });

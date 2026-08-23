@@ -32,6 +32,12 @@ export function cityHintFromSupplement(value) {
         || /^[A-Za-z0-9+·\-]{2,20}$/u.test(line.slice(name.length)))
     ));
     if (embeddedCity) return embeddedCity;
+    const contextualCity = [...KNOWN_CITY_NAMES].find((name) => {
+      const cityIndex = line.indexOf(name);
+      const wandaIndex = cityIndex >= 0 ? line.indexOf('万达', cityIndex + name.length) : -1;
+      return cityIndex >= 0 && wandaIndex >= 0 && wandaIndex - cityIndex <= 24;
+    });
+    if (contextualCity) return contextualCity;
     const wanda = line.match(/^([\u4e00-\u9fff]{2,8}?)(?:市)?万达(?:影城|影院)?(?:[（(].*)?$/u);
     if (wanda && !['这个', '那个', '这里', '那边'].includes(wanda[1])) return wanda[1];
     const province = PROVINCE_NAMES.find((name) => line.startsWith(name) && line.length > name.length);
@@ -64,6 +70,13 @@ export function cinemaHintFromSupplement(value) {
     const prefix = compact.slice(0, Number(match.index));
     const branchName = prefix.split(/(?:省|自治区|特别行政区|市|区|县|旗|[，,。；;、])/u).at(-1)?.replace(/^(?:你好|您好|问一下|咨询一下|请问)/u, '') ?? '';
     if (/^[\u4e00-\u9fffA-Za-z0-9+·\-]{2,20}$/u.test(branchName)) return `${branchName}万达`;
+  }
+  const compactInput = String(value ?? '').replace(/\s+/gu, '');
+  for (const city of KNOWN_CITY_NAMES) {
+    const cityIndex = compactInput.indexOf(city);
+    if (cityIndex < 0) continue;
+    const cityCinema = compactInput.slice(cityIndex).match(new RegExp(`^${city}[\\u4e00-\\u9fffA-Za-z0-9+·\\-]{0,24}?万达(?:影城|影院)?`, 'u'));
+    if (cityCinema) return cityCinema[0].slice(0, 160);
   }
   const branch = String(value ?? '').split(/\r?\n/u).map((item) => item.replace(/\s+/gu, '').trim()).find((item) => (
     /^[\u4e00-\u9fffA-Za-z0-9+·\-]{4,40}$/u.test(item)

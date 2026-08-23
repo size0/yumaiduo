@@ -233,6 +233,7 @@ export async function loadConfig({ env = process.env, projectRoot = PROJECT_ROOT
     }
     quotePreview = Object.freeze({
       recognizeUrl: new URL('/api/quotes/preview-recognize', ingestUrl).toString(),
+      textFactUrl: new URL('/api/quotes/preview-extract-text', ingestUrl).toString(),
       quoteUrl: new URL('/api/quotes/preview-quote', ingestUrl).toString(),
       ingestKey,
     });

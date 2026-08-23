@@ -567,6 +567,7 @@ export function createWorkflow({
       } : {}),
       ...(quoteAttemptDeduplicated ? { quote_skipped: 'duplicate_quote_draft' } : {}),
       ...(recognitionReuseReason ? { recognition_reused: recognitionReuseReason } : {}),
+      ...(preview?.semantic_source ? { semantic_fact_source: String(preview.semantic_source).slice(0, 100) } : {}),
       ...(orderLinked ? { quote_skipped: 'order_linked' } : {}),
       reply_preview_status: replyPreview?.status ?? (replyResult.status === 'rejected' ? 'failed' : null),
       ...(conversationExperienceStatus ? { conversation_experience_status: conversationExperienceStatus } : {}),

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.conversation_agent import ConversationAgentService, SYSTEM_PROMPT, classify_agent_scene
 from app.main import create_app
-from app.schemas import AgentPlan, AgentTurnRequest
+from app.schemas import AgentPlan, AgentTurnRequest, QuoteTextFactExtractRequest, QuoteTextFacts
 
 
 def request_payload() -> AgentTurnRequest:
@@ -50,6 +50,39 @@ def test_agent_service_returns_a_typed_bounded_plan() -> None:
     assert result.action == "ask_for_image"
     assert result.missing_fields == ["完整选座页截图"]
     assert result.reply.startswith("请发送")
+
+
+def test_agent_service_extracts_typed_quote_facts_without_transaction_fields() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["enable_thinking"] is False
+        assert body["max_tokens"] == 400
+        system = body["messages"][0]["content"]
+        assert "只抽取买家明确表达" in system
+        assert "价格" in system and "库存" in system
+        user = json.loads(body["messages"][1]["content"])
+        assert user["reference_date"] == "2026-08-23"
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({
+            "quote_intent": True, "city": "济南", "cinema": "济南世贸万达影城", "movie": "奥德赛", "date": "2026-08-23",
+            "showtime": "12:35", "hall": None, "ticket_count": 2, "seat_numbers": [], "requested_row": None,
+            "refers_to_image_positions": True, "confidence": 0.99,
+        }, ensure_ascii=False)}}]})
+
+    request = QuoteTextFactExtractRequest(
+        event_id="event-jinan", tenant_id="107",
+        message_text="您好 请问济南世贸万达影城今日12:35开场的奥德赛这两个位置还有票吗？",
+        observed_at=1787452278221,
+    )
+    facts = asyncio.run(ConversationAgentService(httpx.MockTransport(handler)).extract_quote_facts(request, {
+        "base_url": "https://model.example/v1", "model": "flash", "api_key": "secret", "temperature": 0, "max_tokens": 1200,
+    }))
+    assert facts.city == "济南"
+    assert facts.cinema == "济南世贸万达影城"
+    assert facts.movie == "奥德赛"
+    assert facts.date.isoformat() == "2026-08-23"
+    assert facts.ticket_count == 2
+    assert facts.refers_to_image_positions is True
+    assert facts.seat_numbers == []
 
 
 def test_agent_scene_classification_is_deterministic_and_prefers_transaction_stage() -> None:
@@ -249,6 +282,34 @@ def test_agent_endpoint_requires_ingest_auth_and_returns_only_the_typed_plan(mon
     assert response.status_code == 200
     assert response.json()["status"] == "planned"
     assert response.json()["plan"]["action"] == "ask_for_city"
+
+
+def test_quote_fact_endpoint_requires_auth_and_returns_only_typed_semantics(monkeypatch) -> None:
+    class FakeExtractor(ConversationAgentService):
+        async def extract_quote_facts(self, request, model_settings):
+            assert request.tenant_id == "107"
+            return QuoteTextFacts(
+                quote_intent=True, city="济南", cinema="济南世贸万达影城", movie="奥德赛", date="2026-08-23", showtime="12:35",
+                ticket_count=2, refers_to_image_positions=True, confidence=0.99,
+            )
+
+    monkeypatch.setenv("WANDA_PREVIEW_INGEST_KEY", "test-preview-key")
+    client = TestClient(create_app(conversation_agent_service=FakeExtractor()))
+    payload = {
+        "event_id": "event-jinan", "tenant_id": "107", "observed_at": 1787452278221,
+        "message_text": "济南世贸万达影城今日12:35奥德赛这两个位置",
+    }
+    assert client.post("/api/quotes/preview-extract-text", json=payload).status_code == 401
+    response = client.post("/api/quotes/preview-extract-text", headers={"X-Wanda-Preview-Key": "test-preview-key"}, json=payload)
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "extracted", "extractor_version": "wanda-quote-fact-extractor-v1", "failure_code": None,
+        "facts": {
+            "quote_intent": True, "city": "济南", "cinema": "济南世贸万达影城", "movie": "奥德赛", "date": "2026-08-23",
+            "showtime": "12:35", "hall": None, "ticket_count": 2, "seat_numbers": [], "requested_row": None,
+            "refers_to_image_positions": True, "confidence": 0.99,
+        },
+    }
 
 
 def test_agent_plan_rejects_model_prose_for_transaction_adjacent_tool_actions() -> None:

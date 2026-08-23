@@ -86,6 +86,25 @@ def test_catalog_resolves_noisy_brand_and_format_words_to_the_unique_official_ci
     assert without_city.cinema_id == "380"
 
 
+def test_catalog_uses_explicit_city_to_resolve_a_truncated_shimao_dolby_header(tmp_path):
+    path = tmp_path / "cinema_cache.sqlite"
+    with sqlite3.connect(path) as connection:
+        connection.executescript("""
+            CREATE TABLE cinemas (cinema_id TEXT, city_id TEXT, city_name TEXT, cinema_name TEXT);
+            CREATE TABLE city_movies (city_id TEXT, day TEXT, movie_id TEXT, source TEXT, sort_order INTEGER, raw_json TEXT, updated_at INTEGER);
+        """)
+        connection.execute("INSERT INTO cinemas VALUES ('jn-1', 'jn', '济南', '济南万达影城世茂广场店')")
+        connection.execute("INSERT INTO cinemas VALUES ('qd-1', 'qd', '青岛', '青岛万达影城世茂店')")
+        connection.execute("INSERT INTO cinemas VALUES ('ly-1', 'ly', '龙岩', '龙岩万达影城长汀世贸店')")
+    resolution = LocalWandaCatalog(path).resolve(Recognition(
+        city="济南", cinema="万达影城（世茂杜比影院店）", movie="奥德赛", date="2026-08-23", showtime="12:35-15:27",
+    ))
+    assert resolution.matched is True
+    assert resolution.cinema_id == "jn-1"
+    assert resolution.recognition.city == "济南"
+    assert resolution.recognition.cinema == "济南万达影城世茂广场店"
+
+
 def test_catalog_uses_branch_and_format_together_instead_of_matching_a_generic_city_cinema(tmp_path):
     path = tmp_path / "cinema_cache.sqlite"
     with sqlite3.connect(path) as connection:

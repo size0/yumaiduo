@@ -241,6 +241,53 @@ class QuoteScope(str, Enum):
     AREA_PROBE = "area_probe"
 
 
+class QuoteTextFactExtractRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: Annotated[str, Field(min_length=1, max_length=200)]
+    tenant_id: Annotated[str, Field(min_length=1, max_length=128)]
+    message_text: Annotated[str, Field(min_length=1, max_length=4000)]
+    observed_at: Annotated[int, Field(ge=0)]
+
+
+class QuoteTextFacts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quote_intent: bool
+    city: str | None = Field(default=None, max_length=80)
+    cinema: str | None = Field(default=None, max_length=160)
+    movie: str | None = Field(default=None, max_length=160)
+    date: CalendarDate | None = None
+    showtime: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    hall: str | None = Field(default=None, max_length=80)
+    ticket_count: int | None = Field(default=None, ge=1, le=20)
+    seat_numbers: list[str] = Field(default_factory=list, max_length=20)
+    requested_row: int | None = Field(default=None, ge=1, le=99)
+    refers_to_image_positions: bool = False
+    confidence: float = Field(ge=0, le=1)
+
+    @field_validator("seat_numbers")
+    @classmethod
+    def validate_seat_numbers(cls, values: list[str]) -> list[str]:
+        result: list[str] = []
+        for value in values:
+            normalized = str(value).replace(" ", "").strip()
+            if not re.fullmatch(r"\d{1,2}排\d{1,3}座", normalized):
+                raise ValueError("invalid seat number")
+            if normalized not in result:
+                result.append(normalized)
+        return result
+
+
+class QuoteTextFactExtractResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["extracted", "failed"]
+    extractor_version: str = Field(min_length=1, max_length=100)
+    facts: QuoteTextFacts | None = None
+    failure_code: str | None = Field(default=None, max_length=100)
+
+
 class QuoteRealtimeRequest(BaseModel):
     recognition: Recognition
     ticket_count: Annotated[int | None, Field(default=None, ge=1, le=20)]

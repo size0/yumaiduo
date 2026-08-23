@@ -1427,6 +1427,51 @@ def test_realtime_quote_uses_unique_official_movie_date_time_match_to_resolve_an
     assert response.total_quote_cents == 6190
 
 
+def test_joint_match_rejects_a_cross_city_cache_candidate_before_reading_seats() -> None:
+    class AmbiguousCatalog:
+        def resolve(self, recognition: Recognition) -> CatalogResolution:
+            return CatalogResolution(recognition=recognition, matched=False, cinema_id=None)
+
+        def contains_cinema_id(self, cinema_id: str) -> bool:
+            return True
+
+    class CrossCityGateway(FakeTicketGateway):
+        async def match(self, recognition: Recognition) -> dict[str, object]:
+            self.calls.append("match")
+            return {"data": {
+                "city": {"id": "qd", "name": "青岛"},
+                "cinema": {"id": "cinema-qd", "name": "青岛万达影城世茂店", "cityName": "青岛"},
+                "showtime": {"id": "show-1", "cinemaId": "cinema-qd"},
+                "showtime_match": {
+                    "confidence": 0.95,
+                    "candidate_count": 1,
+                    "components": {
+                        "cinema": {"status": "normalized_partial"},
+                        "movie": {"status": "exact"},
+                        "date": {"status": "exact"},
+                        "time": {"status": "exact"},
+                    },
+                    "caps": [],
+                },
+            }}
+
+    request = QuoteRealtimeRequest.model_validate({
+        "ticket_count": 2,
+        "recognition": {
+            "image_type": "SEAT_MAP", "city": "济南", "cinema": "济南世贸万达影城", "movie": "奥德赛",
+            "date": "2026-08-23", "showtime": "12:35", "official_selection": {
+                "is_selected": True, "selected_seat_numbers": ["9排14座", "9排15座"], "selected_count": 2,
+            },
+        },
+    })
+    gateway = CrossCityGateway()
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(RealtimeQuoteService(gateway, cinema_catalog=AmbiguousCatalog()).quote(request))
+    assert raised.value.detail["code"] == "showtime_not_unique"
+    assert raised.value.detail["diagnostics"]["requested_match"]["city"] == "济南"
+    assert gateway.calls == ["for_quote", "match"]
+
+
 def test_realtime_quote_rejects_an_ambiguous_cinema_when_joint_match_confidence_is_not_unique() -> None:
     class AmbiguousCatalog:
         def resolve(self, recognition: Recognition) -> CatalogResolution:

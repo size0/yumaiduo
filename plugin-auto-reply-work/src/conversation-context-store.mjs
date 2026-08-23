@@ -755,11 +755,12 @@ function safeHttpsUrl(value, maxLength) {
 }
 
 function normalizeSource(value, fallback) {
-  return ['buyer_text', 'image', 'typed_seats', 'conversation_draft', 'image_or_text'].includes(value) ? value : fallback;
+  return ['ai_text', 'buyer_text', 'image', 'typed_seats', 'conversation_draft', 'image_or_text'].includes(value) ? value : fallback;
 }
 
 function sourceConfidence(field, source, fallback) {
   if (source === 'typed_seats') return 0.9;
+  if (source === 'ai_text') return ['date', 'showtime'].includes(field) ? 0.95 : 0.9;
   if (source === 'buyer_text' && ['date', 'showtime'].includes(field)) return 1;
   if (source === 'buyer_text' && ['city', 'cinema'].includes(field)) return 0.96;
   if (source === 'buyer_text' && field === 'movie') return 0.82;

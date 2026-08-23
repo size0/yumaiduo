@@ -84,6 +84,15 @@ function isTextQuoteIntent(content) {
   return /(?:多少钱|好多钱|价格|票价|核价|万达|(?:影片|电影|片名)\s*[:：]|\d{1,2}\s*(?:月|[./-])\s*\d{1,2}|(?:[01]?\d|2[0-3])\s*[:：.]\s*[0-5]\d|\d{1,2}\s*排\s*\d{1,2}|\d+\s*张|[一二三四五六七八九十]\s*张)/u.test(content);
 }
 
+function relativeTextDate(value, now) {
+  const content = String(value ?? '');
+  const offset = /(?:后天)/u.test(content) ? 2 : /(?:明天|明日)/u.test(content) ? 1 : /(?:今天|今日)/u.test(content) ? 0 : null;
+  if (offset === null) return null;
+  const chinaNow = new Date(now.getTime() + 8 * 60 * 60 * 1_000);
+  const base = Date.UTC(chinaNow.getUTCFullYear(), chinaNow.getUTCMonth(), chinaNow.getUTCDate() + offset);
+  return new Date(base).toISOString().slice(0, 10);
+}
+
 function parseTextDate(match, now) {
   if (!match) return null;
   const year = match[1] ? Number(match[1]) : now.getUTCFullYear();
@@ -164,6 +173,52 @@ function missingFactsReply(missing) {
   return `为了实时核价，请发送已标记需要购买位置的完整选座页截图，并说明需要几张。截图需要补全：${missing.join('、')}。图片标记仅供人工出票，不代表官方选座。`;
 }
 
+function semanticQuoteFacts(response, { hasImage = false } = {}) {
+  const facts = response?.status === 'extracted' && response.facts && typeof response.facts === 'object' && !Array.isArray(response.facts)
+    ? response.facts
+    : null;
+  const confidence = Number(facts?.confidence);
+  if (!facts || facts.quote_intent !== true || !Number.isFinite(confidence) || confidence < 0.8 || confidence > 1) return null;
+  const date = /^\d{4}-\d{2}-\d{2}$/u.test(String(facts.date ?? '')) ? String(facts.date) : '';
+  const showtime = /^\d{2}:\d{2}$/u.test(String(facts.showtime ?? '')) ? String(facts.showtime) : '';
+  const seats = Array.isArray(facts.seat_numbers)
+    ? [...new Set(facts.seat_numbers.map((value) => String(value).replace(/\s+/gu, '')).filter((value) => /^\d{1,2}排\d{1,3}座$/u.test(value)))].slice(0, 20)
+    : [];
+  const ticketCount = Number(facts.ticket_count);
+  const recognition = {
+    image_type: 'UNKNOWN',
+    ...(text(facts.city, 80) ? { city: text(facts.city, 80) } : {}),
+    ...(text(facts.cinema, 160) ? { cinema: text(facts.cinema, 160) } : {}),
+    ...(text(facts.movie, 160) ? { movie: text(facts.movie, 160) } : {}),
+    ...(date ? { date } : {}), ...(showtime ? { showtime } : {}),
+    ...(text(facts.hall, 80) ? { hall: text(facts.hall, 80) } : {}),
+    official_selection: { is_selected: false, selected_seat_numbers: seats, selected_count: 0 },
+  };
+  const requestedRow = Number(facts.requested_row);
+  const missing = [
+    !recognition.date && '日期（请使用未过期日期；过去日期请带年份）',
+    !recognition.cinema && '完整万达影院名',
+    !recognition.showtime && '开场时间',
+    !recognition.movie && '影片名',
+    facts.refers_to_image_positions === true && !hasImage && seats.length === 0 && '这几个位置的完整选座截图',
+  ].filter(Boolean);
+  const fieldSources = Object.fromEntries([
+    ...['city', 'cinema', 'movie', 'date', 'showtime', 'hall'].map((name) => [name, recognition[name] ? 'ai_text' : '']).filter(([, source]) => source),
+    ...(Number.isInteger(ticketCount) && ticketCount >= 1 && ticketCount <= 20 ? [['ticket_count', 'ai_text']] : []),
+    ...(Number.isInteger(requestedRow) && requestedRow >= 1 && requestedRow <= 99 ? [['requested_row', 'ai_text']] : []),
+  ]);
+  const result = {
+    status: missing.length ? 'needs_confirmation' : 'recognized', text_quote: true,
+    ticket_count: Number.isInteger(ticketCount) && ticketCount >= 1 && ticketCount <= 20 ? ticketCount : (seats.length || null),
+    recognition, field_sources: fieldSources,
+    ...(Number.isInteger(requestedRow) && requestedRow >= 1 && requestedRow <= 99 ? { requested_row: requestedRow } : {}),
+    semantic_source: text(response.extractor_version, 100) || 'ai',
+  };
+  return Object.freeze(missing.length
+    ? { ...result, failure_code: 'text_quote_missing_fields', missing_fields: missing, reply_text: missingFactsReply(missing) }
+    : result);
+}
+
 const PROVINCE_PREFIXES = Object.freeze([
   '黑龙江', '内蒙古', '广西', '宁夏', '新疆', '西藏',
   '北京', '天津', '上海', '重庆', '河北', '山西', '辽宁', '吉林', '江苏', '浙江',
@@ -187,7 +242,7 @@ export function parseTextQuoteRequest(value, now = new Date()) {
   if (!isTextQuoteIntent(content)) return Object.freeze({ status: 'ignored_no_image' });
   const compactShowtime = content.match(/^(?<location>[\u4e00-\u9fff]{2,12})\s+(?<cinema>[\u4e00-\u9fffA-Za-z0-9（）()·]{2,40}万达(?:影城|影院)?)\s+(?<date>(?:\d{4}[年./-])?\d{1,2}[月./-]\d{1,2}日?)(?<movie>[\u4e00-\u9fffA-Za-z0-9·：:]{1,60}?)(?<start>(?:[01]?\d|2[0-3])[:：∶.]\d{2})\s*(?:-|—|~|～|至|到)\s*(?<end>(?:[01]?\d|2[0-3])[:：∶.]\d{2})/u);
   const dateMatch = content.match(/(?:(\d{4})\s*[年./-]\s*)?(\d{1,2})\s*(?:月|[./-])\s*(\d{1,2})\s*日?/u);
-  const date = parseTextDate(dateMatch, now) ?? weekdayDate(content, now);
+  const date = parseTextDate(dateMatch, now) ?? relativeTextDate(content, now) ?? weekdayDate(content, now);
   const dateStart = Number(dateMatch?.index ?? -1);
   const dateEnd = dateStart + String(dateMatch?.[0] ?? '').length;
   const timeMatches = [...content.matchAll(/((?:[01]?\d|2[0-3]))\s*[:：∶.]\s*([0-5]\d)/gu)];
@@ -204,18 +259,19 @@ export function parseTextQuoteRequest(value, now = new Date()) {
   const namedCinema = text(content.match(/(?:[\u4e00-\u9fff]{1,12})?(?:万达影城|万达影院)(?:[（(][^）)\n]{1,80}[）)])?/u)?.[0], 160);
   const labelled = (labels) => text(lines.find((line) => new RegExp(`^(?:${labels})\\s*[:：]`, 'u').test(line))?.replace(new RegExp(`^(?:${labels})\\s*[:：]\\s*`, 'u'), ''), 160);
   const structuredCinema = labelled('影院|影城|门店') || (lines.length > 1 ? lines.find((line) => line.includes('万达')) ?? '' : '');
-  let cinema = text(compactShowtime?.groups?.cinema, 160) || structuredCinema || cinemaBeforeDate || cinemaBetweenDateAndTime || namedCinema;
-  const city = cityFromCompactLocation(compactShowtime?.groups?.location);
+  let cinema = text(compactShowtime?.groups?.cinema, 160) || structuredCinema || cinemaHintFromSupplement(content) || cinemaBeforeDate || cinemaBetweenDateAndTime || namedCinema;
+  const city = cityFromCompactLocation(compactShowtime?.groups?.location) || cityHintFromSupplement(content);
   const seats = typedSeats(content);
   const firstSeat = content.search(/\d{1,2}\s*排\s*\d{1,2}\s*座?/u);
-  const priceQuestion = content.search(/(?:多少钱|价格|票价|核价|\d+\s*张|[一二三四五六七八九十]+\s*张|老板)/u);
-  const movieEnd = [firstSeat, priceQuestion].filter((index) => index >= 0 && index > timeStart).sort((left, right) => left - right)[0] ?? content.length;
+  const referencedSeats = content.search(/(?:这|那)?(?:[1-9]|1\d|20|[一二两三四五六七八九十]{1,3})\s*(?:个)?(?:位置|座位)/u);
+  const priceQuestion = content.search(/(?:多少钱|价格|票价|核价|还有票|有票吗|\d+\s*张|[一二三四五六七八九十]+\s*张|老板)/u);
+  const movieEnd = [firstSeat, referencedSeats, priceQuestion].filter((index) => index >= 0 && index > timeStart).sort((left, right) => left - right)[0] ?? content.length;
   const namedCinemaIndex = namedCinema ? content.indexOf(namedCinema) : -1;
   const movieStart = timeMatch ? timeStart + timeMatch[0].length : namedCinemaIndex >= 0 ? namedCinemaIndex + namedCinema.length : -1;
   const movieRaw = movieStart >= 0 ? content.slice(movieStart, movieEnd) : '';
   const inlineHall = text(content.match(/第?\s*\d{1,2}\s*号?\s*(?:放映厅|影厅|厅)/u)?.[0].replace(/\s+/gu, ''), 80);
   let movie = text(movieRaw
-    .replace(/^(?:那场|的|场|，|,|。|\s)+/u, '')
+    .replace(/^(?:开场的?|那场|的|场|，|,|。|\s)+/u, '')
     // In compact buyer text such as “19:10影片名 7号厅6排8座”,
     // the hall is a separate fact, never part of the film title.
     .replace(/\s*第?\s*\d{1,2}\s*号?\s*(?:放映厅|影厅|厅).*$/u, '')
@@ -229,23 +285,31 @@ export function parseTextQuoteRequest(value, now = new Date()) {
   if (structuredMovie) movie = structuredMovie;
   if (compactShowtime?.groups?.movie) movie = text(compactShowtime.groups.movie, 160);
   const hall = labelled('影厅|放映厅') || inlineHall;
+  const referencedSeatImageRequired = referencedSeats >= 0 && seats.length === 0;
   const missing = [
     !date && '日期（请使用未过期日期；过去日期请带年份）',
     !cinema && '完整万达影院名',
     !timeMatch && (/(?:[01]?\d|2[0-3])\s*点\s*(?:多|左右)/u.test(content) ? '准确开场时间（“9点多”请补为如9:20）' : '开场时间'),
     !movie && '影片名',
+    referencedSeatImageRequired && '这几个位置的完整选座截图',
   ].filter(Boolean);
-  if (missing.length) return Object.freeze({ status: 'needs_confirmation', failure_code: 'text_quote_missing_fields', missing_fields: missing, reply_text: missingFactsReply(missing) });
-
   const ticketCount = ticketCountFromText(content) ?? (seats.length || null);
-  return Object.freeze({
-    status: 'recognized', text_quote: true, ticket_count: ticketCount,
-    recognition: {
-      image_type: 'UNKNOWN', ...(city ? { city } : {}), cinema, movie, date, showtime: `${String((/(?:晚上|夜场|晚)/u.test(content.slice(Math.max(0, timeStart - 6), timeStart)) && Number(timeMatch[1]) < 12) ? Number(timeMatch[1]) + 12 : Number(timeMatch[1])).padStart(2, '0')}:${timeMatch[2]}`,
-      ...(hall ? { hall } : {}),
-      official_selection: { is_selected: false, selected_seat_numbers: seats, selected_count: 0 },
-    },
+  const recognition = {
+    image_type: 'UNKNOWN', ...(city ? { city } : {}), ...(cinema ? { cinema } : {}), ...(movie ? { movie } : {}), ...(date ? { date } : {}),
+    ...(timeMatch ? { showtime: `${String((/(?:晚上|夜场|晚)/u.test(content.slice(Math.max(0, timeStart - 6), timeStart)) && Number(timeMatch[1]) < 12) ? Number(timeMatch[1]) + 12 : Number(timeMatch[1])).padStart(2, '0')}:${timeMatch[2]}` } : {}),
+    ...(hall ? { hall } : {}),
+    official_selection: { is_selected: false, selected_seat_numbers: seats, selected_count: 0 },
+  };
+  const fieldSources = Object.fromEntries([
+    ...['city', 'cinema', 'movie', 'date', 'showtime', 'hall'].map((name) => [name, recognition[name] ? 'buyer_text' : '']).filter(([, source]) => source),
+    ...(ticketCount ? [['ticket_count', 'buyer_text']] : []),
+  ]);
+  if (missing.length) return Object.freeze({
+    status: 'needs_confirmation', failure_code: 'text_quote_missing_fields', missing_fields: missing,
+    reply_text: missingFactsReply(missing), ticket_count: ticketCount, recognition, field_sources: fieldSources,
   });
+
+  return Object.freeze({ status: 'recognized', text_quote: true, ticket_count: ticketCount, recognition, field_sources: fieldSources });
 }
 
 function presentText(value) {
@@ -334,7 +398,9 @@ function textFactsWithQuoteDraft(parsedText, quoteDraft, content) {
     showtime: timeSupplement(content),
     hall: text(String(content ?? '').match(/第?\s*\d{1,2}\s*号?\s*(?:放映厅|影厅|厅)/u)?.[0].replace(/\s+/gu, ''), 80),
   };
-  const source = (name, value) => parsed?.recognition?.[name] ? 'buyer_text' : supplement[name] ? 'buyer_text' : draft.field_sources[name] || '';
+  const source = (name, value) => parsed?.recognition?.[name]
+    ? parsed.field_sources?.[name] || 'buyer_text'
+    : supplement[name] ? 'buyer_text' : draft.field_sources[name] || '';
   const draftOfficialSelection = draft.recognition.official_selection && typeof draft.recognition.official_selection === 'object'
     && !Array.isArray(draft.recognition.official_selection) ? draft.recognition.official_selection : null;
   const recognition = {
@@ -354,6 +420,7 @@ function textFactsWithQuoteDraft(parsedText, quoteDraft, content) {
   if (!complete) return parsedText;
   return Object.freeze({
     status: 'recognized', text_quote: true, ticket_count: ticketCount,
+    ...(parsed?.semantic_source ? { semantic_source: parsed.semantic_source } : {}),
     recognition: { image_type: 'UNKNOWN', ...recognition },
     field_sources: Object.fromEntries([
       ...['city', 'cinema', 'movie', 'date', 'showtime', 'hall'].map((name) => [name, source(name, recognition[name])]).filter(([, value]) => value),
@@ -524,17 +591,41 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
     finally { if (cacheKey && recognitionInFlight.get(cacheKey) === operation) recognitionInFlight.delete(cacheKey); }
   }
 
+  async function extractSemanticTextFacts(envelope, payload, hasImage) {
+    const rawMessage = multilineText(payload?.content ?? payload?.text, 4_000);
+    const message = rawMessage.replace(/https?:\/\/[^\s,，。！？、;；]+/giu, ' ').replace(/\s+/gu, ' ').trim();
+    if (!preview.textFactUrl || !message) return null;
+    try {
+      const response = await fetchJson(preview.textFactUrl, {
+        event_id: text(envelope?.id, 200) || 'unknown-event', tenant_id: text(envelope?.tenantId, 128) || 'unknown-tenant',
+        message_text: message, observed_at: Number.isSafeInteger(Number(envelope?.ts)) && Number(envelope.ts) >= 0 ? Number(envelope.ts) : Date.now(),
+      }, 'quote text fact extraction');
+      return semanticQuoteFacts(response, { hasImage });
+    } catch {
+      return null;
+    }
+  }
+
   async function recognize(envelope) {
     const payload = envelope?.payload ?? {};
-    const parsedText = parseTextQuoteRequest(payload?.content ?? payload?.text, new Date(Number(envelope?.ts) || Date.now()));
-    const textFacts = textFactsWithQuoteDraft(parsedText, payload?.quote_draft, payload?.content ?? payload?.text);
     const sourceImageUrls = recognitionImageUrls(payload);
     const sourceImageUrl = sourceImageUrls.at(-1) ?? firstImageUrl(payload);
+    const fallbackText = parseTextQuoteRequest(payload?.content ?? payload?.text, new Date(Number(envelope?.ts) || Date.now()));
+    const semanticText = await extractSemanticTextFacts(envelope, payload, Boolean(sourceImageUrl));
+    const parsedText = semanticText ?? fallbackText;
+    const textFacts = textFactsWithQuoteDraft(parsedText, payload?.quote_draft, payload?.content ?? payload?.text);
     if (repeatedQuoteDraft(payload?.quote_draft, textFacts, sourceImageUrl)) {
       return Object.freeze({ status: 'quote_deduplicated', tenant_id: text(envelope?.tenantId, 128) });
     }
     const reusedRecognition = reusableSameImageRecognition(payload?.quote_draft, sourceImageUrl);
-    if (reusedRecognition) return Object.freeze({ ...reusedRecognition, tenant_id: text(envelope?.tenantId, 128) });
+    if (reusedRecognition) {
+      const recognition = mergeRecognitionWithTextFacts(reusedRecognition.recognition, textFacts, payload?.content ?? payload?.text);
+      return Object.freeze({
+        ...reusedRecognition, tenant_id: text(envelope?.tenantId, 128), recognition,
+        ticket_count: textFacts?.ticket_count ?? reusedRecognition.ticket_count,
+        field_sources: { ...(reusedRecognition.field_sources ?? {}), ...(textFacts?.field_sources ?? {}) },
+      });
+    }
     if (!sourceImageUrl) {
       return textFacts.status === 'recognized'
         ? Object.freeze({ ...textFacts, tenant_id: text(envelope?.tenantId, 128) })
@@ -580,6 +671,7 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
         recognition: fusedRecognition,
         field_sources: fieldSourcesForRecognition(fusedRecognition, textFacts, recognition, payload?.content ?? payload?.text),
         recognition_reply_text: recognitionReplyText(fusedRecognition),
+        ...(textFacts.semantic_source ? { semantic_source: textFacts.semantic_source } : {}),
         ...(contentHashReused ? { recognition_reused: 'same_image_content_hash' } : {}),
       });
     } catch (error) {
@@ -612,10 +704,10 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
     }
     if (!outcome.response.ok) {
       const failure = quoteFailure(outcome.result?.detail, outcome.response.status);
-      const contextualReply = ['showtime_not_unique', 'cinema_catalog_not_unique', 'official_selection_unverifiable', 'temporary_lock_release_unverified'].includes(failure.code)
+      const contextualReply = ['showtime_not_found', 'showtime_not_unique', 'cinema_catalog_not_unique', 'official_selection_unverifiable', 'temporary_lock_release_unverified'].includes(failure.code)
         ? quoteFailureReplyText(failure.code, attempt.recognition)
         : '';
-      return Object.freeze({ status: 'quote_failed', recognition: attempt.recognition, recognition_reply_text: attempt.recognition_reply_text, failure_code: failure.code, ...(failure.diagnostics ? { diagnostics: failure.diagnostics } : {}), reply_text: contextualReply || failure.replyText || quoteFailureReplyText(failure.code, attempt.recognition) });
+      return Object.freeze({ status: 'quote_failed', recognition: attempt.recognition, recognition_reply_text: attempt.recognition_reply_text, failure_code: failure.code, ...(attempt.semantic_source ? { semantic_source: attempt.semantic_source } : {}), ...(failure.diagnostics ? { diagnostics: failure.diagnostics } : {}), reply_text: contextualReply || failure.replyText || quoteFailureReplyText(failure.code, attempt.recognition) });
     }
     const result = outcome.result;
     if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('quote preview quote returned an invalid response');
@@ -629,7 +721,7 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
         reply_text: backendQuoteReplyText(result),
       });
     }
-    return Object.freeze({ ...result, status: 'preview_ready', ...(recognized.text_quote ? { text_quote: true } : {}), recognition, recognition_reply_text: recognitionReplyText(recognition), reply_text: recognized.text_quote ? textQuoteReply(result, { ...recognized, recognition }) : (backendQuoteReplyText(result) || quoteReplyText(result, recognition)) });
+    return Object.freeze({ ...result, status: 'preview_ready', ...(recognized.text_quote ? { text_quote: true } : {}), ...(recognized.semantic_source ? { semantic_source: recognized.semantic_source } : {}), recognition, recognition_reply_text: recognitionReplyText(recognition), reply_text: recognized.text_quote ? textQuoteReply(result, { ...recognized, recognition }) : (backendQuoteReplyText(result) || quoteReplyText(result, recognition)) });
   }
 
   async function requestQuote(recognized) {

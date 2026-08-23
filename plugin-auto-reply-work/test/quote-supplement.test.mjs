@@ -23,6 +23,9 @@ test('short city supplements are bounded quote facts while casual acknowledgemen
   assert.equal(isLocationQuoteSupplement({ content: '广州' }), true);
   assert.equal(isLocationQuoteSupplement({ content: '海上世界店' }), true);
   assert.equal(isLocationQuoteSupplement({ content: '万达影城厦门寰映影城' }), true);
+  const jinanRequest = '您好 请问济南世贸万达影城今日12:35开场的奥德赛这两个位置还有票吗？';
+  assert.equal(cityHintFromSupplement(jinanRequest), '济南');
+  assert.equal(cinemaHintFromSupplement(jinanRequest), '济南世贸万达影城');
   const ziboRequest = '你好，问一下山东省淄博市张店区富力万达的万达影城，今天晚上7点的奥德赛，位置7排15，16和8排16的价格';
   assert.equal(cityHintFromSupplement(ziboRequest), '淄博');
   assert.equal(cinemaHintFromSupplement(ziboRequest), '富力万达');

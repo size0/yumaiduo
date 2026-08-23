@@ -43,6 +43,41 @@ test('prepare starts readonly recognition immediately and complete advances to q
   assert.equal(result.circledDeliveryInstructionImage, 'https://img.example/seat.jpg');
 });
 
+test('partial text identity is persisted for the following image without attempting a quote', async () => {
+  const drafts = [];
+  let quoteCalls = 0;
+  let claimCalls = 0;
+  const partial = {
+    status: 'needs_confirmation', failure_code: 'text_quote_missing_fields', ticket_count: 2,
+    missing_fields: ['这几个位置的完整选座截图'],
+    recognition: { image_type: 'UNKNOWN', city: '济南', cinema: '济南世贸万达影城', movie: '奥德赛', date: '2026-08-23', showtime: '12:35' },
+    field_sources: { city: 'buyer_text', cinema: 'buyer_text', movie: 'buyer_text', date: 'buyer_text', showtime: 'buyer_text', ticket_count: 'buyer_text' },
+  };
+  const orchestrator = createQuoteOrchestrator({
+    quotePreviewClient: {
+      async recognize() { return partial; },
+      async quote() { quoteCalls += 1; return { status: 'preview_ready' }; },
+    },
+    conversationContextStore: {
+      async recordQuoteDraft(_tenant, _payload, draft) { drafts.push(draft); },
+      async claimQuoteDraftAttempt() { claimCalls += 1; return true; },
+    },
+  });
+  const textEnvelope = { ...envelope, payload: { ...envelope.payload, imageUrls: [], content: '济南世贸万达影城今日12:35奥德赛这两个位置' } };
+  const result = await orchestrator.prepare({
+    envelope: textEnvelope, quoteEnvelope: textEnvelope, quoteContext: null,
+    runtimeSettings: { recognition_enabled: true, quote_enabled: true }, orderLinked: false,
+  }).complete({ awaitStage: (promise) => promise });
+
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0].recognition.city, '济南');
+  assert.equal(drafts[0].ticketCount, 2);
+  assert.equal(drafts[0].imageUrl, null);
+  assert.equal(quoteCalls, 0);
+  assert.equal(claimCalls, 0);
+  assert.equal(result.quoteResult.value.status, 'needs_confirmation');
+});
+
 test('count-only supplement reuses a bounded recognition artifact without vision', async () => {
   let recognitionCalls = 0;
   let quotedCount = null;

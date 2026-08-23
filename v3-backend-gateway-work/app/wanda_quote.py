@@ -316,6 +316,19 @@ def _match_diagnostics(match: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _city_identity(value: Any) -> str:
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]+", "", _text(value)).removesuffix("市")
+
+
+def _matched_city_identity(match: Mapping[str, Any]) -> tuple[str, str]:
+    root = _data(match)
+    city = root.get("city") if isinstance(root.get("city"), Mapping) else {}
+    cinema = root.get("cinema") if isinstance(root.get("cinema"), Mapping) else {}
+    city_name = _text(city.get("name") or city.get("cityName") or cinema.get("cityName") or cinema.get("_cityName") or root.get("cityName"))
+    cinema_name = _text(cinema.get("cinemaName") or cinema.get("name") or root.get("cinemaName"))
+    return _city_identity(city_name), _city_identity(cinema_name)
+
+
 def _requested_match_diagnostics(recognition: Recognition) -> dict[str, str]:
     """Keep bounded, non-sensitive identity facts needed to debug zero matches."""
     showtime = _text(recognition.showtime).split("-", 1)[0][:5]
@@ -648,8 +661,13 @@ class RealtimeQuoteService:
             raise self._catalog_error(recognition)
         return resolved
 
-    def _verify_joint_match(self, match: Mapping[str, Any], cinema_id: str) -> None:
+    def _verify_joint_match(self, match: Mapping[str, Any], cinema_id: str, recognition: Recognition) -> None:
         root = _data(match)
+        requested_city = _city_identity(recognition.city)
+        if requested_city:
+            matched_city, matched_cinema = _matched_city_identity(match)
+            if (matched_city and matched_city != requested_city) or (not matched_city and requested_city not in matched_cinema):
+                raise HTTPException(status_code=422, detail="官方场次城市与买家明确城市不一致")
         evidence = root.get("showtime_match")
         evidence = evidence if isinstance(evidence, Mapping) else {}
         components = evidence.get("components")
@@ -724,7 +742,7 @@ class RealtimeQuoteService:
         try:
             showtime_id, cinema_id, cinema_name = _showtime_and_cinema(initial_match)
             if joint_match_required:
-                self._verify_joint_match(initial_match, cinema_id)
+                self._verify_joint_match(initial_match, cinema_id, recognition)
             return initial_match, recognition, showtime_id, cinema_id, cinema_name
         except HTTPException as initial_error:
             # Wanda's seat-map title often truncates a long branch name with an
@@ -742,7 +760,7 @@ class RealtimeQuoteService:
             try:
                 showtime_id, cinema_id, cinema_name = _showtime_and_cinema(retried_match)
                 if joint_match_required:
-                    self._verify_joint_match(retried_match, cinema_id)
+                    self._verify_joint_match(retried_match, cinema_id, retried_recognition)
             except HTTPException as retried_error:
                 retried_error.match_result = retried_match
                 raise

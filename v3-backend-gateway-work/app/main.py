@@ -19,11 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .quote_preview_store import QuotePreviewStore, empty_pending_record
 from .plugin_bridge_store import DEFAULT_REPLY_TEMPLATE_IMAGES, DEFAULT_REPLY_TEMPLATES, PluginBridgeStore
 from .knowledge_base_store import KnowledgeBaseStore
-from .conversation_agent import ConversationAgentService, classify_agent_scene
+from .conversation_agent import ConversationAgentService, QUOTE_FACT_PROMPT_VERSION, classify_agent_scene
 from .reply_preview import ReplyPreviewService
 from .match_candidate_resolver import MatchCandidateResolver
 from .local_catalog import LocalWandaCatalog
-from .schemas import AgentTurnRequest, AgentTurnResponse, AvailableWplusSeatsRequest, AvailableWplusSeatsResponse, ConversationExperienceIngestRequest, ImageType, ImageUploadResponse, Recognition, ModelSettingsUpdate, ModelSettingsView, PendingQuoteRecord, PendingQuotesResponse, QuoteMatchCandidateRequest, QuoteMatchCandidateResponse, QuotePreviewIngestRequest, QuotePreviewIngestResponse, QuotePreviewQuoteRequest, QuoteRealtimeRequest, QuoteRealtimeResponse, QuoteShowtimeResolveRequest, QuoteShowtimeResolveResponse, ReplyPreviewIngestRequest, ReplyPreviewIngestResponse, StorageSettingsView, VisionRecognizeRequest, VisionRecognizeResponse, WandaQuoteSettingsUpdate, WandaQuoteSettingsView
+from .schemas import AgentTurnRequest, AgentTurnResponse, AvailableWplusSeatsRequest, AvailableWplusSeatsResponse, ConversationExperienceIngestRequest, ImageType, ImageUploadResponse, Recognition, ModelSettingsUpdate, ModelSettingsView, PendingQuoteRecord, PendingQuotesResponse, QuoteMatchCandidateRequest, QuoteMatchCandidateResponse, QuotePreviewIngestRequest, QuotePreviewIngestResponse, QuotePreviewQuoteRequest, QuoteRealtimeRequest, QuoteRealtimeResponse, QuoteShowtimeResolveRequest, QuoteShowtimeResolveResponse, QuoteTextFactExtractRequest, QuoteTextFactExtractResponse, ReplyPreviewIngestRequest, ReplyPreviewIngestResponse, StorageSettingsView, VisionRecognizeRequest, VisionRecognizeResponse, WandaQuoteSettingsUpdate, WandaQuoteSettingsView
 from .settings_store import ModelSettingsStore
 from .storage import CosStorageService
 from .storage_store import CosSettingsStore
@@ -593,6 +593,25 @@ def create_app(
     async def quote_realtime(request: QuoteRealtimeRequest) -> QuoteRealtimeResponse:
         recognition = app.state.local_catalog.canonicalize(request.recognition)
         return await app.state.quote_service.quote(request.model_copy(update={"recognition": recognition}))
+
+    @app.post("/api/quotes/preview-extract-text", response_model=QuoteTextFactExtractResponse)
+    async def preview_extract_text_facts(
+        request: QuoteTextFactExtractRequest,
+        x_wanda_preview_key: str | None = Header(default=None, alias="X-Wanda-Preview-Key"),
+    ) -> QuoteTextFactExtractResponse:
+        configured_key = os.getenv("WANDA_PREVIEW_INGEST_KEY", "")
+        if not configured_key or not x_wanda_preview_key or not hmac.compare_digest(x_wanda_preview_key, configured_key):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+        try:
+            service = app.state.conversation_agent_service
+            if not isinstance(service, ConversationAgentService):
+                return QuoteTextFactExtractResponse(status="failed", extractor_version=QUOTE_FACT_PROMPT_VERSION, failure_code="semantic_extractor_unavailable")
+            facts = await service.extract_quote_facts(request, reply_model_settings())
+            return QuoteTextFactExtractResponse(status="extracted", extractor_version=QUOTE_FACT_PROMPT_VERSION, facts=facts)
+        except Exception as error:
+            failure_code = _preview_failure_code(error)
+            logger.warning("quote text fact extraction failed event_id=%s failure_code=%s", request.event_id, failure_code)
+            return QuoteTextFactExtractResponse(status="failed", extractor_version=QUOTE_FACT_PROMPT_VERSION, failure_code=failure_code)
 
     @app.post("/api/quotes/preview-recognize", response_model=VisionRecognizeResponse)
     async def preview_recognize(
