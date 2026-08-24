@@ -94,6 +94,9 @@ def test_native_agent_completion_uses_standard_messages_tools_and_reasoning_with
     assert "response_format" not in captured
     assert captured["messages"][0]["content"].startswith(NATIVE_SYSTEM_PROMPT)
     assert [item["role"] for item in captured["messages"][1:]] == ["user", "assistant", "tool"]
+    assert "tool_calls" not in captured["messages"][1]
+    assert captured["messages"][2]["tool_calls"][0]["id"] == "old-call"
+    assert "tool_calls" not in captured["messages"][3]
     assert [item["function"]["name"] for item in captured["tools"]] == ["recognize_image", "read_active_quote", "create_manual_task"]
     assert result.assistant.tool_calls[0].function.name == "read_active_quote"
     assert result.finish_reason == "tool_calls"

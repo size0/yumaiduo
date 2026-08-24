@@ -127,6 +127,18 @@ def classify_agent_scene(request: AgentTurnRequest) -> str:
     return "general"
 
 
+def _native_provider_message(message: NativeAgentMessage) -> dict[str, Any]:
+    """Serialize only fields accepted by OpenAI-compatible providers.
+
+    Pydantic retains the default ``tool_calls=[]`` on user and tool messages.
+    DashScope rejects that otherwise valid transcript as an empty tool call.
+    """
+    payload = message.model_dump(mode="json", exclude_none=True)
+    if not payload.get("tool_calls"):
+        payload.pop("tool_calls", None)
+    return payload
+
+
 def _system_prompt(model_settings: Mapping[str, object], knowledge_rules: list[str]) -> str:
     configured = []
     for label, key in (
@@ -175,7 +187,7 @@ class ConversationAgentService:
                 system_content += "\n\n当前租户已审核知识：\n" + "\n".join(f"- {entry}" for entry in snapshot.entries)
 
             messages = [{"role": "system", "content": system_content}]
-            messages.extend(message.model_dump(mode="json", exclude_none=True) for message in request.messages)
+            messages.extend(_native_provider_message(message) for message in request.messages)
             payload: dict[str, Any] = {
                 "model": model_settings["model"],
                 "temperature": min(float(model_settings.get("temperature", 0)), 0.7),
