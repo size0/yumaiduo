@@ -1,6 +1,6 @@
 # 当前 main 上线审核清单
 
-> 当前生产V3与插件均来自 `cfb3b94cca8efb1ae8be7cf21d106454b9df4fc5`：V3契约为 `wanda-v3-v17-full-agent-owner`，插件Runtime为 `wanda-agent-runtime-v34-full-active`。认证运营者已明确开启100%全量会话Agent；所有真实买家IM轮次由独立Durable Agent worker、工具journal和唯一Reply Outbox执行，图片、场次和报价只允许调用受控权威工具。平台订单创建、确定性改价、付款、出票、退款、发货及系统生命周期事件仍由确定性交易worker处理，模型不能提供价格或订单执行参数。生产设置已GET回读确认Active、100%流量、kill switch关闭且唯一会话Owner为Agent；V3和插件完成健康校验及实际回滚恢复。
+> 当前生产V3与插件均来自 `94717e6b9c9f235451b6a97ea8792fe24c3972e4`：V3契约为 `wanda-v3-v18-active-reply-supersession`，插件Runtime为 `wanda-agent-runtime-v35-source-turn-supersession`。认证运营者已明确开启100%全量会话Agent。每条Active Outbox回复绑定源买家平台消息ID；源消息后的新买家消息或任意人工卖家回复都会永久取消旧回复，不再受20秒接管窗口限制。无工具、无权威事实的计划失败只生成内部任务，不再向买家发送空泛人工提示；有效报价后的颜色/W+追问使用确定性报价快照。生产设置已GET回读确认Active、100%流量且唯一会话Owner为Agent；V3和插件完成健康校验及实际回滚恢复。
 
 ## 已完成
 
@@ -17,7 +17,7 @@
 - [x] UI 使用平台 iframe SDK、网关鉴权、主题变量和自适应宽度
 - [x] Agent轨迹可按租户脱敏回放；人工任务支持负责人、优先级、标签、SLA和内部备注
 - [x] Agent回复知识按确定性会话场景有界检索，价格、库存和订单事实仍只来自权威工具
-- [x] 当前源码插件测试 515 项、V3 后端测试 211 项通过；新增全量Active路由、100%稳定流量、唯一Agent Owner、事件时点快照、未来状态隔离、人工卖家历史和权威工具门禁测试
+- [x] 当前源码插件测试 517 项、V3 后端测试 211 项通过；新增源买家消息覆盖、迟到人工接管、有效报价澄清、全量Active路由和唯一Agent Owner测试
 - [x] 每次新增Agent、识图或核价能力必须回归：首次图片报价、有效报价后问价、文字座位、确认、订单创建/付款、人工接管、平台系统消息；禁止有效报价后的普通追问重新识图或重复临时试价
 - [x] 历史0.6.0审核包曾在干净目录执行 `npm ci --ignore-scripts && npm test` 通过
 - [x] 历史0.6.0审核包官方 npm registry 生产依赖审计为0漏洞
@@ -39,9 +39,9 @@
 - [x] 已在受限生产环境中生成并配置至少32字节的 `WANDA_PRICING_ACCOUNT_REF_KEY`，未输出或复用账号Token
 - [x] 已使用生产环境执行 `scripts/validate_direct_gateway_env.py --require-enabled`，结果为 `ready`，识别15个合格账号
 - [x] 账号池权限为 `640 ticket-system:ticket-system`，预检确认文件类型和权限安全
-- [x] 已在源码提交 `cfb3b94` 执行插件515项测试和V3 211项测试；生产完成编译、健康、100%Active设置回读和V16/V33实际回滚恢复
+- [x] 已在源码提交 `94717e6` 执行插件517项测试和V3 211项测试；生产完成编译、健康、100%Active设置回读和V17/V34实际回滚恢复
 - [x] 官方registry执行 `npm audit --omit=dev --json` 成功：生产依赖漏洞总数0；审计响应SHA-256为 `08886336e9ac4c3334d9e199091490029d90496fed849454723ebd7dbc3ceb6d`
-- [x] 已为源码提交 `cfb3b94cca8efb1ae8be7cf21d106454b9df4fc5` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/cfb3b94cca8e`
+- [x] 已为源码提交 `94717e6b9c9f235451b6a97ea8792fe24c3972e4` 生成并验证确定性V3和插件候选包及独立SHA-256；本地候选目录为 `dist/release-candidates/94717e6b9c9f`
 - [x] 已在服务器创建独立V3和插件release目录，未覆盖历史release
 - [x] 新运营工作台以 `/ui/workbench` 隔离上线；Playwright使用本机Edge完成桌面、390px移动端、状态卡、队列筛选、样本门槛及横向溢出E2E，生产静态资源Smoke和实际回滚恢复通过
 - [x] 运营工作台完成视觉重构：简化中文层级、统一蓝灰状态体系、压缩移动端长度、增加一致图标和响应式双栏；桌面/移动截图检查及实际回滚恢复通过
@@ -51,7 +51,7 @@
 - [x] `quote_enabled=false`或`ai_reply_enabled=false`时不再发送“正在核对实时场次和优惠”；独立开关回归、生产release测试及实际回滚恢复通过
 - [x] 部署后Runtime契约校验为 `ready`；两个systemd服务均为 `active`、`NRestarts=0`，WorkingDirectory准确且最近warning日志为空
 - [x] 已对牡丹江万达广场店17:15场次执行只读W+座位Smoke，8排返回6个实时可选座位；未创建临时订单
-- [x] 当前生产设置为 `automation_enabled=true`、`recognition_enabled=true`、`quote_enabled=true`、`auto_price_change=true`、`ai_reply_enabled=true`、`shadow_evaluation_enabled=true`；`conversation_agent_mode=active`、`execution_owner=agent`、Active流量100%、批准版本V34且kill switch关闭
+- [x] 当前生产设置为 `automation_enabled=true`、`recognition_enabled=true`、`quote_enabled=true`、`auto_price_change=true`、`ai_reply_enabled=true`、`shadow_evaluation_enabled=true`；`conversation_agent_mode=active`、`execution_owner=agent`、Active流量100%、批准版本V35且kill switch关闭
 - [ ] V33重新采集至少100轮自动安全审计和100轮图片样本；V32及更旧版本样本不得补门槛
 - [x] 已完成单座优惠修复release到前一V31 release回滚及恢复演练；两端健康、WorkingDirectory和队列恢复通过
 - [x] V32生产只读Smoke把“泉州晋江万达今天15:50奥德赛还有W座位吗”规划为 `resolve_ticket_identity → show_available_wplus_seats`，官方唯一匹配晋江万达广场激光IMAX店并返回7排9座、7排10座；未创建临时试价订单
@@ -61,13 +61,13 @@
 
 ## 当前生产候选包证据
 
-- V3 SHA-256：`62073f002bcd2e54968fae015f9d656ae09ec02704a4f816013a38df6305f852`
-- 插件 SHA-256：`75d242a84bddb642e7660da7de903fff9128b1bb61f865b330dc945bb3ac0e87`
-- Manifest SHA-256：`aa3ae50f0767095fb1599a7df713587af6427437ba0ecbf2ea89de34d3176aa3`
+- V3 SHA-256：`2a19cbada16e9bb8410993b493dbe618dfb1f7c92ebb3f0bc505f6577273f78f`
+- 插件 SHA-256：`6d0575a8eb3326d6da313c84f9bc42b9c9184f62d7982828c63236cc292e0ae4`
+- Manifest SHA-256：`a0dd20ecc264669064d41d67878fc1f0a69f00b0ad93bc45f0b85ec7f501b929`
 - 构建命令：`python deploy/build_release_bundles.py`
-- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/cfb3b94cca8e`
-- 生产V3：`/opt/wanda-v3-backend/releases/v17-full-agent-owner-cfb3b94cca8e`
-- 生产插件：`/opt/wanda-preview-plugin/releases/v34-full-agent-cfb3b94cca8e`
+- 校验命令：`python deploy/verify_release_bundles.py dist/release-candidates/94717e6b9c9f`
+- 生产V3：`/opt/wanda-v3-backend/releases/v18-active-reply-supersession-94717e6b9c9f`
+- 生产插件：`/opt/wanda-preview-plugin/releases/v35-source-turn-supersession-94717e6b9c9f`
 
 ## 提交前由门户确认
 
