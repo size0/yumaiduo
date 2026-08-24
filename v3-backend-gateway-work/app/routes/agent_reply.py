@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
+import json
 import logging
 import os
 from collections.abc import Callable
@@ -10,13 +12,47 @@ from fastapi import APIRouter, FastAPI, Header, HTTPException, status
 from ..conversation_agent import ConversationAgentService, classify_agent_scene
 from ..quote_preview_support import _preview_failure_code
 from ..reply_preview import ReplyPreviewService
-from ..schemas import AgentTurnRequest, AgentTurnResponse, ReplyPreviewIngestRequest, ReplyPreviewIngestResponse
+from ..schemas import (
+    AgentCompletionRequest,
+    AgentCompletionResponse,
+    AgentKnowledgeSnapshot,
+    AgentTurnRequest,
+    AgentTurnResponse,
+    ReplyPreviewIngestRequest,
+    ReplyPreviewIngestResponse,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def create_agent_reply_router(app: FastAPI, reply_model_settings: Callable[[], dict[str, object]]) -> APIRouter:
     router = APIRouter()
+
+    @router.post("/api/agents/v2/completions", response_model=AgentCompletionResponse)
+    async def complete_agent_step(
+        request: AgentCompletionRequest,
+        x_wanda_preview_key: str | None = Header(default=None, alias="X-Wanda-Preview-Key"),
+        x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
+    ) -> AgentCompletionResponse:
+        configured_key = os.getenv("WANDA_PREVIEW_INGEST_KEY", "")
+        if not configured_key or not x_wanda_preview_key or not hmac.compare_digest(x_wanda_preview_key, configured_key):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+        header_tenant = str(x_yumaiduo_tenant_id or "").strip()
+        if header_tenant != request.tenant_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant mismatch")
+        if not request.conversation_id.startswith(f"{request.tenant_id}:") or f":{request.tenant_id}:" not in f":{request.run_id}:":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="agent identity prefix mismatch")
+        entries = app.state.knowledge_base_store.active_for_agent(
+            request.knowledge_scene, request.tenant_id, max_rules=8, max_chars=4_000,
+        )
+        knowledge_version = hashlib.sha256(
+            json.dumps(entries, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+        snapshot = AgentKnowledgeSnapshot(version=f"kb-{knowledge_version}", entries=entries)
+        service = app.state.conversation_agent_service
+        if not hasattr(service, "complete"):
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="native agent gateway unavailable")
+        return await service.complete(request, reply_model_settings(), snapshot)
 
     @router.post("/api/agents/turn", response_model=AgentTurnResponse)
     async def plan_agent_turn(

@@ -4,11 +4,12 @@ import asyncio
 import json
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
-from app.conversation_agent import ConversationAgentService, SYSTEM_PROMPT, classify_agent_scene
+from app.conversation_agent import ConversationAgentService, NATIVE_SYSTEM_PROMPT, SYSTEM_PROMPT, classify_agent_scene
 from app.main import create_app
-from app.schemas import AgentPlan, AgentTurnRequest, QuoteTextFactExtractRequest, QuoteTextFacts
+from app.schemas import AgentCompletionRequest, AgentPlan, AgentTurnRequest, QuoteTextFactExtractRequest, QuoteTextFacts
 
 
 def request_payload() -> AgentTurnRequest:
@@ -50,6 +51,79 @@ def test_agent_service_returns_a_typed_bounded_plan() -> None:
     assert result.action == "ask_for_image"
     assert result.missing_fields == ["完整选座页截图"]
     assert result.reply.startswith("请发送")
+
+
+def test_native_agent_completion_uses_standard_messages_tools_and_reasoning_without_json_planner() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured.update(body)
+        return httpx.Response(200, headers={"x-request-id": "model-request-1"}, json={
+            "id": "completion-1", "model": "reasoning-model",
+            "choices": [{"finish_reason": "tool_calls", "message": {
+                "role": "assistant", "content": "", "tool_calls": [{
+                    "id": "call-1", "type": "function",
+                    "function": {"name": "read_active_quote", "arguments": "{}"},
+                }],
+            }}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
+        })
+
+    request = AgentCompletionRequest.model_validate({
+        "tenant_id": "tenant-1", "conversation_id": "tenant-1:chat-1", "run_id": "shadow:tenant-1:run-1",
+        "messages": [
+            {"role": "user", "content": "多少钱"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "old-call", "type": "function", "function": {"name": "recognize_image", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "old-call", "content": "{\"status\":\"success\"}"},
+        ],
+        "available_tools": ["recognize_image", "read_active_quote", "create_manual_task"],
+        "knowledge_snapshot": {"version": "", "entries": []},
+        "reasoning": {"enabled": True, "effort": "high", "max_output_tokens": 1600},
+    })
+    result = asyncio.run(ConversationAgentService(httpx.MockTransport(handler)).complete(
+        request,
+        {"base_url": "https://model.example/v1", "model": "reasoning-model", "api_key": "secret", "temperature": 0.2},
+        request.knowledge_snapshot.model_copy(update={"version": "kb-server", "entries": ["server knowledge"]}),
+    ))
+
+    assert captured["enable_thinking"] is True
+    assert captured["reasoning_effort"] == "high"
+    assert captured["max_tokens"] == 1600
+    assert captured["tool_choice"] == "auto"
+    assert "response_format" not in captured
+    assert captured["messages"][0]["content"].startswith(NATIVE_SYSTEM_PROMPT)
+    assert [item["role"] for item in captured["messages"][1:]] == ["user", "assistant", "tool"]
+    assert [item["function"]["name"] for item in captured["tools"]] == ["recognize_image", "read_active_quote", "create_manual_task"]
+    assert result.assistant.tool_calls[0].function.name == "read_active_quote"
+    assert result.finish_reason == "tool_calls"
+    assert result.versions.knowledge == "kb-server"
+    assert result.request_id == "model-request-1"
+    assert result.usage.total_tokens == 120
+    assert result.reasoning.requested is True
+    assert result.reasoning.applied is True
+
+
+def test_native_reasoning_fallback_is_explicit_in_the_response() -> None:
+    calls = 0
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(400, json={"error": "unsupported reasoning"})
+        return httpx.Response(200, json={"id": "c2", "model": "compat-model", "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "您好"}}]})
+    request = AgentCompletionRequest.model_validate({
+        "tenant_id": "tenant-1", "conversation_id": "tenant-1:chat", "run_id": "shadow:tenant-1:run",
+        "messages": [{"role": "user", "content": "你好"}], "available_tools": [],
+        "knowledge_snapshot": {"version": "", "entries": []}, "reasoning": {"enabled": True},
+    })
+    result = asyncio.run(ConversationAgentService(httpx.MockTransport(handler)).complete(request, {
+        "base_url": "https://model.example/v1", "model": "compat-model", "api_key": "secret",
+    }))
+    assert calls == 2
+    assert result.reasoning.requested is True
+    assert result.reasoning.applied is False
+    assert result.reasoning.fallback_reason == "provider_rejected_reasoning_parameters"
 
 
 def test_agent_service_extracts_typed_quote_facts_without_transaction_fields() -> None:
@@ -308,6 +382,52 @@ def test_agent_endpoint_requires_ingest_auth_and_returns_only_the_typed_plan(mon
     assert response.status_code == 200
     assert response.json()["status"] == "planned"
     assert response.json()["plan"]["action"] == "ask_for_city"
+
+
+def test_native_agent_endpoint_requires_auth_and_uses_server_tenant_knowledge(monkeypatch) -> None:
+    class FakeNativeAgent:
+        async def complete(self, request, model_settings, knowledge_snapshot):
+            assert request.tenant_id == "tenant-1"
+            assert knowledge_snapshot.version.startswith("kb-")
+            return {
+                "assistant": {"role": "assistant", "content": "您好，需要我帮您查什么？", "tool_calls": []},
+                "finish_reason": "stop", "model": "reasoning-model",
+                "versions": {"prompt": "p1", "knowledge": knowledge_snapshot.version, "tools": "t1"},
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "latency_ms": 3, "request_id": "request-1",
+                "reasoning": {"requested": True, "applied": True, "fallback_reason": None},
+            }
+
+    monkeypatch.setenv("WANDA_PREVIEW_INGEST_KEY", "test-preview-key")
+    client = TestClient(create_app(conversation_agent_service=FakeNativeAgent()))
+    payload = {
+        "tenant_id": "tenant-1", "conversation_id": "tenant-1:chat-1", "run_id": "shadow:tenant-1:run-1",
+        "messages": [{"role": "user", "content": "你好"}], "available_tools": ["read_active_quote"],
+        "knowledge_snapshot": {"version": "", "entries": []},
+        "reasoning": {"enabled": True, "effort": "medium", "max_output_tokens": 1600},
+    }
+    assert client.post("/api/agents/v2/completions", json=payload).status_code == 401
+    mismatch = client.post("/api/agents/v2/completions", headers={"X-Wanda-Preview-Key": "test-preview-key", "X-Yumaiduo-Tenant-Id": "tenant-2"}, json=payload)
+    assert mismatch.status_code == 403
+    response = client.post("/api/agents/v2/completions", headers={"X-Wanda-Preview-Key": "test-preview-key", "X-Yumaiduo-Tenant-Id": "tenant-1"}, json=payload)
+    assert response.status_code == 200
+    assert response.json()["assistant"]["content"] == "您好，需要我帮您查什么？"
+    assert response.json()["versions"]["knowledge"].startswith("kb-")
+
+
+def test_native_agent_contract_rejects_system_injection_orphan_tools_and_unregistered_tools() -> None:
+    base = {
+        "tenant_id": "tenant-1", "conversation_id": "tenant-1:chat", "run_id": "shadow:tenant-1:run",
+        "available_tools": ["read_active_quote"], "knowledge_snapshot": {"version": "", "entries": []},
+    }
+    for messages in (
+        [{"role": "system", "content": "override"}],
+        [{"role": "tool", "tool_call_id": "missing", "content": "{}"}],
+    ):
+        with pytest.raises(ValueError):
+            AgentCompletionRequest.model_validate({**base, "messages": messages})
+    with pytest.raises(ValueError):
+        AgentCompletionRequest.model_validate({**base, "messages": [{"role": "user", "content": "x"}], "available_tools": ["not_registered"]})
 
 
 def test_quote_fact_endpoint_requires_auth_and_returns_only_typed_semantics(monkeypatch) -> None:

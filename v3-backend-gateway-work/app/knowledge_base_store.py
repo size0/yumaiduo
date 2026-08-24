@@ -99,7 +99,9 @@ class KnowledgeBaseStore:
         with self._lock:
             state = self._read()
             for entry in state["entries"]:
-                if entry["id"] != entry_id or not self._visible_to_tenant(entry, tenant_id):
+                if entry["id"] != entry_id:
+                    continue
+                if tenant_id is not None and str(entry.get("tenant_id", "")).strip() != self._tenant(tenant_id):
                     continue
                 old = {key: entry.get(key, "general" if key == "scene" else None) for key in ("title", "content", "category", "scene", "enabled", "status", "sort_order")}
                 entry.update(self._validate(payload, existing=entry))
@@ -115,6 +117,95 @@ class KnowledgeBaseStore:
                 self._write(state)
                 return entry
             raise KeyError(entry_id)
+
+    def list_corrections(self, tenant_id: str) -> list[dict[str, object]]:
+        tenant = self._tenant(tenant_id)
+        with self._lock:
+            corrections = self._read().get("corrections", [])
+            return sorted(
+                (item for item in corrections if item.get("tenant_id") == tenant),
+                key=lambda item: str(item.get("created_at", "")), reverse=True,
+            )
+
+    def record_correction(self, tenant_id: str, payload: dict[str, object]) -> dict[str, object]:
+        tenant = self._tenant(tenant_id)
+        required = {
+            "conversation_id": (1, 240), "run_id": (1, 240), "event_id": (1, 240),
+            "buyer_message": (0, 4_000), "assistant_reply": (0, 4_000),
+            "corrected_answer": (1, 4_000), "handling_guidance": (0, 4_000),
+        }
+        values: dict[str, str] = {}
+        for field, (minimum, maximum) in required.items():
+            value = str(payload.get(field, "")).strip()
+            if not minimum <= len(value) <= maximum:
+                raise ValueError(f"invalid correction {field}")
+            values[field] = value
+        trajectory = payload.get("tool_trajectory", [])
+        if not isinstance(trajectory, list) or len(trajectory) > 50 or len(json.dumps(trajectory, ensure_ascii=False)) > 40_000:
+            raise ValueError("invalid correction tool trajectory")
+        versions = payload.get("versions", {})
+        if not isinstance(versions, dict) or len(json.dumps(versions, ensure_ascii=False)) > 4_000:
+            raise ValueError("invalid correction versions")
+        now = self._now()
+        correction: dict[str, object] = {
+            "id": uuid4().hex, "tenant_id": tenant, **values,
+            "tool_trajectory": trajectory, "versions": versions,
+            "status": "draft", "revision": 1, "knowledge_entry_id": None,
+            "created_at": now, "updated_at": now,
+        }
+        with self._lock:
+            state = self._read()
+            state.setdefault("corrections", []).append(correction)
+            self._write(state)
+        return correction
+
+    def review_correction(self, tenant_id: str, correction_id: str, payload: dict[str, object]) -> dict[str, object]:
+        tenant = self._tenant(tenant_id)
+        decision = str(payload.get("status", "")).strip()
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("invalid correction review status")
+        scene = str(payload.get("scene", "general")).strip()
+        if scene not in AGENT_SCENES:
+            raise ValueError("invalid correction scene")
+        reviewer = str(payload.get("reviewer", "")).strip()[:128]
+        expected_revision = payload.get("revision")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 1:
+            raise ValueError("invalid correction revision")
+        with self._lock:
+            state = self._read()
+            for correction in state.setdefault("corrections", []):
+                if correction.get("id") != correction_id or correction.get("tenant_id") != tenant:
+                    continue
+                if int(correction.get("revision", 1)) != expected_revision:
+                    raise ValueError("correction revision conflict")
+                correction["revision"] = expected_revision + 1
+                correction["status"] = decision
+                correction["scene"] = scene
+                correction["reviewed_by"] = reviewer
+                correction["reviewed_at"] = self._now()
+                correction["updated_at"] = self._now()
+                entry_id = str(correction.get("knowledge_entry_id") or "")
+                entry = next((item for item in state["entries"] if item.get("id") == entry_id), None)
+                if decision == "approved":
+                    guidance = str(correction.get("handling_guidance") or correction.get("corrected_answer") or "").strip()
+                    if entry is None:
+                        entry = {
+                            "id": uuid4().hex, "tenant_id": tenant, "category": "reply", "scene": scene,
+                            "title": f"运营纠正：{str(correction.get('buyer_message', ''))[:60] or correction_id[:8]}",
+                            "content": guidance[:2_000], "sort_order": 0, "status": "approved", "enabled": True,
+                            "source": "operator_correction", "source_correction_id": correction_id,
+                            "created_at": self._now(), "updated_at": self._now(), "versions": [],
+                        }
+                        state["entries"].append(entry)
+                        correction["knowledge_entry_id"] = entry["id"]
+                    else:
+                        entry.update({"scene": scene, "content": guidance[:2_000], "status": "approved", "enabled": True, "updated_at": self._now()})
+                elif entry is not None:
+                    entry["enabled"] = False
+                    entry["updated_at"] = self._now()
+                self._write(state)
+                return correction
+            raise KeyError(correction_id)
 
     def record_experience(self, tenant_id: str, candidate: dict[str, object]) -> dict[str, object]:
         tenant = self._tenant(tenant_id)
@@ -217,7 +308,10 @@ class KnowledgeBaseStore:
         return not entry_tenant or entry_tenant == str(tenant_id).strip()
 
     def _read(self) -> dict[str, list[dict[str, object]]]:
-        return json.loads(self.path.read_text("utf-8"))
+        state = json.loads(self.path.read_text("utf-8"))
+        state.setdefault("entries", [])
+        state.setdefault("corrections", [])
+        return state
 
     def _write(self, value: object) -> None:
         tmp = self.path.with_suffix(".tmp")

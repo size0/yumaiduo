@@ -181,6 +181,11 @@
           <p id="agent-offline-evaluation-status" class="section-note">正在回放图片工具链并计算完成率、重复调用和延迟。</p>
           <div class="table-wrap"><table><thead><tr><th>对应买家 / 这一轮</th><th>AI建议下一步<br><small>未执行</small></th><th>确定性系统实际结果</th><th>您认为应该怎么做</th><th>还要追问</th><th>应该转人工</th><th>AI回复是否合适</th><th>是否符合实际结果</th><th>高风险动作</th><th>虚假声明</th><th>重复追问</th><th>原会话</th><th>保存</th></tr></thead><tbody id="agent-evaluation-body"><tr><td class="table-empty" colspan="13">正在读取影子评测记录。</td></tr></tbody></table></div>
         </section>
+        <section class="surface-section" aria-labelledby="correction-review-title">
+          <div class="section-heading"><div><h3 id="correction-review-title">本轮纠正审核</h3><p id="correction-review-count">正在读取运营纠正记录。</p></div></div>
+          <p class="section-note">“纠正本轮”只创建待审核记录。审核通过后，处理方式进入当前租户的新知识版本；金额、权限和订单门禁不会被知识文本修改。</p>
+          <div class="table-wrap"><table><thead><tr><th>买家问题</th><th>Agent原回复</th><th>正确回答 / 处理方式</th><th>适用场景</th><th>状态</th><th>审核</th></tr></thead><tbody id="correction-review-body"><tr><td class="table-empty" colspan="6">正在读取纠正记录。</td></tr></tbody></table></div>
+        </section>
         <section class="surface-section" aria-labelledby="human-comparison-title">
           <div class="section-heading"><div><h3 id="human-comparison-title">人工介入对照监督</h3><p id="human-comparison-count">正在扫描人工回复并关联影子Agent计划。</p></div></div>
           <p class="section-note">系统在独立后台扫描中识别非插件卖家回复，将它与上一条买家问题、会话事实、报价/订单状态和影子计划关联。自动标签只供审核，不直接训练模型；审核后只能选择沉淀为知识库、回复模板、业务规则或工具门禁。</p>

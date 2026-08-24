@@ -26,7 +26,12 @@ export function createAiOrchestrator({ primaryProvider } = {}) {
     return normalizeAgentPlan(await primaryProvider.plan(snapshot));
   }
 
-  return Object.freeze({ plan });
+  async function complete(input) {
+    if (typeof primaryProvider.complete !== 'function') throw new TypeError('primary AI provider does not implement native completion');
+    return primaryProvider.complete(input);
+  }
+
+  return Object.freeze({ plan, ...(typeof primaryProvider.complete === 'function' ? { complete } : {}) });
 }
 
 function boundedSourceSnapshot(input = {}) {

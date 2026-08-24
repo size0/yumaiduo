@@ -2,7 +2,7 @@ import { createConversationAgentClient } from '../agent/conversation-agent-clien
 import { createAiOrchestrator } from '../ai/ai-orchestrator.mjs';
 import { createAgentHumanComparisonScanner } from '../agent/agent-human-comparison-scanner.mjs';
 import { createAgentReplyOutboxDispatcher } from '../agent/agent-reply-outbox-dispatcher.mjs';
-import { createShadowAgentRuntime } from '../agent/shadow-agent-runtime.mjs';
+import { conversationProjectionVersion, createShadowAgentRuntime } from '../agent/shadow-agent-runtime.mjs';
 import { createActionExecutor } from '../action-executor.mjs';
 import { createReplyOrchestrator } from '../reply/reply-orchestrator.mjs';
 
@@ -57,6 +57,11 @@ export function createAgentRuntimeBundle({
     store: storage.agentReplyOutboxStore,
     executeReply: (action) => outboxReplyOrchestrator.deliver(action),
     commitDelivery: (entry) => commitQuoteDelivery(storage.conversationContextStore, entry),
+    validateReply: async (entry) => {
+      if (!entry.projection_version) return false;
+      const state = await storage.conversationContextStore.get(entry.tenant_id, { accountUnb: entry.account_unb, chatId: entry.chat_id, peerUnb: entry.peer_unb });
+      return conversationProjectionVersion(state?.facts) === entry.projection_version;
+    },
     logger,
   });
   const shadowAgentRuntime = conversationAgentPlanner
@@ -70,6 +75,8 @@ export function createAgentRuntimeBundle({
       manualTaskStore: storage.agentManualTaskStore,
       coreFor,
       quotePreviewClient,
+      executeAction: (action) => outboxExecutor.execute(action),
+      requireNativeActive: true,
       logger,
     })
     : null;

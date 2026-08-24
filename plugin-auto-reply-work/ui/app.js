@@ -13,6 +13,7 @@ import { createPluginSdk } from './sdk.js';
     agentCanaryReadiness: 'api/agent-canary-readiness',
     agentOfflineEvaluation: 'api/agent-offline-evaluation',
     agentHumanComparisons: 'api/agent-human-comparisons',
+    corrections: 'api/corrections',
     manualTasks: 'api/manual-tasks',
     operations: 'api/operations',
     quoteAnalytics: 'api/quote-analytics',
@@ -135,6 +136,7 @@ import { createPluginSdk } from './sdk.js';
     agentCanaryReadiness: null,
     agentOfflineEvaluation: null,
     agentHumanComparisons: [],
+    corrections: [],
     loading: false,
   };
 
@@ -160,7 +162,7 @@ import { createPluginSdk } from './sdk.js';
       'ai-reply-enabled', 'conversation-agent-mode', 'ai-reply-system-prompt', 'ai-reply-shop-background', 'ai-reply-precautions', 'ai-reply-style', 'ai-reply-memory-hours', 'ai-reply-memory-depth', 'ai-reply-delay-seconds', 'ai-reply-manual-takeover-seconds', 'model-key-status', 'model-save-status',
       'agent-takeover-status', 'learning-agent-mode', 'learning-agent-failures', 'learning-observed-turns', 'learning-experience-drafts', 'learning-experience-enabled', 'learning-summary-note',
       'agent-evaluation-count', 'agent-readiness-status', 'agent-offline-evaluation-status', 'agent-evaluation-body',
-      'human-comparison-count', 'human-comparison-body',
+      'human-comparison-count', 'human-comparison-body', 'correction-review-count', 'correction-review-body',
       'knowledge-base-form', 'knowledge-category', 'knowledge-title', 'knowledge-sort-order', 'knowledge-content', 'knowledge-save-status', 'knowledge-count', 'knowledge-list', 'review-filter',
       'review-search', 'review-count', 'review-records-body',
       'log-filter', 'log-search', 'clear-log-filter', 'log-count', 'logs-body', 'toast-region',
@@ -258,6 +260,7 @@ import { createPluginSdk } from './sdk.js';
         requestJson(API.agentCanaryReadiness),
         requestJson(API.agentOfflineEvaluation),
         requestJson(API.agentHumanComparisons),
+        requestJson(API.corrections),
       ]);
       const valueAt = (index, fallback) => results[index].status === 'fulfilled' ? results[index].value : fallback;
       const coreFailure = results.slice(0, 2).find((result) => result.status === 'rejected');
@@ -277,6 +280,7 @@ import { createPluginSdk } from './sdk.js';
       state.agentCanaryReadiness = valueAt(10, null);
       state.agentOfflineEvaluation = valueAt(11, null);
       state.agentHumanComparisons = Array.isArray(valueAt(12, [])) ? valueAt(12, []) : [];
+      state.corrections = Array.isArray(valueAt(13, [])) ? valueAt(13, []) : [];
       renderAll();
       if (results.some((result, index) => index > 1 && result.status === 'rejected')) {
         notify('部分辅助数据暂时不可用，不影响图片识别和实时核价。', 'warning');
@@ -293,6 +297,7 @@ import { createPluginSdk } from './sdk.js';
       state.agentCanaryReadiness = null;
       state.agentOfflineEvaluation = null;
       state.agentHumanComparisons = [];
+      state.corrections = [];
       renderAll();
       showError(readableError(error));
     } finally {
@@ -337,6 +342,7 @@ import { createPluginSdk } from './sdk.js';
     renderKnowledgeBase();
     renderConversationLearningSummary();
     renderAgentEvaluations();
+    renderCorrections();
     renderHumanComparisons();
     populateForms();
     renderReviewRecords();
@@ -396,6 +402,23 @@ import { createPluginSdk } from './sdk.js';
       const falseClaim = evaluationSelect(['false', 'true'], String(review.false_claim ?? false));
       const duplicateQuestion = evaluationSelect(['false', 'true'], String(review.duplicate_question ?? false));
       const save = document.createElement('button'); save.type = 'button'; save.className = 'button button-secondary button-compact'; save.textContent = review.event_id ? '更新' : '保存';
+      const correct = document.createElement('button'); correct.type = 'button'; correct.className = 'button button-secondary button-compact'; correct.textContent = '纠正本轮';
+      correct.addEventListener('click', async () => {
+        const correctedAnswer = window.prompt('请输入这轮应该给买家的正确回答：', '');
+        if (!correctedAnswer?.trim()) return;
+        const handlingGuidance = window.prompt('可选：请输入可复用于相似问题的处理方式（审核通过后进入知识版本）：', '') ?? '';
+        correct.disabled = true;
+        try {
+          await requestJson(`${API.agentEvaluations}/${encodeURIComponent(record.event_id)}/correction`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ corrected_answer: correctedAnswer.trim(), handling_guidance: handlingGuidance.trim() }),
+          });
+          state.corrections = await requestJson(API.corrections);
+          renderCorrections();
+          notify('本轮纠正已保存为待审核记录');
+        } catch (error) { notify(readableError(error), 'error'); }
+        finally { correct.disabled = false; }
+      });
       save.addEventListener('click', async () => {
         save.disabled = true;
         try {
@@ -418,7 +441,48 @@ import { createPluginSdk } from './sdk.js';
         selectCell(expected), selectCell(shouldAsk), selectCell(shouldHandoff), selectCell(quality), selectCell(consistency),
         selectCell(highRisk), selectCell(falseClaim), selectCell(duplicateQuestion), session, document.createElement('td'),
       ];
-      cells.at(-1).append(save); const row = document.createElement('tr'); row.append(...cells); body.append(row);
+      cells.at(-1).append(save, correct); const row = document.createElement('tr'); row.append(...cells); body.append(row);
+    });
+  }
+
+  function renderCorrections() {
+    const records = Array.isArray(state.corrections) ? state.corrections : [];
+    const drafts = records.filter((record) => record.status === 'draft').length;
+    elements['correction-review-count'].textContent = `${records.length}条纠正 · ${drafts}条待审核`;
+    const body = elements['correction-review-body']; body.replaceChildren();
+    if (!records.length) { body.append(createEmptyRow(6, '暂无运营纠正记录。')); return; }
+    const scenes = { general: '通用', intake: '信息收集', quote_followup: '报价跟进', order: '订单', fulfillment: '履约', aftersale: '售后' };
+    records.slice(0, 100).forEach((record) => {
+      const scene = evaluationSelect(Object.keys(scenes), record.scene || 'general');
+      [...scene.options].forEach((option) => { option.textContent = scenes[option.value]; });
+      const actions = document.createElement('td');
+      if (record.status === 'draft') {
+        const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'button button-primary button-compact'; approve.textContent = '审核通过';
+        const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'button button-secondary button-compact'; reject.textContent = '拒绝';
+        const review = async (status) => {
+          approve.disabled = true; reject.disabled = true;
+          try {
+            await requestJson(`${API.corrections}/${encodeURIComponent(record.id)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status, scene: scene.value, revision: record.revision }) });
+            state.corrections = await requestJson(API.corrections); renderCorrections();
+            if (status === 'approved') {
+              state.knowledgeBase = await requestJson(API.knowledgeBase);
+              renderKnowledgeBase();
+            }
+            notify(status === 'approved' ? '纠正已进入当前租户知识版本' : '纠正已拒绝');
+          } catch (error) { approve.disabled = false; reject.disabled = false; notify(readableError(error), 'error'); }
+        };
+        approve.addEventListener('click', () => void review('approved'));
+        reject.addEventListener('click', () => void review('rejected'));
+        actions.append(approve, reject);
+      } else actions.append(textLine(record.status === 'approved' ? '已审核通过' : '已拒绝', 'table-muted'));
+      const row = document.createElement('tr');
+      row.append(
+        textCell(record.buyer_message || '[图片或非文本消息]'),
+        textCell(record.assistant_reply || '未形成回复', 'table-muted'),
+        textCell(`${record.corrected_answer || ''}${record.handling_guidance ? `\n处理方式：${record.handling_guidance}` : ''}`),
+        selectCell(scene), textCell(record.status || 'draft'), actions,
+      );
+      body.append(row);
     });
   }
 

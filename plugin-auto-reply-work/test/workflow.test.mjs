@@ -2166,6 +2166,29 @@ test('durable shadow scheduling never waits for model planning inside the busine
   assert.equal(calls.find(([name]) => name === 'send')[1].text, '权威报价及时送达。\n接受本次报价请回复“确认”。');
 });
 
+test('durable scheduling merges append-only agent tool history instead of replacing it with the platform page', async () => {
+  const scheduled = [];
+  const { workflow } = harness({
+    runtimeSettings: { automation_enabled: false, ai_reply_enabled: true, conversation_agent_mode: 'shadow' },
+    core: { im: { async listMessages() { return { items: [{ direction: 'inbound', content: '平台最新消息', sentAt: new Date().toISOString() }] }; } } },
+    quotePreviewClient: {},
+    conversationContextStore: { async get() { return {
+      facts: { city: '郑州' },
+      messages: Array.from({ length: 60 }, (_, index) => ({ role: 'buyer', text: `持久消息${index}`, at: index + 1 })),
+      agent_events: [
+        { id: 'call', role: 'assistant', content: '', at: 100, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read_active_quote', arguments: '{}' } }] },
+        { id: 'result', role: 'tool', content: '{"status":"success"}', at: 101, tool_call_id: 'c1', name: 'read_active_quote' },
+      ],
+    }; }, async recordPlatformHistory() {} },
+    shadowAgentScheduler: { async schedule(_envelope, options) { scheduled.push(options.contextSnapshot); } },
+  });
+  await workflow.processClaimed(record({ id: 'evt-full-context', tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(), payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '平台最新消息' } }));
+  assert.ok(scheduled[0].messages.length > 60);
+  assert.equal(scheduled[0].messages.some((item) => item.role === 'assistant' && item.tool_calls?.[0]?.function?.name === 'read_active_quote'), true);
+  assert.equal(scheduled[0].messages.some((item) => item.role === 'tool' && item.tool_call_id === 'c1'), true);
+  assert.equal(scheduled[0].messages.some((item) => item.content === '平台最新消息'), true);
+});
+
 test('durable active owner schedules a low-risk turn and completes the business lease without inline planning', async () => {
   const scheduled = [];
   const eventId = selectedCanaryEventId('evt-durable-active');

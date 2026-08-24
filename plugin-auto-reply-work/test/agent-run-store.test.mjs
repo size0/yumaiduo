@@ -56,6 +56,23 @@ test('agent run persists a bounded source-time planner snapshot without transact
   ]);
 });
 
+test('agent snapshot preserves cross-turn assistant tool calls and tool results without a fifty-message slice', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-standard-context-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  const messages = Array.from({ length: 60 }, (_, index) => ({ role: 'buyer', content: `历史消息${index}`, at: index }));
+  messages.push({ role: 'assistant', content: '', at: 61, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_active_quote', arguments: '{}' } }] });
+  messages.push({ role: 'tool', content: '{"status":"success"}', at: 62, tool_call_id: 'call-1', name: 'read_active_quote' });
+  await store.enqueue({ runId: 'shadow:standard-context', eventKey: 'tenant-1:standard-context', tenantId: 'tenant-1', contextSnapshot: { facts: {}, messages } });
+  const snapshot = (await store.get('shadow:standard-context')).context_snapshot.messages;
+  assert.equal(snapshot.length, 62);
+  assert.equal(snapshot[0].content, '历史消息0');
+  assert.equal(snapshot.at(-2).role, 'assistant');
+  assert.equal(snapshot.at(-2).tool_calls[0].function.name, 'read_active_quote');
+  assert.equal(snapshot.at(-1).role, 'tool');
+  assert.equal(snapshot.at(-1).tool_call_id, 'call-1');
+});
+
 test('historical evaluation runs enqueue in one idempotent bounded batch', async () => {
   const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-batch-')), 'runs.json');
   const store = new AgentRunStore(file);
@@ -148,6 +165,21 @@ test('agent tool journal replays completed observations and fails closed on an u
   assert.equal((await store.get(first.run_id)).tool_calls.length, 2);
 });
 
+test('pending write observations survive durable persistence without becoming errors', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-pending-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  await store.enqueue({ runId: 'active:pending', eventKey: 'tenant-1:pending', tenantId: 'tenant-1', mode: 'active' });
+  const run = await store.claimDue();
+  await store.beginTool(run.run_id, run.lease_id, { callId: 'tool:1:change_order_price', step: 1, tool: 'change_order_price', trace: [], observations: [] });
+  await store.completeTool(run.run_id, run.lease_id, 'tool:1:change_order_price', {
+    status: 'pending', tool: 'change_order_price', code: 'price_change_submitted', summary: '等待平台确认', facts: {}, missing: [], retryable: false,
+  });
+  const persisted = await store.get(run.run_id);
+  assert.equal(persisted.observations[0].status, 'pending');
+  assert.equal(persisted.tool_calls[0].observation.status, 'pending');
+});
+
 test('agent run checkpoint rejects stale leases and stores only bounded observation fields', async () => {
   const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-runs-')), 'runs.json');
   const store = new AgentRunStore(file);
@@ -156,6 +188,6 @@ test('agent run checkpoint rejects stale leases and stores only bounded observat
   const run = await store.claimDue();
   await assert.rejects(() => store.checkpoint(run.run_id, 'stale', { trace: [], observations: [] }), /lease mismatch/u);
   await assert.rejects(() => store.checkpoint(run.run_id, run.lease_id, {
-    trace: [], observations: Array.from({ length: 9 }, () => ({ status: 'success', tool: 'x', summary: '', facts: {}, next_actions: [] })),
+    trace: [], observations: Array.from({ length: 13 }, () => ({ status: 'success', tool: 'x', summary: '', facts: {}, next_actions: [] })),
   }), /too many observations/u);
 });

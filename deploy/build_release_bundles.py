@@ -12,8 +12,8 @@ sys.path.insert(0, str(REPOSITORY / "v3-backend-gateway-work"))
 
 from app.release_bundle import build_component_archive, require_release_files
 
-EXPECTED_V3_CONTRACT = "wanda-v3-v19-contextual-agent-fallbacks"
-EXPECTED_AGENT_RUNTIME = "wanda-agent-runtime-v36-contextual-fallbacks"
+EXPECTED_V3_CONTRACT = "wanda-agent-runtime-v37-model-led-native-tools"
+EXPECTED_AGENT_RUNTIME = "wanda-agent-runtime-v37-model-led-native-tools"
 
 
 def _git(*arguments: str) -> str:
@@ -52,9 +52,15 @@ def main() -> int:
         "plugin": ("plugin-auto-reply-work", EXPECTED_AGENT_RUNTIME),
     }
     required_files = {
-        "v3": ["v3-backend-gateway-work/app/main.py", "v3-backend-gateway-work/requirements.txt"],
+        "v3": [
+            "v3-backend-gateway-work/app/main.py",
+            "v3-backend-gateway-work/app/agent_tool_registry.py",
+            "v3-backend-gateway-work/requirements.txt",
+        ],
         "plugin": [
             "plugin-auto-reply-work/index.mjs",
+            "plugin-auto-reply-work/src/agent/model-driven-agent-loop.mjs",
+            "plugin-auto-reply-work/src/agent/native-tool-registry.mjs",
             "plugin-auto-reply-work/package-lock.json",
             "plugin-auto-reply-work/vendor/plugin-sdk-server/dist/index.js",
         ],

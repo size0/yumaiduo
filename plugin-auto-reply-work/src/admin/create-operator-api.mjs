@@ -392,6 +392,54 @@ export function createOperatorApi({ config, platformRuntime, backendClient, stor
     const current = agentImageOfflineEvaluationFrom(runs.filter((run) => run.result?.runtime_version === AGENT_RUNTIME_VERSION), tenantEvents);
     return { ...current, runtime_version: AGENT_RUNTIME_VERSION, historical_sample_count: historical.sample_count };
   }
+  async function createAgentCorrection(tenantId, eventId, input) {
+    const [event, runs] = await Promise.all([
+      eventStore.get(eventId),
+      agentRunStore.list({ tenantId, limit: 500 }),
+    ]);
+    if (String(event?.envelope?.tenantId ?? '') !== String(tenantId)) throw uiApiError(404, 'agent_evaluation_not_found');
+    const run = runs.find((candidate) => candidate.event_key === eventId && ['completed', 'timed_out'].includes(candidate.status));
+    if (!run) throw uiApiError(404, 'agent_run_not_found');
+    const correctedAnswer = compactText(input?.corrected_answer, 4_000);
+    const handlingGuidance = compactText(input?.handling_guidance, 4_000);
+    if (!correctedAnswer) throw uiApiError(422, 'corrected_answer_required');
+    const payload = event.envelope?.payload ?? {};
+    const conversation = typeof conversationContextStore.get === 'function'
+      ? await conversationContextStore.get(tenantId, payload)
+      : null;
+    const fullAssistantReply = Array.isArray(conversation?.agent_events)
+      ? conversation.agent_events.find((item) => item?.id === `${run.run_id}:assistant:final`)?.content
+      : '';
+    const response = await backendClient.createCorrection(tenantId, {
+      conversation_id: [tenantId, payload.accountUnb ?? payload.account_unb, payload.chatId ?? payload.chat_id, payload.peerUnb ?? payload.peer_unb].map(String).join(':'),
+      run_id: run.run_id,
+      event_id: eventId,
+      buyer_message: compactText(payload.content ?? payload.text ?? '[图片或非文本消息]', 4_000),
+      assistant_reply: compactText(fullAssistantReply || run.result?.proposed_reply, 4_000),
+      corrected_answer: correctedAnswer,
+      handling_guidance: handlingGuidance,
+      tool_trajectory: (run.tool_calls ?? []).slice(0, 50).map((call) => ({
+        tool: compactText(call.tool, 64), status: compactText(call.status, 32), observation: call.observation ?? null,
+      })),
+      versions: {
+        runtime: compactText(run.result?.runtime_version, 120),
+        model: compactText(run.result?.model_step?.model, 200),
+        ...(run.result?.model_step?.versions && typeof run.result.model_step.versions === 'object' ? run.result.model_step.versions : {}),
+      },
+    });
+    if (!response?.correction) throw new Error('backend correction response is invalid');
+    return response.correction;
+  }
+  async function listCorrections(tenantId) {
+    const response = await backendClient.listCorrections(tenantId);
+    if (!Array.isArray(response?.corrections)) throw new Error('backend correction response is invalid');
+    return response.corrections;
+  }
+  async function reviewCorrection(tenantId, correctionId, input, { userId = '' } = {}) {
+    const response = await backendClient.reviewCorrection(tenantId, correctionId, { ...input, reviewer: userId });
+    if (!response?.correction) throw new Error('backend correction response is invalid');
+    return response.correction;
+  }
   async function reviewAgentEvaluation(tenantId, eventId, input) {
     const [event, runs] = await Promise.all([eventStore.get(eventId), agentRunStore.list({ tenantId, limit: 500 })]);
     const run = runs.find((candidate) => candidate.event_key === eventId && ['completed', 'timed_out'].includes(candidate.status) && Array.isArray(candidate.result?.trace) && candidate.result.trace.length);
@@ -460,6 +508,9 @@ export function createOperatorApi({ config, platformRuntime, backendClient, stor
     getAgentCanaryReadiness,
     getAgentOfflineEvaluation,
     reviewAgentEvaluation,
+    createAgentCorrection,
+    listCorrections,
+    reviewCorrection,
     listAgentHumanComparisons,
     reviewAgentHumanComparison,
     listManualTasks,

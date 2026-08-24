@@ -67,19 +67,36 @@ function sanitizeContextSnapshot(value) {
     if (safe !== null) facts[key] = safe;
   }
   if (inputFacts.order_id) facts.has_linked_order = true;
-  const messages = (Array.isArray(value.messages) ? value.messages : []).slice(-50).map((item) => {
-    const role = item?.role === 'seller' ? 'seller' : 'buyer';
+  const messages = (Array.isArray(value.messages) ? value.messages : []).map((item) => {
+    const requestedRole = bounded(item?.role, 32);
+    const role = ['seller', 'buyer', 'user', 'assistant', 'tool', 'system'].includes(requestedRole) ? requestedRole : 'buyer';
     const requestedSource = bounded(item?.source, 32);
-    const source = role === 'buyer' ? 'buyer' : ['plugin', 'external_seller', 'unknown'].includes(requestedSource) ? requestedSource : 'unknown';
-    const content = bounded(String(item?.content ?? item?.text ?? '').replace(/https?:\/\/\S+/giu, '[链接]'), 1_000);
+    const source = ['buyer', 'user'].includes(role) ? 'buyer' : ['plugin', 'external_seller', 'unknown'].includes(requestedSource) ? requestedSource : 'unknown';
+    const rawContent = item?.content ?? item?.text ?? '';
+    const content = Array.isArray(rawContent)
+      ? rawContent.slice(0, 20).map((part) => safeSnapshotValue(part)).filter(Boolean)
+      : bounded(String(rawContent), role === 'tool' ? 100_000 : 10_000);
     const at = Number(item?.at);
-    return { role, source, content, ...(Number.isFinite(at) && at >= 0 ? { at } : {}) };
-  }).filter((item) => item.content);
+    const toolCalls = role === 'assistant' && Array.isArray(item?.tool_calls)
+      ? item.tool_calls.slice(0, 12).map((call) => ({
+        id: bounded(call?.id, 200), type: 'function', function: {
+          name: bounded(call?.function?.name, 64), arguments: bounded(call?.function?.arguments ?? '{}', 16_000),
+        },
+      })).filter((call) => call.id && call.function.name)
+      : [];
+    return {
+      role, source, content,
+      ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+      ...(role === 'tool' && item?.tool_call_id ? { tool_call_id: bounded(item.tool_call_id, 200) } : {}),
+      ...(item?.name ? { name: bounded(item.name, 64) } : {}),
+      ...(Number.isFinite(at) && at >= 0 ? { at } : {}),
+    };
+  }).filter((item) => item.content || item.tool_calls?.length);
   return { facts, messages };
 }
 
 function sanitizeTrace(value) {
-  if (!Array.isArray(value) || value.length > 8) throw new TypeError('too many agent trace steps');
+  if (!Array.isArray(value) || value.length > 12) throw new TypeError('too many agent trace steps');
   return value.map((item, index) => ({
     step: Number.isSafeInteger(Number(item?.step)) ? Number(item.step) : index + 1,
     action: bounded(item?.action, 64), intent: bounded(item?.intent, 32),
@@ -89,17 +106,20 @@ function sanitizeTrace(value) {
 }
 
 function sanitizeObservations(value) {
-  if (!Array.isArray(value) || value.length > 8) throw new TypeError('too many observations');
+  if (!Array.isArray(value) || value.length > 12) throw new TypeError('too many observations');
   return value.map((item) => {
     const facts = item?.facts && typeof item.facts === 'object' && !Array.isArray(item.facts)
       ? Object.fromEntries(Object.entries(item.facts).slice(0, 30).map(([key, fact]) => [bounded(key, 64), fact]))
       : {};
     if (JSON.stringify(facts).length > 6_000) throw new TypeError('agent observation facts are too large');
     return {
-      status: ['success', 'warning', 'error'].includes(item?.status) ? item.status : 'error',
+      status: ['success', 'warning', 'error', 'pending'].includes(item?.status) ? item.status : 'error',
       tool: bounded(item?.tool, 64) || 'unknown', summary: bounded(item?.summary, 200), facts,
       authoritative_reply: bounded(item?.authoritative_reply, 1_000),
       next_actions: Array.isArray(item?.next_actions) ? item.next_actions.slice(0, 8).map((action) => bounded(action, 64)).filter(Boolean) : [],
+      code: bounded(item?.code, 100),
+      missing: Array.isArray(item?.missing) ? item.missing.slice(0, 20).map((field) => bounded(field, 100)).filter(Boolean) : [],
+      retryable: item?.retryable === true,
       stop_reason: bounded(item?.stop_reason, 100) || null,
     };
   });
@@ -204,14 +224,14 @@ export class AgentRunStore {
 
   async beginTool(runId, leaseId, input, { leaseMs = 60_000 } = {}) {
     const callId = bounded(input?.callId, 300); const tool = bounded(input?.tool, 64); const step = Number(input?.step);
-    if (!callId || !tool || !Number.isSafeInteger(step) || step < 1 || step > 8) throw new TypeError('invalid agent tool call');
+    if (!callId || !tool || !Number.isSafeInteger(step) || step < 1 || step > 12) throw new TypeError('invalid agent tool call');
     return this.#finish(runId, leaseId, (run) => {
       run.toolCalls ??= {};
       const existing = run.toolCalls[callId];
       if (existing) return existing.status === 'completed'
         ? { state: 'replay', observation: clone(existing.observation) }
         : { state: 'unknown' };
-      if (Object.keys(run.toolCalls).length >= 8) throw new TypeError('too many agent tool calls');
+      if (Object.keys(run.toolCalls).length >= 12) throw new TypeError('too many agent tool calls');
       run.trace = sanitizeTrace(input?.trace ?? []); run.observations = sanitizeObservations(input?.observations ?? []);
       run.toolCalls[callId] = { call_id: callId, step, tool, status: 'pending', started_at: new Date(this.#now()).toISOString(), completed_at: null, observation: null };
       run.leaseUntil = this.#now() + Math.max(15_000, Number(leaseMs));
@@ -225,7 +245,7 @@ export class AgentRunStore {
       const call = run.toolCalls?.[callId];
       if (!call || call.status !== 'pending') throw new Error(`agent tool call is not pending: ${callId}`);
       call.status = 'completed'; call.observation = sanitizeObservations([observation])[0]; call.completed_at = new Date(this.#now()).toISOString();
-      run.observations = sanitizeObservations([...(run.observations ?? []), call.observation].slice(-8));
+      run.observations = sanitizeObservations([...(run.observations ?? []), call.observation].slice(-12));
       run.leaseUntil = this.#now() + Math.max(15_000, Number(leaseMs));
       return { state: 'completed', observation: clone(call.observation) };
     }, { release: false });

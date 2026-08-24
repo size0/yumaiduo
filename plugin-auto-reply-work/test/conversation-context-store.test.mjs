@@ -157,6 +157,7 @@ test('a replacement exact-seat quote invalidates confirmation for the previous a
   assert.equal(facts.quote_total_cents, 8200);
   assert.equal(facts.stage, 'quoted');
   assert.equal(facts.quote_confirmed, false);
+  assert.equal(facts.confirmed_quote_record_id, undefined);
 });
 
 test('quote confirmation requires amount, count, policy version, delivery, and a live expiry', async () => {
@@ -168,6 +169,30 @@ test('quote confirmation requires amount, count, policy version, delivery, and a
   const facts = (await store.get('tenant-1', message)).facts;
   assert.equal(facts.pricing_rule_version, 'policy-v1');
   assert.equal(facts.quote_reply_delivered, true);
+});
+
+test('native quote confirmation requires explicit current buyer evidence bound to the current quote version', async () => {
+  const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-context-confirm-evidence-')), 'context.json'));
+  await store.markQuoted('tenant-1', message, { ticketCount: 2, totalQuoteCents: 7400, pricingRuleVersion: 'policy-v1', replyDelivered: true });
+  const quoteRecordId = (await store.get('tenant-1', message)).facts.quote_record_id;
+  assert.equal(await store.confirmQuoteFromBuyerMessage('tenant-1', { ...message, content: '还有票吗', messageId: 'm-1' }, { quoteRecordId, eventId: 'event-1' }), false);
+  assert.equal(await store.confirmQuoteFromBuyerMessage('tenant-1', { ...message, content: '确认报价', messageId: 'm-2' }, { quoteRecordId: 'stale-quote', eventId: 'event-2' }), false);
+  assert.equal(await store.confirmQuoteFromBuyerMessage('tenant-1', { ...message, content: '确认报价', messageId: 'm-3' }, { quoteRecordId, eventId: 'event-3' }), true);
+  const facts = (await store.get('tenant-1', message)).facts;
+  assert.equal(facts.confirmed_quote_record_id, quoteRecordId);
+  assert.equal(facts.quote_confirmation_event_id, 'event-3');
+});
+
+test('price-change command claim rejects stale quote versions and blocks unknown writes across runs', async () => {
+  const store = new ConversationContextStore(join(await mkdtemp(join(tmpdir(), 'wanda-context-price-command-')), 'context.json'));
+  await store.markQuoted('tenant-1', message, { ticketCount: 2, totalQuoteCents: 7400, pricingRuleVersion: 'policy-v1', replyDelivered: true });
+  const quoteRecordId = (await store.get('tenant-1', message)).facts.quote_record_id;
+  await store.markQuoteConfirmed('tenant-1', message);
+  await store.bindOrder('tenant-1', message, 'order-1');
+  assert.equal((await store.claimPriceChangeCommand('tenant-1', message, { actionId: 'a-stale', quoteRecordId: 'stale', orderId: 'order-1', totalCents: 7400, ticketCount: 2 })).status, 'rejected');
+  assert.equal((await store.claimPriceChangeCommand('tenant-1', message, { actionId: 'a-1', quoteRecordId, orderId: 'order-1', totalCents: 7400, ticketCount: 2 })).status, 'claimed');
+  await store.completePriceChangeCommand('tenant-1', message, 'a-1', { status: 'unknown', code: 'result_unknown' });
+  assert.equal((await store.claimPriceChangeCommand('tenant-1', message, { actionId: 'a-2', quoteRecordId, orderId: 'order-1', totalCents: 7400, ticketCount: 2 })).code, 'price_change_result_unresolved');
 });
 
 test('direct Wanda quote confirmation requires opaque pricing-account evidence', async () => {
@@ -342,7 +367,7 @@ test('a late older buyer message cannot overwrite newer conversation facts', asy
   assert.deepEqual(updated.messages.map((item) => item.at), [1_000, 2_000, 2_100, 2_500]);
 });
 
-test('buyer message bodies, image URLs and expired quote drafts are removed after twenty four hours', async () => {
+test('append-only conversation messages survive context window aging while transactional drafts expire', async () => {
   let now = 1_000;
   const file = join(await mkdtemp(join(tmpdir(), 'wanda-context-')), 'context.json');
   const store = new ConversationContextStore(file, { now: () => now });
@@ -353,15 +378,16 @@ test('buyer message bodies, image URLs and expired quote drafts are removed afte
   });
   now += 24 * 60 * 60 * 1_000 + 1;
   const expired = await store.get('tenant-1', message);
-  assert.deepEqual(expired.messages, []);
+  assert.equal(expired.messages.length, 1);
+  assert.equal(expired.messages[0].text, '包含临时买家信息');
   assert.equal(expired.facts.quote_draft, undefined);
-  assert.equal(expired.facts.buyer_name, undefined);
+  assert.equal(expired.facts.buyer_name, '测试买家昵称');
 
   await store.markOrderException('tenant-1', message, 'retention_self_test');
   const persisted = await readFile(file, 'utf8');
-  assert.equal(persisted.includes('包含临时买家信息'), false);
-  assert.equal(persisted.includes('private-seat.png'), false);
-  assert.equal(persisted.includes('测试买家昵称'), false);
+  assert.equal(persisted.includes('包含临时买家信息'), true);
+  assert.equal(persisted.includes('private-seat.png'), true);
+  assert.equal(persisted.includes('测试买家昵称'), true);
 });
 
 test('quote drafts retain only bounded matching facts and never a quoted price or typed seat selection', async () => {

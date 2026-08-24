@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v19-contextual-agent-fallbacks",
+        "runtime_contract": "wanda-agent-runtime-v37-model-led-native-tools",
     }
 
 
@@ -422,7 +422,7 @@ def test_plugin_bridge_settings_and_quote_policy_require_the_bridge_key(tmp_path
     }
 
 
-def test_plugin_bridge_explicit_active_mode_enables_full_durable_agent_owner(tmp_path: Path, monkeypatch) -> None:
+def test_runtime_settings_cannot_bypass_atomic_agent_release(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WANDA_PLUGIN_BRIDGE_KEY", "test-bridge-key")
     client = TestClient(create_app(plugin_bridge_store=PluginBridgeStore(tmp_path / "plugin_bridge_settings.json")))
     response = client.put(
@@ -430,16 +430,39 @@ def test_plugin_bridge_explicit_active_mode_enables_full_durable_agent_owner(tmp
         headers={"X-Plugin-Bridge-Key": "test-bridge-key"},
         json={"conversation_agent_mode": "active"},
     )
-    assert response.status_code == 200
-    settings = response.json()["settings"]
-    assert settings["conversation_agent_mode"] == "active"
-    assert settings["conversation_agent_active_ready"] is True
-    assert settings["execution_owner"] == "agent"
-    assert settings["agent_canary_enabled"] is True
-    assert settings["agent_canary_kill_switch"] is False
-    assert settings["agent_canary_percentage"] == 100
-    assert settings["agent_canary_approved"] is True
-    assert settings["agent_canary_runtime_version"] == "wanda-agent-runtime-v36-contextual-fallbacks"
+    assert response.status_code == 409
+    assert response.json()["detail"] == "agent_release_endpoint_required"
+
+
+def test_agent_release_atomically_activates_v37_and_rolls_back(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WANDA_PLUGIN_BRIDGE_KEY", "test-bridge-key")
+    client = TestClient(create_app(plugin_bridge_store=PluginBridgeStore(tmp_path / "plugin_bridge_settings.json")))
+    headers = {"X-Plugin-Bridge-Key": "test-bridge-key"}
+    evaluation = {
+        "failure_replay_count": 100, "image_sample_count": 100,
+        "tool_selection_accuracy": 95, "image_full_path_rate": 95, "completion_rate": 95,
+        "p95_latency_ms": 60_000,
+        "high_risk_actions": 0, "false_transaction_facts": 0, "duplicate_writes": 0,
+        "unknown_result_retries": 0, "cross_tenant_access": 0,
+        "authoritative_inconsistencies": 0, "unsafe_final_replies": 0, "post_deadline_effects": 0,
+    }
+    payload = {
+        "action": "activate", "release_id": "v37-test", "runtime_version": "wanda-agent-runtime-v37-model-led-native-tools",
+        "source_commit": "a" * 40, "manifest_sha256": "b" * 64,
+        "health": {"v3": "wanda-agent-runtime-v37-model-led-native-tools", "plugin": "wanda-agent-runtime-v37-model-led-native-tools"},
+        "evaluation": evaluation, "rollback_verified": True,
+    }
+    activated = client.put("/api/xianyu-plugin/bridge/agent-release", headers=headers, json=payload)
+    assert activated.status_code == 200
+    settings = activated.json()["settings"]
+    assert (settings["conversation_agent_mode"], settings["execution_owner"], settings["agent_canary_percentage"], settings["agent_canary_kill_switch"]) == ("active", "agent", 100, False)
+    assert settings["agent_canary_runtime_version"] == "wanda-agent-runtime-v37-model-led-native-tools"
+    assert settings["agent_v2_strict_tenant_validation"] is True
+    repeated = client.put("/api/xianyu-plugin/bridge/agent-release", headers=headers, json=payload)
+    assert repeated.status_code == 200
+    rolled_back = client.put("/api/xianyu-plugin/bridge/agent-release", headers=headers, json={"action": "rollback"})
+    rollback_settings = rolled_back.json()["settings"]
+    assert (rollback_settings["conversation_agent_mode"], rollback_settings["execution_owner"], rollback_settings["agent_canary_percentage"], rollback_settings["agent_canary_kill_switch"]) == ("shadow", "deterministic", 0, True)
 
 
 def test_agent_canary_approval_is_independent_fail_closed_and_revocable(tmp_path: Path, monkeypatch) -> None:

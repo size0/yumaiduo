@@ -2,7 +2,6 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { hasRequiredPricingAccountEvidence } from './quote/quote-evidence-policy.mjs';
 
-const MAX_MESSAGES = 50;
 const MEMORY_MS = 24 * 60 * 60 * 1_000;
 const QUOTE_DRAFT_TTL_MS = 10 * 60 * 1_000;
 const FIRST_CONTACT_WINDOW_MS = 2 * 60 * 1_000;
@@ -33,10 +32,10 @@ export class ConversationContextStore {
       const messageAt = Number.isFinite(candidateAt) && candidateAt > 0 ? candidateAt : this.now();
       const previousLatestAt = Math.max(0, ...current.messages.map((item) => Number(item?.at) || 0));
       const message = { at: messageAt, role: 'buyer', text: String(payload.content ?? payload.text ?? '').slice(0, 1000), image: imageUrls.length > 0, image_urls: imageUrls };
+      // This is the durable conversation log, not the model context window.
+      // Windowing is performed dynamically when a model request is built.
       current.messages = [...current.messages, message]
-        .filter((x) => this.now() - x.at <= MEMORY_MS)
-        .sort((left, right) => left.at - right.at)
-        .slice(-MAX_MESSAGES);
+        .sort((left, right) => left.at - right.at);
       const buyerName = buyerDisplayName(payload);
       current.facts = {
         ...current.facts,
@@ -48,7 +47,64 @@ export class ConversationContextStore {
       return structuredClone(current);
     });
   }
-  async get(tenantId, payload) { const state = await this.#read(); return state[conversationKey(tenantId, payload)] ?? { facts: {}, messages: [] }; }
+  async get(tenantId, payload) { const state = await this.#read(); return state[conversationKey(tenantId, payload)] ?? { facts: {}, messages: [], agent_events: [] }; }
+  async recordPlatformHistory(tenantId, payload, history = []) {
+    if (!Array.isArray(history)) throw new TypeError('platform history must be an array');
+    const normalized = history.map((item, index) => {
+      const role = item?.role === 'seller' ? 'seller' : 'buyer';
+      const textValue = String(item?.content ?? item?.text ?? '').slice(0, 10_000);
+      const parsedAt = Date.parse(String(item?.sent_at ?? item?.sentAt ?? ''));
+      return {
+        at: Number.isFinite(parsedAt) ? parsedAt : this.now() + index,
+        role,
+        text: textValue,
+        image: false,
+        image_urls: [],
+        source: role === 'buyer' ? 'buyer' : ['plugin', 'external_seller', 'unknown'].includes(item?.source) ? item.source : 'unknown',
+        platform_history: true,
+      };
+    }).filter((item) => item.text);
+    if (!normalized.length) return 0;
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key] ?? { facts: {}, messages: [], agent_events: [] };
+      let added = 0;
+      for (const item of normalized) {
+        const duplicate = current.messages.some((existing) => existing?.role === item.role
+          && String(existing?.text ?? existing?.content ?? '') === item.text
+          && Math.abs(Number(existing?.at ?? 0) - item.at) <= 1_000);
+        if (!duplicate) { current.messages.push(item); added += 1; }
+      }
+      current.messages.sort((left, right) => Number(left.at) - Number(right.at));
+      state[key] = current;
+      return added;
+    });
+  }
+  async appendAgentEvent(tenantId, payload, input = {}) {
+    const id = String(input.id ?? '').trim().slice(0, 300);
+    const role = ['assistant', 'tool', 'system'].includes(String(input.role)) ? String(input.role) : '';
+    if (!id || !role) throw new TypeError('agent event id and role are required');
+    const event = {
+      id,
+      at: Number.isFinite(Number(input.at)) ? Number(input.at) : this.now(),
+      role,
+      content: String(input.content ?? '').slice(0, 100_000),
+      ...(input.tool_call_id ? { tool_call_id: String(input.tool_call_id).slice(0, 200) } : {}),
+      ...(input.name ? { name: String(input.name).slice(0, 64) } : {}),
+      ...(Array.isArray(input.tool_calls) ? { tool_calls: structuredClone(input.tool_calls.slice(0, 12)) } : {}),
+      ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata) ? { metadata: structuredClone(input.metadata) } : {}),
+    };
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key] ?? { facts: {}, messages: [], agent_events: [] };
+      current.agent_events ??= [];
+      if (current.agent_events.some((item) => item?.id === id)) return false;
+      current.agent_events.push(event);
+      current.agent_events.sort((left, right) => Number(left.at) - Number(right.at));
+      state[key] = current;
+      return true;
+    });
+  }
   async listRecent({ tenantId = null, limit = 20 } = {}) {
     const state = await this.#read();
     return Object.entries(state).map(([key, current]) => {
@@ -211,8 +267,14 @@ export class ConversationContextStore {
         pricing_rule_version: pricingVersion || null,
         quote_reply_delivered: replyDelivered === true,
       });
+      const {
+        confirmed_quote_record_id: _confirmedQuoteRecordId,
+        quote_confirmation_event_id: _quoteConfirmationEventId,
+        quote_confirmation_message_id: _quoteConfirmationMessageId,
+        ...baseFacts
+      } = current.facts;
       current.facts = {
-        ...current.facts, ...snapshot, stage: 'quoted', quote_confirmed: false, quote_expires_at: at + validFor,
+        ...baseFacts, ...snapshot, stage: 'quoted', quote_confirmed: false, quote_expires_at: at + validFor,
         ...(quoteRecord ? { quote_record_id: quoteRecord.id, quote_history: [...priorHistory, quoteRecord] } : {}),
         ...(safeDeliveryActionId ? { quote_delivery_action_id: safeDeliveryActionId } : {}),
         ...(safePlatformMessageId ? { quote_reply_platform_message_id: safePlatformMessageId } : {}),
@@ -230,17 +292,84 @@ export class ConversationContextStore {
       const key = conversationKey(tenantId, payload);
       const current = state[key] ?? { facts: {}, messages: [] };
       const facts = current.facts;
-      const confirmable = Number(facts.quote_expires_at ?? 0) >= this.now()
-        && Number.isSafeInteger(facts.quote_total_cents) && facts.quote_total_cents > 0
-        && Number.isSafeInteger(facts.quote_ticket_count) && facts.quote_ticket_count > 0
-        && Boolean(String(facts.pricing_rule_version ?? '').trim())
-        && facts.quote_reply_delivered === true
-        && hasRequiredPricingAccountEvidence(facts);
-      if (!confirmable) return false;
+      if (!confirmableQuoteFacts(facts, this.now())) return false;
       current.facts = updateLatestQuoteRecord(
-        { ...current.facts, stage: 'quote_confirmed', quote_confirmed: true },
+        { ...current.facts, stage: 'quote_confirmed', quote_confirmed: true, confirmed_quote_record_id: String(facts.quote_record_id ?? '') },
         { stage: 'quote_confirmed', confirmed_at: this.now() },
       );
+      state[key] = current;
+      return true;
+    });
+  }
+  async confirmQuoteFromBuyerMessage(tenantId, payload, { quoteRecordId, eventId } = {}) {
+    const expectedQuoteRecordId = String(quoteRecordId ?? '').trim().slice(0, 100);
+    const confirmationEventId = String(eventId ?? '').trim().slice(0, 240);
+    const confirmationMessageId = String(payload?.messageId ?? payload?.message_id ?? payload?.remoteMessageId ?? payload?.remote_message_id ?? '').trim().slice(0, 240);
+    const buyerMessage = String(payload?.content ?? payload?.text ?? '');
+    if (!expectedQuoteRecordId || !confirmationEventId || !hasExplicitQuoteConfirmation(buyerMessage)) return false;
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key] ?? { facts: {}, messages: [] };
+      const facts = current.facts ?? {};
+      if (String(facts.quote_record_id ?? '') !== expectedQuoteRecordId || !confirmableQuoteFacts(facts, this.now())) return false;
+      current.facts = updateLatestQuoteRecord({
+        ...facts,
+        stage: 'quote_confirmed', quote_confirmed: true,
+        confirmed_quote_record_id: expectedQuoteRecordId,
+        quote_confirmation_event_id: confirmationEventId,
+        ...(confirmationMessageId ? { quote_confirmation_message_id: confirmationMessageId } : {}),
+      }, { stage: 'quote_confirmed', confirmed_at: this.now(), confirmation_event_id: confirmationEventId });
+      state[key] = current;
+      return true;
+    });
+  }
+  async claimPriceChangeCommand(tenantId, payload, input = {}) {
+    const actionId = String(input.actionId ?? '').trim().slice(0, 300);
+    const quoteRecordId = String(input.quoteRecordId ?? '').trim().slice(0, 100);
+    const orderId = String(input.orderId ?? '').trim().slice(0, 128);
+    const totalCents = Number(input.totalCents);
+    const ticketCount = Number(input.ticketCount);
+    if (!actionId || !quoteRecordId || !orderId || !Number.isSafeInteger(totalCents) || totalCents <= 0 || !Number.isSafeInteger(ticketCount) || ticketCount <= 0) {
+      throw new TypeError('invalid price change command claim');
+    }
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key] ?? { facts: {}, messages: [] };
+      const facts = current.facts ?? {};
+      const existing = facts.price_change_command;
+      if (existing?.action_id === actionId) return { status: 'replay', code: String(existing.status ?? 'pending'), command: structuredClone(existing) };
+      if (existing && ['pending', 'submitted', 'unknown'].includes(String(existing.status))) {
+        return { status: 'rejected', code: 'price_change_result_unresolved' };
+      }
+      const valid = facts.quote_confirmed === true
+        && String(facts.quote_record_id ?? '') === quoteRecordId
+        && String(facts.confirmed_quote_record_id ?? '') === quoteRecordId
+        && String(facts.order_id ?? '') === orderId
+        && Number(facts.quote_total_cents) === totalCents
+        && Number(facts.quote_ticket_count) === ticketCount
+        && Number(facts.quote_expires_at ?? 0) > this.now();
+      if (!valid) return { status: 'rejected', code: 'price_change_quote_version_mismatch' };
+      const command = {
+        action_id: actionId, quote_record_id: quoteRecordId, order_id: orderId,
+        total_cents: totalCents, ticket_count: ticketCount,
+        status: 'pending', started_at: this.now(), updated_at: this.now(),
+      };
+      current.facts = { ...facts, price_change_command: command };
+      state[key] = current;
+      return { status: 'claimed', code: 'price_change_claimed', command: structuredClone(command) };
+    });
+  }
+  async completePriceChangeCommand(tenantId, payload, actionIdValue, input = {}) {
+    const actionId = String(actionIdValue ?? '').trim();
+    const commandStatus = String(input.status ?? '').trim();
+    const code = String(input.code ?? '').trim().slice(0, 100);
+    if (!actionId || !['submitted', 'completed', 'unknown', 'rejected'].includes(commandStatus)) throw new TypeError('invalid price change command result');
+    return this.#mutate((state) => {
+      const key = conversationKey(tenantId, payload);
+      const current = state[key];
+      const command = current?.facts?.price_change_command;
+      if (!command || command.action_id !== actionId) return false;
+      current.facts = { ...current.facts, price_change_command: { ...command, status: commandStatus, ...(code ? { code } : {}), updated_at: this.now() } };
       state[key] = current;
       return true;
     });
@@ -535,9 +664,11 @@ function sanitizeConversationState(value, now) {
   for (const current of Object.values(state)) {
     if (!current || typeof current !== 'object' || Array.isArray(current)) continue;
     current.messages = (Array.isArray(current.messages) ? current.messages : [])
-      .filter((item) => Number.isFinite(Number(item?.at)) && now - Number(item.at) <= MEMORY_MS)
-      .sort((left, right) => Number(left.at) - Number(right.at))
-      .slice(-MAX_MESSAGES);
+      .filter((item) => Number.isFinite(Number(item?.at)))
+      .sort((left, right) => Number(left.at) - Number(right.at));
+    current.agent_events = (Array.isArray(current.agent_events) ? current.agent_events : [])
+      .filter((item) => item && typeof item === 'object' && Number.isFinite(Number(item.at)))
+      .sort((left, right) => Number(left.at) - Number(right.at));
     const facts = current.facts && typeof current.facts === 'object' && !Array.isArray(current.facts) ? { ...current.facts } : {};
     if (Number(facts.quote_draft?.expires_at ?? 0) <= now) delete facts.quote_draft;
     const quoteActive = Number(facts.quote_expires_at ?? 0) > now;
@@ -707,6 +838,20 @@ function extractFacts(text) {
   }
   const count = text.match(/(?:一共|共|要|需要)?\s*([1-9]|1\d|20)\s*张/);
   return { ...(seats.length ? { seats } : {}), ...(count ? { ticket_count: Number(count[1]) } : {}) };
+}
+
+function confirmableQuoteFacts(facts, now) {
+  return Number(facts?.quote_expires_at ?? 0) >= now
+    && Number.isSafeInteger(facts?.quote_total_cents) && facts.quote_total_cents > 0
+    && Number.isSafeInteger(facts?.quote_ticket_count) && facts.quote_ticket_count > 0
+    && Boolean(String(facts?.pricing_rule_version ?? '').trim())
+    && facts?.quote_reply_delivered === true
+    && hasRequiredPricingAccountEvidence(facts);
+}
+
+export function hasExplicitQuoteConfirmation(value) {
+  const normalized = String(value ?? '').toLocaleLowerCase('zh-CN').replace(/[\s，。！？!?,.、~～]/gu, '');
+  return new Set(['确认', '确认报价', '接受报价', '按这个报价', '就按这个报价', '这个报价可以', '这个价格可以', 'ok', 'okay']).has(normalized);
 }
 
 function activeQuoteDraft(value, now) {

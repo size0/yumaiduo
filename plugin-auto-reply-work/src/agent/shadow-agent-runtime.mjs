@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
+import { createModelDrivenAgentLoop, transactionFactConflicts } from './model-driven-agent-loop.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v36-contextual-fallbacks';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v37-model-led-native-tools';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
+export function conversationProjectionVersion(facts = {}) {
+  const value = facts && typeof facts === 'object' && !Array.isArray(facts) ? facts : {};
+  return createHash('sha256').update(JSON.stringify(value, Object.keys(value).sort())).digest('hex');
+}
 function runIdFor(envelope, mode) {
   if (mode !== 'evaluation') return `${mode}:${eventKey(envelope)}`;
   const sourceHash = createHash('sha256').update(eventKey(envelope)).digest('hex');
-  return `evaluation:${AGENT_RUNTIME_VERSION}:${sourceHash}`;
+  return `evaluation:${String(envelope?.tenantId ?? '')}:${AGENT_RUNTIME_VERSION}:${sourceHash}`;
 }
 function text(value, length = 1_000) { return String(value ?? '').replace(/\s+/gu, ' ').trim().slice(0, length); }
 function comparisonReply(value) {
@@ -35,15 +40,36 @@ async function sourceTimeState(envelope, conversationContextStore) {
   const payload = envelope?.payload ?? {};
   const state = await conversationContextStore.get(envelope.tenantId, payload);
   const sourceAt = messageTime(envelope.ts) ?? Date.now();
-  const fallbackMessages = (Array.isArray(state?.messages) ? state.messages : [])
+  const buyerMessages = (Array.isArray(state?.messages) ? state.messages : [])
     .filter((item) => (messageTime(item?.at) ?? sourceAt) <= sourceAt)
     .map((item) => ({
       at: messageTime(item?.at) ?? sourceAt,
       role: item?.role === 'seller' ? 'seller' : 'buyer',
       source: item?.role === 'seller' ? text(item?.source, 32) || 'unknown' : 'buyer',
-      content: text(item?.content ?? item?.text, 1_000) || (item?.image === true ? '[图片]' : ''),
+      content: text(item?.content ?? item?.text, 10_000) || (item?.image === true ? '[图片]' : ''),
+      ...(Array.isArray(item?.image_urls) ? { image_urls: item.image_urls.slice(0, 4).map((url) => text(url, 2_000)).filter(Boolean) } : {}),
     })).filter((item) => item.content);
-  return { facts: state?.facts ?? {}, messages: fallbackMessages };
+  const agentMessages = (Array.isArray(state?.agent_events) ? state.agent_events : [])
+    .filter((item) => (messageTime(item?.at) ?? sourceAt) <= sourceAt)
+    .map((item) => ({
+      at: messageTime(item?.at) ?? sourceAt,
+      role: item.role,
+      content: String(item.content ?? '').slice(0, 100_000),
+      ...(item.tool_call_id ? { tool_call_id: text(item.tool_call_id, 200) } : {}),
+      ...(item.name ? { name: text(item.name, 64) } : {}),
+      ...(Array.isArray(item.tool_calls) ? { tool_calls: structuredClone(item.tool_calls.slice(0, 12)) } : {}),
+    }));
+  return { facts: state?.facts ?? {}, messages: [...buyerMessages, ...agentMessages].sort((left, right) => left.at - right.at) };
+}
+
+function knowledgeScene(state, payload) {
+  const stage = String(state?.facts?.stage ?? '');
+  if (['aftersale', 'refund', 'dispute'].includes(stage)) return 'aftersale';
+  if (['paid', 'paid_manual_delivery', 'ticket_issued', 'ticket_sent', 'fulfillment_exception'].includes(stage)) return 'fulfillment';
+  if (state?.facts?.order_id || ['quote_confirmed', 'waiting_payment', 'order_created'].includes(stage)) return 'order';
+  if (['quoted', 'quote_replaced'].includes(stage) || state?.facts?.quote_total_cents) return 'quote_followup';
+  if (hasImage(payload) || stage === 'collecting_information') return 'intake';
+  return 'general';
 }
 
 function sourceSnapshot(source) {
@@ -102,7 +128,7 @@ function sourceObservation(source, tool) {
   };
 }
 
-function runtimeTools(source, state, mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, initialObservations = []) {
+function runtimeTools(source, state, mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, executeAction, settings, currentTime, initialObservations = []) {
   let quoteInput = [...initialObservations].reverse().find((item) => item?.facts?._quote_input)?.facts?._quote_input ?? null;
   if (!quoteInput) {
     try { quoteInput = compactQuoteInput(state?.facts?.quote_draft?.recognition_artifact); }
@@ -231,7 +257,10 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       const count = safePositiveInteger(state?.facts?.quote_ticket_count ?? state?.facts?.ticket_count);
       const explicitUnit = safePositiveInteger(state?.facts?.quote_unit_cents ?? state?.facts?.unit_quote_cents);
       const unit = explicitUnit ?? (total && count && total % count === 0 ? total / count : null);
-      if (!total || !count || !unit) {
+      const expiresAt = safePositiveInteger(state?.facts?.quote_expires_at);
+      const stage = text(state?.facts?.stage, 64);
+      const active = expiresAt && expiresAt > Number(currentTime) && ['quoted', 'quote_confirmed', 'waiting_payment'].includes(stage);
+      if (!total || !count || !unit || !active) {
         return { status: 'error', tool: 'read_active_quote', summary: '当前报价已失效或证据不完整', facts: {}, next_actions: ['respond'], stop_reason: 'active_quote_missing_or_expired' };
       }
       const snapshot = source?.result?.agent_reply_snapshot;
@@ -243,12 +272,93 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       };
     },
     async request_price_change() {
-      if (mode === 'active') {
-        return { status: 'error', tool: 'request_price_change', summary: 'Agent改价申请执行尚未开放', facts: {}, next_actions: ['handoff'], stop_reason: 'agent_price_change_not_enabled' };
+      if (mode === 'active') return { status: 'error', tool: 'request_price_change', summary: '旧计划链不执行Agent改价', facts: {}, next_actions: ['handoff'], stop_reason: 'legacy_agent_price_change_disabled' };
+      return { status: 'success', tool: 'request_price_change', summary: '影子模式仅评估无参数改价申请，不执行平台改价', facts: { price_change_requested: false }, next_actions: ['respond'] };
+    },
+    async change_order_price() {
+      if (mode !== 'active') return {
+        status: 'success', code: 'write_simulated', tool: 'change_order_price', summary: '影子模式仅评估改价调用，不执行平台写入',
+        facts: { price_change_requested: false }, missing: [], retryable: false,
+      };
+      const envelope = source?.envelope ?? {};
+      const payload = envelope.payload ?? {};
+      if (typeof conversationContextStore?.get !== 'function') return {
+        status: 'error', code: 'authoritative_context_unavailable', tool: 'change_order_price',
+        summary: '无法刷新当前会话的权威报价与订单事实', facts: {}, missing: [], retryable: true,
+      };
+      const live = await conversationContextStore.get(envelope.tenantId, payload);
+      const facts = live?.facts ?? {};
+      const orderId = text(facts.order_id, 128);
+      const quoteRecord = Array.isArray(facts.quote_history) ? facts.quote_history.at(-1) ?? {} : {};
+      const total = safePositiveInteger(facts.quote_total_cents);
+      const quantity = safePositiveInteger(facts.quote_ticket_count);
+      const missing = [];
+      if (!orderId) missing.push('linked_order');
+      if (!total || !quantity) missing.push('active_quote');
+      if (facts.quote_confirmed !== true || !facts.quote_record_id || facts.confirmed_quote_record_id !== facts.quote_record_id) missing.push('buyer_confirmation');
+      if (Number(facts.quote_expires_at ?? 0) <= Number(currentTime)) missing.push('unexpired_quote');
+      if (safePositiveInteger(facts.ticket_count) && safePositiveInteger(facts.ticket_count) !== quantity) missing.push('unchanged_ticket_count');
+      if (missing.length) return {
+        status: 'error', code: 'price_change_prerequisites_missing', tool: 'change_order_price',
+        summary: '当前权威会话事实未通过自动改价前置验证', facts: {}, missing, retryable: false,
+      };
+      if (typeof conversationContextStore?.claimPriceChangeCommand !== 'function' || typeof conversationContextStore?.completePriceChangeCommand !== 'function') return {
+        status: 'error', code: 'price_change_journal_unavailable', tool: 'change_order_price',
+        summary: '改价命令幂等日志当前不可用', facts: {}, missing: [], retryable: false,
+      };
+      if (typeof executeAction !== 'function') return {
+        status: 'error', code: 'price_change_executor_unavailable', tool: 'change_order_price',
+        summary: '订单改价执行器当前不可用', facts: {}, missing: [], retryable: true,
+      };
+      const accountUnb = text(payload.accountUnb ?? payload.account_unb, 128);
+      const maxAmount = safePositiveInteger(settings?.max_auto_order_amount_cents) ?? 200_000;
+      const featureEnabled = settings?.automation_enabled === true
+        && (settings?.price_change_enabled === true || settings?.auto_price_change === true);
+      const actionId = `${String(envelope.id)}:${String(facts.quote_record_id)}:native-agent-price-change`;
+      const claim = await conversationContextStore.claimPriceChangeCommand(envelope.tenantId, payload, {
+        actionId, quoteRecordId: String(facts.quote_record_id), orderId, totalCents: total, ticketCount: quantity,
+      });
+      if (claim?.status === 'replay') {
+        if (claim.code === 'completed') return { status: 'success', code: 'price_change_reconciled', tool: 'change_order_price', summary: '平台订单金额已与确认报价一致', facts: { price_change_requested: true, reconciled: true }, missing: [], retryable: false };
+        if (['pending', 'submitted'].includes(claim.code)) return { status: 'pending', code: 'price_change_submitted', tool: 'change_order_price', summary: '已有改价命令等待平台确认', facts: { price_change_requested: true, reconciled: false }, missing: [], retryable: false };
       }
+      if (claim?.status !== 'claimed') return {
+        status: 'error', code: text(claim?.code, 100) || 'price_change_claim_rejected', tool: 'change_order_price',
+        summary: '最新报价版本或既有改价结果尚未通过幂等门禁', facts: {}, missing: [], retryable: false,
+      };
+      let result;
+      try {
+        result = await executeAction({
+          action_id: actionId, kind: 'change_price',
+          tenant_id: String(envelope.tenantId), account_unb: accountUnb, order_id: orderId,
+          price_fee: total, transport_fee: 0, expected_total_cents: total, expected_quantity: quantity,
+          order_quantity_policy: 'listing_unit',
+          gates: {
+            feature_enabled: featureEnabled,
+            unique_showtime: ['cinema', 'movie', 'date', 'showtime'].every((key) => Boolean(text(facts[key] ?? quoteRecord[key], 160))),
+            quantity_confirmed: true, selection_confirmed: true, quote_valid: true, order_linked: true,
+            human_takeover: false, max_amount_cents: maxAmount,
+          },
+        });
+      } catch (error) {
+        await conversationContextStore.completePriceChangeCommand(envelope.tenantId, payload, actionId, { status: 'unknown', code: 'execution_result_unknown' });
+        throw error;
+      }
+      if (result?.status === 'skipped') {
+        await conversationContextStore.completePriceChangeCommand(envelope.tenantId, payload, actionId, { status: 'rejected', code: text(result.reason, 100) || 'price_change_rejected' });
+        return {
+          status: 'error', code: text(result.reason, 100) || 'price_change_rejected', tool: 'change_order_price',
+          summary: '订单改价被权威门禁拒绝', facts: { failures: Array.isArray(result.failures) ? result.failures.slice(0, 20) : [] }, missing: [], retryable: false,
+        };
+      }
+      const pending = result?.status === 'submitted';
+      await conversationContextStore.completePriceChangeCommand(envelope.tenantId, payload, actionId, {
+        status: pending ? 'submitted' : 'completed', code: pending ? 'price_change_submitted' : 'price_change_reconciled',
+      });
       return {
-        status: 'success', tool: 'request_price_change', summary: '影子模式仅评估无参数改价申请，不执行平台改价',
-        facts: { price_change_requested: false }, next_actions: ['respond'],
+        status: pending ? 'pending' : 'success', code: pending ? 'price_change_submitted' : 'price_change_reconciled', tool: 'change_order_price',
+        summary: pending ? '改价命令已提交，等待平台订单事件确认' : '平台订单金额已与确认报价一致',
+        facts: { price_change_requested: true, reconciled: result?.reconciled === true }, missing: [], retryable: false,
       };
     },
     async recognize_and_quote() { return sourceObservation(source, 'recognize_and_quote'); },
@@ -323,16 +433,22 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
           facts: { quote_confirmed: false }, ...(shadowReply ? { authoritative_reply: shadowReply } : {}), next_actions: ['respond'],
         };
       }
-      if (typeof conversationContextStore?.markQuoteConfirmed !== 'function') {
+      if (typeof conversationContextStore?.confirmQuoteFromBuyerMessage !== 'function' || typeof conversationContextStore?.get !== 'function') {
         return { status: 'error', tool: 'confirm_active_quote', summary: '确定性报价确认门禁不可用', facts: {}, next_actions: ['handoff'], stop_reason: 'quote_confirmation_gate_unavailable' };
       }
       const envelope = source?.envelope ?? {};
-      const confirmed = await conversationContextStore.markQuoteConfirmed(envelope.tenantId, envelope.payload ?? {});
+      const live = await conversationContextStore.get(envelope.tenantId, envelope.payload ?? {});
+      const quoteRecordId = text(live?.facts?.quote_record_id, 100);
+      const confirmed = await conversationContextStore.confirmQuoteFromBuyerMessage(envelope.tenantId, envelope.payload ?? {}, {
+        quoteRecordId, eventId: String(envelope.id),
+      });
       if (confirmed !== true) {
         return {
           status: 'warning', tool: 'confirm_active_quote', summary: '确定性报价确认门禁拒绝本次确认',
           facts: { quote_confirmed: false },
-          authoritative_reply: '当前报价缺少有效规则版本或送达确认，不能进入下单流程。请发送最新完整选座页，我重新实时核价。',
+          authoritative_reply: quoteRecordId
+            ? '当前报价尚未获得您的明确确认。如接受这份报价，请回复“确认报价”。'
+            : '当前没有可确认的有效报价，请发送最新完整选座页重新实时核价。',
           next_actions: ['respond'],
         };
       }
@@ -518,7 +634,7 @@ function linkedOrderReply(lifecycle) {
   return '闲鱼订单已关闭或取消，无法继续原订单流程。如仍需购票，请重新发送当前选座页截图。';
 }
 
-export function createShadowAgentRuntime({ runStore, eventStore, conversationContextStore, planner, getSettings, replyOutboxStore = null, manualTaskStore = null, coreFor = null, quotePreviewClient = null, logger = console, maxSteps = 8, leaseMs = 60_000, heartbeatMs = 15_000, deadlineMs = 180_000, now = Date.now } = {}) {
+export function createShadowAgentRuntime({ runStore, eventStore, conversationContextStore, planner, getSettings, replyOutboxStore = null, manualTaskStore = null, coreFor = null, quotePreviewClient = null, executeAction = null, requireNativeActive = false, logger = console, maxSteps = 12, leaseMs = 60_000, heartbeatMs = 15_000, deadlineMs = 240_000, now = Date.now } = {}) {
   if (!runStore || !eventStore || !conversationContextStore || !planner || typeof getSettings !== 'function') throw new TypeError('shadow agent runtime dependencies are required');
   const activeControllers = new Set();
 
@@ -537,6 +653,13 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
     if (!run) return null;
     const heartbeat = startLeaseHeartbeat(runStore, run, { leaseMs, heartbeatMs });
     const controller = new AbortController();
+    let deadlineExceeded = false;
+    const deadlineDelay = Math.min(2_147_483_647, Math.max(0, Number(run.deadline_at) - now()));
+    const deadlineTimer = setTimeout(() => {
+      deadlineExceeded = true;
+      controller.abort(new Error('agent_deadline_exceeded'));
+    }, deadlineDelay);
+    deadlineTimer.unref?.();
     activeControllers.add(controller);
     try {
       const source = await eventStore.get(run.event_key);
@@ -562,10 +685,13 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         let replyQueued = false;
         if (run.mode === 'active' && await createFallbackManualTask(manualTaskStore, source)) {
           const payload = source.envelope?.payload ?? {};
+          const fallbackState = typeof conversationContextStore?.get === 'function' ? await conversationContextStore.get(source.envelope.tenantId, payload) : { facts: {} };
           await replyOutboxStore.enqueue({
             actionId: `${run.run_id}:fallback`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
             accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
-            ...(sourcePlatformMessageId(payload) ? { sourceMessageId: sourcePlatformMessageId(payload) } : {}),
+            sourceMessageId: sourcePlatformMessageId(payload) || String(source.envelope.id),
+            projectionVersion: conversationProjectionVersion(fallbackState?.facts), expiresAt: Number(run.deadline_at),
+            replyProvenance: { runtime_version: AGENT_RUNTIME_VERSION, request_id: '', model: '', reason: 'agent_tool_result_unknown' },
             text: '本次工具执行结果暂时无法确认，为避免重复操作已停止自动处理，并转人工核对。',
           });
           replyQueued = true;
@@ -588,30 +714,70 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
       const executionState = state;
       const context = {
         event_id: String(source.envelope.id), tenant_id: String(source.envelope.tenantId),
+        conversation_id: [source.envelope.tenantId, payload.accountUnb ?? payload.account_unb, payload.chatId ?? payload.chat_id, payload.peerUnb ?? payload.peer_unb].map(String).join(':'),
+        run_id: run.run_id,
         latest_message: text(payload.content ?? payload.text) || '[图片或非文本消息]', has_image: hasImage(payload),
         settings, state: state ?? { facts: {}, messages: [] }, observations: run.observations, trace: run.trace, mode: run.mode,
+        knowledge_scene: knowledgeScene(state, payload),
         now: run.mode === 'evaluation' && Number.isSafeInteger(Number(source?.result?.agent_state_snapshot?.observed_at))
           ? Number(source.result.agent_state_snapshot.observed_at) : now(),
         human_takeover: false, signal: controller.signal,
       };
-      const agent = createConversationAgent({
-        planner, tools: runtimeTools(source, executionState, run.mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, run.observations),
-        maxSteps, mode: run.mode, allowWriteSimulation: run.mode !== 'active',
-      });
+      const tools = runtimeTools(source, executionState, run.mode, conversationContextStore, manualTaskStore, coreFor, quotePreviewClient, executeAction, settings, context.now, run.observations);
+      const nativeRequiredButUnavailable = run.mode === 'active' && requireNativeActive && typeof planner.complete !== 'function';
+      const agent = nativeRequiredButUnavailable
+        ? { async runTurn() { return { status: 'handoff', reason: 'native_completion_unavailable', reply: null, trace: run.trace }; } }
+        : typeof planner.complete === 'function'
+          ? createModelDrivenAgentLoop({ model: planner, tools, maxToolCalls: maxSteps })
+          : createConversationAgent({
+            planner, tools, maxSteps: Math.min(maxSteps, 8), mode: run.mode, allowWriteSimulation: run.mode !== 'active',
+          });
       const outcome = await agent.runTurn(context, {
-        onToolStart: (call) => runStore.beginTool(run.run_id, run.lease_id, {
-          callId: `tool:${call.step}:${call.tool}`, step: call.step, tool: call.tool,
-          trace: call.trace, observations: call.observations,
-        }, { leaseMs }),
-        onToolFinish: (call, observation) => runStore.completeTool(
-          run.run_id, run.lease_id, `tool:${call.step}:${call.tool}`, observation, { leaseMs },
-        ),
+        onToolStart: async (call) => {
+          const journal = await runStore.beginTool(run.run_id, run.lease_id, {
+            callId: `tool:${call.step}:${call.tool}`, step: call.step, tool: call.tool,
+            trace: call.trace, observations: call.observations,
+          }, { leaseMs });
+          if (journal?.state === 'started' && typeof conversationContextStore.appendAgentEvent === 'function') {
+            await conversationContextStore.appendAgentEvent(source.envelope.tenantId, payload, {
+              id: `${run.run_id}:tool:${call.step}:call`, at: now(), role: 'assistant', content: '',
+              tool_calls: [{ id: call.call_id || `call-${call.step}`, type: 'function', function: { name: call.tool, arguments: JSON.stringify(call.arguments ?? {}) } }],
+            });
+          }
+          return journal;
+        },
+        onToolFinish: async (call, observation) => {
+          const completed = await runStore.completeTool(
+            run.run_id, run.lease_id, `tool:${call.step}:${call.tool}`, observation, { leaseMs },
+          );
+          if (typeof conversationContextStore.appendAgentEvent === 'function') {
+            await conversationContextStore.appendAgentEvent(source.envelope.tenantId, payload, {
+              id: `${run.run_id}:tool:${call.step}:result`, at: now(), role: 'tool',
+              tool_call_id: call.call_id || `call-${call.step}`, name: call.tool, content: JSON.stringify(observation),
+            });
+          }
+          return completed;
+        },
         onCheckpoint: (checkpoint) => runStore.checkpoint(run.run_id, run.lease_id, checkpoint, { leaseMs }),
         shouldContinue: () => now() < Number(run.deadline_at),
       });
+      if (deadlineExceeded || now() >= Number(run.deadline_at)) {
+        await heartbeat.stop();
+        const persistedResult = withSourceSnapshot({ runtime_version: AGENT_RUNTIME_VERSION, status: 'handoff', reason: 'agent_deadline_exceeded', trace: outcome.trace, reply_generated: false, authoritative_outcome: 'not_available' }, source);
+        await runStore.timeout(run.run_id, run.lease_id, persistedResult);
+        return { status: 'timed_out', run_id: run.run_id, result: persistedResult };
+      }
+      if (typeof outcome.reply === 'string' && outcome.reply.trim() && typeof conversationContextStore.appendAgentEvent === 'function') {
+        await conversationContextStore.appendAgentEvent(source.envelope.tenantId, payload, {
+          id: `${run.run_id}:assistant:final`, at: now(), role: 'assistant', content: outcome.reply,
+          ...(outcome.metadata ? { metadata: outcome.metadata } : {}),
+        });
+      }
       await heartbeat.stop();
       let replyQueued = false;
       let queuedReply = typeof outcome.reply === 'string' ? outcome.reply.trim() : '';
+      let finalStatus = outcome.status;
+      let finalReason = outcome.reason;
       let actionSuffix = 'reply';
       const persistedRun = run.mode === 'active' && typeof runStore.get === 'function' ? await runStore.get(run.run_id) : run;
       if (run.mode === 'active' && outcome.status === 'handoff' && await createFallbackManualTask(manualTaskStore, source, context.state?.facts?.order_id)) {
@@ -619,7 +785,9 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         const quoteClarification = activeQuoteClarificationReply(context.state, message, now());
         const toolCalls = Array.isArray(persistedRun?.tool_calls) ? persistedRun.tool_calls : [];
         const lastTool = String(toolCalls.at(-1)?.tool ?? '');
-        const toolFailureReply = lastTool === 'read_linked_order'
+        const toolFailureReply = outcome.reason === 'fact_check_failed_twice'
+          ? '当前交易事实需要重新核验，已停止自动回复并转人工处理。'
+          : lastTool === 'read_linked_order'
           ? '当前暂时无法读取订单最新状态，已转人工核对，请以闲鱼订单页显示为准。'
           : ['recognize_image', 'resolve_showtime', 'quote_realtime'].includes(lastTool)
             ? '本次实时核验未能安全完成，已停止自动处理，请勿付款，人工客服会继续核对。'
@@ -627,26 +795,44 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         queuedReply = quoteClarification || queuedReply || toolFailureReply;
         actionSuffix = quoteClarification ? 'quote-clarification-fallback' : 'fallback';
       }
+      if (run.mode === 'active' && queuedReply && typeof planner.complete === 'function' && typeof conversationContextStore?.get === 'function') {
+        const latestState = await conversationContextStore.get(source.envelope.tenantId, payload);
+        const conflicts = transactionFactConflicts(queuedReply, { ...context, state: latestState, now: now() }, persistedRun?.observations ?? []);
+        if (conflicts.length) {
+          await createFallbackManualTask(manualTaskStore, source, latestState?.facts?.order_id);
+          queuedReply = '当前交易事实需要重新核验，已停止自动回复并转人工处理。';
+          actionSuffix = 'fact-check-fallback';
+          finalStatus = 'handoff';
+          finalReason = 'outbox_fact_check_failed';
+        }
+      }
       if (run.mode === 'active' && queuedReply) {
         const payload = source.envelope?.payload ?? {};
+        const deliveryState = typeof conversationContextStore?.get === 'function'
+          ? await conversationContextStore.get(source.envelope.tenantId, payload)
+          : context.state;
         const delivery = actionSuffix === 'reply'
           ? [...(persistedRun?.observations ?? [])].reverse().find((item) => item?.facts?._quote_delivery)?.facts?._quote_delivery ?? null
           : null;
         await replyOutboxStore.enqueue({
           actionId: `${run.run_id}:${actionSuffix}`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
           accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
-          ...(sourcePlatformMessageId(payload) ? { sourceMessageId: sourcePlatformMessageId(payload) } : {}), text: queuedReply, ...(delivery ? { delivery } : {}),
+          sourceMessageId: sourcePlatformMessageId(payload) || String(source.envelope.id),
+          projectionVersion: conversationProjectionVersion(deliveryState?.facts), expiresAt: Number(run.deadline_at),
+          replyProvenance: { runtime_version: AGENT_RUNTIME_VERSION, request_id: outcome.metadata?.request_id ?? '', model: outcome.metadata?.model ?? '', reason: finalReason },
+          text: queuedReply, ...(delivery ? { delivery } : {}),
         });
         replyQueued = true;
       }
       const result = {
         runtime_version: AGENT_RUNTIME_VERSION,
-        status: outcome.status, reason: outcome.reason, trace: outcome.trace,
+        status: finalStatus, reason: finalReason, trace: outcome.trace,
         reply_generated: Boolean(queuedReply) || (typeof outcome.reply === 'string' && outcome.reply.length > 0),
         authoritative_reply_used: outcome.reason === 'authoritative_tool_response',
         ...(comparisonReply(outcome.reply) ? { proposed_reply: comparisonReply(outcome.reply) } : {}),
         ...(run.mode === 'active' ? { reply_queued: replyQueued } : {}),
         authoritative_outcome: source.result?.preview_status === 'preview_ready' ? 'quote_succeeded' : source.result?.quote_failure_code ? 'quote_failed' : 'not_available',
+        ...(outcome.metadata ? { model_step: outcome.metadata } : {}),
       };
       if (outcome.reason === 'agent_deadline_exceeded') {
         const persistedResult = withSourceSnapshot(result, source);
@@ -659,6 +845,15 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
     } catch (error) {
       let failure = error;
       try { await heartbeat.stop(); } catch (heartbeatError) { failure = heartbeatError; }
+      if (deadlineExceeded || now() >= Number(run.deadline_at)) {
+        try {
+          await runStore.timeout(run.run_id, run.lease_id, { runtime_version: AGENT_RUNTIME_VERSION, status: 'handoff', reason: 'agent_deadline_exceeded', trace: run.trace, reply_generated: false });
+          return { status: 'timed_out', run_id: run.run_id };
+        } catch (leaseError) {
+          if (/agent run lease mismatch/u.test(String(leaseError?.message ?? ''))) return { status: 'lease_lost', run_id: run.run_id };
+          throw leaseError;
+        }
+      }
       if (controller.signal.aborted) {
         try {
           await runStore.defer(run.run_id, run.lease_id, { delayMs: 1_000, reason: 'agent_runtime_stopping' });
@@ -677,6 +872,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         throw leaseError;
       }
     } finally {
+      clearTimeout(deadlineTimer);
       activeControllers.delete(controller);
     }
   }

@@ -11,8 +11,8 @@ sys.path.insert(0, str(REPOSITORY / "v3-backend-gateway-work"))
 from app.release_bundle import verify_component_archive
 
 EXPECTED_CONTRACTS = {
-    "v3": "wanda-v3-v19-contextual-agent-fallbacks",
-    "plugin": "wanda-agent-runtime-v36-contextual-fallbacks",
+    "v3": "wanda-agent-runtime-v37-model-led-native-tools",
+    "plugin": "wanda-agent-runtime-v37-model-led-native-tools",
 }
 
 

@@ -86,6 +86,32 @@ export { paymentSafeOrderInstruction };
 const MIN_IM_REPLY_DELAY_MS = 2_000;
 const IMAGE_SUPPLEMENT_WINDOW_MS = 10 * 60 * 1_000;
 const MULTI_IMAGE_PAIR_WINDOW_MS = 30 * 1_000;
+
+function mergeAgentContextMessages(persisted, platformHistory) {
+  const combined = [...(Array.isArray(persisted) ? persisted : []), ...(Array.isArray(platformHistory) ? platformHistory : [])]
+    .map((item, index) => {
+      const role = ['buyer', 'seller', 'user', 'assistant', 'tool', 'system'].includes(String(item?.role)) ? String(item.role) : 'buyer';
+      const content = item?.content ?? item?.text ?? '';
+      const at = Number(item?.at) || Date.parse(String(item?.sent_at ?? item?.sentAt ?? '')) || index;
+      return {
+        role,
+        content,
+        ...(item?.source ? { source: String(item.source) } : {}),
+        ...(Array.isArray(item?.image_urls) ? { image_urls: item.image_urls } : {}),
+        ...(Array.isArray(item?.tool_calls) ? { tool_calls: item.tool_calls } : {}),
+        ...(item?.tool_call_id ? { tool_call_id: String(item.tool_call_id) } : {}),
+        ...(item?.name ? { name: String(item.name) } : {}),
+        at,
+      };
+    });
+  const unique = new Map();
+  for (const item of combined) {
+    const key = [item.role, item.tool_call_id ?? '', JSON.stringify(item.tool_calls ?? []), JSON.stringify(item.content), item.at].join('\u001f');
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  return [...unique.values()].sort((left, right) => left.at - right.at);
+}
+
 export function createWorkflow({
   backend,
   coreFor,
@@ -872,15 +898,22 @@ export function createWorkflow({
       ? await conversationContextStore.get(envelope.tenantId, envelope.payload ?? {})
       : { facts: {}, messages: [] });
     let history = [];
-    try { history = await loadReplyHistory(envelope, settings); }
+    try { history = await loadReplyHistory(envelope, settings, { completeForAgent: true }); }
     catch (error) {
       logger.warn?.('[workflow] source-time seller history unavailable; using bounded buyer context', {
         eventId: String(envelope.id), error: String(error?.message ?? error),
       });
     }
+    if (history.length && typeof conversationContextStore?.recordPlatformHistory === 'function') {
+      await conversationContextStore.recordPlatformHistory(envelope.tenantId, envelope.payload ?? {}, history);
+    }
+    const persisted = [
+      ...(Array.isArray(state?.messages) ? state.messages : []),
+      ...(Array.isArray(state?.agent_events) ? state.agent_events : []),
+    ];
     return {
       facts: state?.facts ?? {},
-      messages: history.length ? history : Array.isArray(state?.messages) ? state.messages : [],
+      messages: mergeAgentContextMessages(persisted, history),
     };
   }
 
@@ -1037,7 +1070,7 @@ export function createWorkflow({
     });
   }
 
-  async function loadReplyHistory(envelope, settings = {}) {
+  async function loadReplyHistory(envelope, settings = {}, { completeForAgent = false } = {}) {
     const address = messageContext(envelope);
     if (!address.account_unb || !address.chat_id) {
       throw nonRetryable('reply preview requires account_unb and chat_id');
@@ -1046,17 +1079,17 @@ export function createWorkflow({
     const page = await core.im.listMessages({
       accountUnb: address.account_unb,
       chatId: address.chat_id,
-      pageSize: boundedInteger(settings.ai_reply_memory_depth, 5, 50, 20),
+      pageSize: completeForAgent ? 100 : boundedInteger(settings.ai_reply_memory_depth, 5, 50, 20),
     });
     const depth = boundedInteger(settings.ai_reply_memory_depth, 5, 50, 20);
     const historyHours = boundedInteger(settings.ai_reply_memory_hours, 1, 24, 24);
     const cutoff = Date.now() - historyHours * 60 * 60 * 1_000;
     const sourceAt = Number(envelope.ts);
-    const selected = (Array.isArray(page?.items) ? page.items : [])
-      .slice(0, depth)
+    const platformItems = Array.isArray(page?.items) ? page.items : [];
+    const selected = (completeForAgent ? platformItems : platformItems.slice(0, depth))
       .filter((item) => {
         const sentAt = Date.parse(String(item?.sentAt ?? item?.sent_at ?? ''));
-        return (!Number.isFinite(sentAt) || sentAt >= cutoff)
+        return (completeForAgent || !Number.isFinite(sentAt) || sentAt >= cutoff)
           && (!Number.isFinite(sourceAt) || !Number.isFinite(sentAt) || sentAt <= sourceAt + 1_000);
       })
       .slice().reverse();

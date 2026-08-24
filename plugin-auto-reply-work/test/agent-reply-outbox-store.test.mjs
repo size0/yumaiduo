@@ -63,6 +63,16 @@ test('reply outbox can close a human-takeover item without sending it again', as
   assert.equal(skipped.last_error, 'human_takeover');
 });
 
+test('reply outbox never claims a reply after the shared agent deadline', async () => {
+  let now = 5_000;
+  const store = new AgentReplyOutboxStore(join(await mkdtemp(join(tmpdir(), 'wanda-agent-expired-outbox-')), 'outbox.json'), { now: () => now });
+  await store.initialize();
+  await store.enqueue({ actionId: 'active:expired', runId: 'active:run', tenantId: 'tenant-1', accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', sourceMessageId: 'm1', projectionVersion: 'p1', replyProvenance: { model: 'm' }, expiresAt: 5_100, text: '不得发送', mode: 'active' });
+  now = 5_101;
+  assert.equal(await store.claimDue(), null);
+  assert.equal((await store.get('active:expired')).last_error, 'agent_deadline_exceeded');
+});
+
 test('reply outbox rejects shadow writes and never blindly retries an unknown send result', async () => {
   let now = 10_000;
   const store = new AgentReplyOutboxStore(join(await mkdtemp(join(tmpdir(), 'wanda-agent-outbox-')), 'outbox.json'), { now: () => now });

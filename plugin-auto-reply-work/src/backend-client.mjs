@@ -261,6 +261,15 @@ export function createBackendClient(config, {
   function updateKnowledgeEntry(tenantId, id, entry) {
     return request(`/api/xianyu-plugin/bridge/knowledge-base/${encodeURIComponent(id)}`, { method: 'PUT', body: entry, tenantId });
   }
+  function listCorrections(tenantId) {
+    return request('/api/xianyu-plugin/bridge/corrections', { tenantId });
+  }
+  function createCorrection(tenantId, input) {
+    return request('/api/xianyu-plugin/bridge/corrections', { method: 'POST', body: input, tenantId });
+  }
+  function reviewCorrection(tenantId, id, input) {
+    return request(`/api/xianyu-plugin/bridge/corrections/${encodeURIComponent(id)}`, { method: 'PUT', body: input, tenantId });
+  }
   function recordConversationExperience(input, context = {}) {
     return request('/api/xianyu-plugin/bridge/conversation-experiences', {
       method: 'POST',
@@ -375,6 +384,9 @@ export function createBackendClient(config, {
     listKnowledgeBase,
     createKnowledgeEntry,
     updateKnowledgeEntry,
+    listCorrections,
+    createCorrection,
+    reviewCorrection,
     recordConversationExperience,
     updateShopSettings,
     syncShops,

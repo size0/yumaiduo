@@ -336,6 +336,20 @@ async function handleApi(req, res, pathname, rawBody, context, api, replyImageUp
     sendJson(res, 200, { ok: true, data: await api.reviewAgentHumanComparison(context.tenantId, decodeURIComponent(humanComparisonMatch[1]), parseJson(rawBody)) });
     return;
   }
+  const agentCorrectionMatch = pathname.match(/^\/ui\/api\/agent-evaluations\/([^/]+)\/correction$/u);
+  if (req.method === 'POST' && agentCorrectionMatch) {
+    sendJson(res, 201, { ok: true, data: await api.createAgentCorrection(context.tenantId, decodeURIComponent(agentCorrectionMatch[1]), parseJson(rawBody)) });
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/ui/api/corrections') {
+    sendJson(res, 200, { ok: true, data: await api.listCorrections(context.tenantId) });
+    return;
+  }
+  const correctionMatch = pathname.match(/^\/ui\/api\/corrections\/([^/]+)$/u);
+  if (req.method === 'PUT' && correctionMatch) {
+    sendJson(res, 200, { ok: true, data: await api.reviewCorrection(context.tenantId, decodeURIComponent(correctionMatch[1]), parseJson(rawBody), { userId: context.userId }) });
+    return;
+  }
   const agentEvaluationMatch = pathname.match(/^\/ui\/api\/agent-evaluations\/([^/]+)$/u);
   if (req.method === 'PUT' && agentEvaluationMatch) {
     sendJson(res, 200, { ok: true, data: await api.reviewAgentEvaluation(context.tenantId, decodeURIComponent(agentEvaluationMatch[1]), parseJson(rawBody)) });

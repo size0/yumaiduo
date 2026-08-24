@@ -19,7 +19,7 @@ V3 服务（FastAPI）
   └─ 实时座位、临时试价订单、W+活动、取消、释放复核
 ```
 
-当前执行所有者是 `deterministic`。Agent 处于 `shadow`，只评估规划，不发送交易回复、不创建真实人工任务，也不执行改价。
+当前发布门禁仍将新运行版本保持在 `shadow`；只有完成回放审核并显式批准 `wanda-agent-runtime-v37-model-led-native-tools` 后才可成为 `active` 执行所有者。旧确定性链保留为迁移期回滚路径。
 
 ## 2. 插件服务职责
 
@@ -33,7 +33,7 @@ V3 服务（FastAPI）
 ### 事件与会话
 
 - `src/event-store.mjs`：加密事件队列、租约、重试、幂等和发送记录。
-- `src/conversation-context-store.mjs`：24小时会话事实、10分钟识图草稿、有效报价与订单阶段。
+- `src/conversation-context-store.mjs`：店铺×买家的追加式原始消息、Agent/Tool事件、10分钟识图草稿、有效报价与订单权威投影；模型窗口在调用时按字符预算动态构建，不再固定截取20条。
 - `src/event-router.mjs`、`src/conversation/message-classifier.mjs`：过滤平台通知并分类业务事件。
 
 ### 确定性业务编排
@@ -48,17 +48,21 @@ V3 服务（FastAPI）
 ### AI 与 Agent
 
 - `src/quote-preview-client.mjs`：调用V3语义抽取、视觉识别、场次解析和报价接口；不自行决定金额。
-- `src/ai/ai-orchestrator.mjs`：Provider 中立的AI边界。
-- `src/agent/`：持久化Agent运行、工具契约、策略守卫、Shadow/Evaluation、Canary和回复Outbox。
+- `src/ai/ai-orchestrator.mjs`：Provider 中立的AI边界，同时保留迁移期旧Plan接口和v2原生completion接口。
+- `src/agent/model-driven-agent-loop.mjs`：模型主导的原生Tool Calling循环；工具错误回注后由模型自行恢复，只读工具可并行，写工具串行。
+- `src/agent/native-tool-registry.mjs`：模型可见工具名与本地权威实现的显式映射，不包含固定工作流或next_actions。
+- `src/agent/agent-run-store.mjs`、`shadow-agent-runtime.mjs`：12次工具调用、240秒、租约、幂等日志、未知写结果禁止重试、Shadow/Evaluation/Canary和回复Outbox。
 
 ## 3. V3 服务职责
 
 - `app/main.py`：FastAPI组合根、生命周期和依赖装配。
 - `app/routes/plugin_bridge.py`：插件Bridge鉴权、运行时设置、Canary审批、报价策略和知识库路由。
-- `app/routes/quote_preview.py`、`app/routes/agent_reply.py`：报价预览、Agent规划与回复草稿路由。
+- `app/routes/quote_preview.py`、`app/routes/agent_reply.py`：报价预览、迁移期旧AgentPlan路由，以及`POST /api/agents/v2/completions`原生模型网关。
 - `app/quote_reply.py`、`app/quote_preview_support.py`：确定性回复渲染与报价预览共享安全辅助逻辑。
 - `app/schemas.py`：所有内部API与Agent工具的严格Schema。
-- `app/conversation_agent.py`：自然语言报价事实抽取和受限Agent规划。
+- `app/conversation_agent.py`：自然语言报价事实抽取、迁移期受限Plan，以及极简System Prompt、reasoning和原生tools调用。
+- `app/agent_tool_registry.py`：能力/输入/结果导向的模型工具描述与工具版本。
+- `app/knowledge_base_store.py`：租户知识、会话经验，以及“纠正本轮→审核→启用知识版本”的闭环。
 - `app/vision.py`：图片视觉Schema抽取与归一化。
 - `app/local_catalog.py`、`app/match_candidate_resolver.py`：本地官方影院目录与候选解析。
 - `app/wanda_quote.py`：城市硬边界、联合场次匹配、实时座位、报价规则和诊断。
@@ -66,9 +70,26 @@ V3 服务（FastAPI）
 - `app/wanda_official_api.py`：万达官方HTTP协议与响应归一化。
 - `app/plugin_bridge_store.py`：运行设置、报价策略和买家回复模板。
 
-V3是价格、库存、临时订单、释放状态和报价结果的唯一权威；AI输出只可作为待验证的身份事实。
+V3和插件工具层共同构成价格、库存、临时订单、释放状态、订单状态与副作用门禁的权威边界。模型可自由理解、规划和表达，但不能向高风险工具注入订单号或金额。
 
-## 4. 一次图片核价的数据流
+## 4. 模型主导会话流
+
+```text
+追加式标准messages + 当前权威投影 + 已审核租户知识
+  → v2 completion（reasoning开启，tool_choice=auto）
+  → 自然回复，或原生tool_calls
+  → 工具内验证租户、事实、权限、幂等与副作用
+  → {status, code, summary, facts, missing, retryable}
+  → 回注同一模型会话，由模型继续选择工具、追问或回复
+  → 显式交易事实冲突时回注fact_check_failed并允许模型修正一次
+```
+
+模型循环不调用`guardAgentPlan`、意图正则或`next_actions`。旧`/api/agents/turn`和Plan链仅供迁移期Shadow对照，待真实失败会话回放达标后删除。
+
+运营可在Agent抽查表点击“纠正本轮”。纠正记录绑定原事件、run、模型回复、工具轨迹和版本；只有再次审核通过后才生成当前租户启用的知识条目。
+
+## 5. 一次图片核价的确定性回滚流
+
 
 ```text
 Webhook验签并持久入队
@@ -86,7 +107,7 @@ Webhook验签并持久入队
   → 回复唯一出口发送并登记平台消息ID
 ```
 
-## 5. `temporary_lock_release_unverified` 的含义
+## 6. `temporary_lock_release_unverified` 的含义
 
 该状态不表示“整场会员座都售罄”。它只表示：系统为了读取W+官方活动而临时试价了特定座位，随后已尝试取消，但这些特定座位没有在本轮0/2/5秒实时座位复核中全部重新出现为可售。为避免重复占座或基于不完整证据报价，本轮必须失败关闭。
 
@@ -97,7 +118,7 @@ Webhook验签并持久入队
 - 不允许换另一个账号继续试价，避免依次占用该场其他可售座位。
 - 即使15/30秒后台复核后来确认释放，原报价仍保持失败；买家需要发起新一轮请求。
 
-## 6. 清理与拆分优先级
+## 7. 清理与拆分优先级
 
 ### 已确认可删除
 
@@ -124,7 +145,7 @@ Webhook验签并持久入队
 2. 持久化文件存储最终应替换为具备事务、索引和迁移能力的数据库；迁移前保持单进程唯一写入者。
 3. 删除兼容导出前先统计生产调用者，并保留完整回归测试与独立回滚点。
 
-## 7. 禁止清理的代码
+## 8. 禁止清理的代码
 
 以下看起来重复，但职责不同，不能按文件名直接删除：
 

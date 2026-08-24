@@ -5,16 +5,37 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import datetime
+from time import perf_counter
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 from typing import Any, Final
 
 import httpx
 from fastapi import HTTPException, status
 
-from .schemas import AgentPlan, AgentTurnRequest, QuoteTextFactExtractRequest, QuoteTextFacts
+from .agent_tool_registry import AGENT_TOOL_VERSION, native_tools
+from .schemas import (
+    AgentCompletionRequest,
+    AgentCompletionResponse,
+    AgentCompletionUsage,
+    AgentCompletionVersions,
+    AgentKnowledgeSnapshot,
+    AgentPlan,
+    AgentReasoningResult,
+    AgentTurnRequest,
+    NativeAgentMessage,
+    QuoteTextFactExtractRequest,
+    QuoteTextFacts,
+)
 
 
 PROMPT_VERSION = "wanda-conversation-agent-v3-bounded-status-and-seats"
+NATIVE_PROMPT_VERSION = "wanda-conversation-agent-v2-model-led"
+NATIVE_SYSTEM_PROMPT: Final = """你是店铺的 AI 客服，目标是尽可能独立解决买家的问题。
+
+你拥有完整会话、店铺知识和一组工具。需要获取事实或执行操作时，自行选择并调用工具；工具失败时，根据结果继续分析、重试其他合理方案、向买家补充询问或转人工。
+
+价格、场次、座位、订单和付款状态以工具返回的最新事实为准。回复应自然、简洁，并结合完整上下文，不要重复询问买家已经提供的信息。"""
 QUOTE_FACT_PROMPT_VERSION = "wanda-quote-fact-extractor-v1"
 MODEL_TIMEOUT: Final = httpx.Timeout(60, connect=8)
 MAX_CONCURRENCY: Final = 8
@@ -127,6 +148,86 @@ class ConversationAgentService:
         self._transport = transport
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
+    async def complete(
+        self,
+        request: AgentCompletionRequest,
+        model_settings: Mapping[str, object],
+        knowledge_snapshot: AgentKnowledgeSnapshot | None = None,
+    ) -> AgentCompletionResponse:
+        """Run one native model step; planning remains inside the model/tool loop."""
+        if not model_settings.get("model") or not model_settings.get("api_key"):
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="尚未完成 AI 模型配置")
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS)
+        except TimeoutError as error:
+            raise HTTPException(status_code=429, detail="AI 会话处理繁忙，请稍后重试") from error
+        try:
+            snapshot = knowledge_snapshot or request.knowledge_snapshot
+            configured_context = []
+            for key in ("ai_reply_shop_background", "ai_reply_style"):
+                value = str(model_settings.get(key, "")).strip()
+                if value:
+                    configured_context.append(value)
+            system_content = NATIVE_SYSTEM_PROMPT
+            if configured_context:
+                system_content += "\n\n店铺背景与表达偏好：\n" + "\n".join(configured_context)
+            if snapshot.entries:
+                system_content += "\n\n当前租户已审核知识：\n" + "\n".join(f"- {entry}" for entry in snapshot.entries)
+
+            messages = [{"role": "system", "content": system_content}]
+            messages.extend(message.model_dump(mode="json", exclude_none=True) for message in request.messages)
+            payload: dict[str, Any] = {
+                "model": model_settings["model"],
+                "temperature": min(float(model_settings.get("temperature", 0)), 0.7),
+                "max_tokens": request.reasoning.max_output_tokens,
+                "enable_thinking": request.reasoning.enabled,
+                "messages": messages,
+                "tools": native_tools(request.available_tools),
+                "tool_choice": "auto",
+            }
+            if request.reasoning.enabled:
+                payload["reasoning_effort"] = request.reasoning.effort
+            base_url = str(model_settings["base_url"]).rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url += "/v1"
+            started = perf_counter()
+            response_payload, response_request_id, reasoning_fallback = await self._completion_response(payload, base_url, str(model_settings["api_key"]))
+            latency_ms = max(0, round((perf_counter() - started) * 1000))
+            choice = response_payload["choices"][0]
+            assistant_payload = choice["message"]
+            assistant = NativeAgentMessage.model_validate({
+                "role": "assistant",
+                "content": assistant_payload.get("content"),
+                "tool_calls": assistant_payload.get("tool_calls", []),
+            })
+            usage = response_payload.get("usage", {})
+            return AgentCompletionResponse(
+                assistant=assistant,
+                finish_reason=str(choice.get("finish_reason") or ("tool_calls" if assistant.tool_calls else "stop")),
+                model=str(response_payload.get("model") or model_settings["model"]),
+                versions=AgentCompletionVersions(
+                    prompt=NATIVE_PROMPT_VERSION,
+                    knowledge=snapshot.version,
+                    tools=AGENT_TOOL_VERSION,
+                ),
+                usage=AgentCompletionUsage(
+                    prompt_tokens=_optional_nonnegative_int(usage.get("prompt_tokens")),
+                    completion_tokens=_optional_nonnegative_int(usage.get("completion_tokens")),
+                    total_tokens=_optional_nonnegative_int(usage.get("total_tokens")),
+                ),
+                latency_ms=latency_ms,
+                request_id=response_request_id,
+                reasoning=AgentReasoningResult(
+                    requested=request.reasoning.enabled,
+                    applied=request.reasoning.enabled and reasoning_fallback is None,
+                    fallback_reason=reasoning_fallback,
+                ),
+            )
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            raise HTTPException(status_code=502, detail="模型服务未返回有效原生会话结果") from error
+        finally:
+            self._semaphore.release()
+
     async def extract_quote_facts(self, request: QuoteTextFactExtractRequest, model_settings: Mapping[str, object]) -> QuoteTextFacts:
         if not model_settings.get("model") or not model_settings.get("api_key"):
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="尚未完成 AI 模型配置")
@@ -215,29 +316,49 @@ class ConversationAgentService:
                     raise HTTPException(status_code=502, detail="模型会话计划连续两次未通过安全契约") from error
         raise AssertionError("agent plan retry loop must return or raise")
 
-    async def _completion(self, payload: dict[str, Any], base_url: str, api_key: str) -> str:
+    async def _completion_response(self, payload: dict[str, Any], base_url: str, api_key: str) -> tuple[dict[str, Any], str, str | None]:
         try:
-            async with httpx.AsyncClient(timeout=MODEL_TIMEOUT, transport=self._transport) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(240, connect=8), transport=self._transport) as client:
                 response = await client.post(
                     f"{base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
                     json=payload,
                 )
+                reasoning_fallback: str | None = None
                 if response.status_code == 400 and "enable_thinking" in payload:
-                    compatible_payload = {key: value for key, value in payload.items() if key != "enable_thinking"}
+                    reasoning_fallback = "provider_rejected_reasoning_parameters"
+                    compatible_payload = {key: value for key, value in payload.items() if key not in {"enable_thinking", "reasoning_effort"}}
                     response = await client.post(
                         f"{base_url}/chat/completions",
                         headers={"Authorization": f"Bearer {api_key}"},
                         json=compatible_payload,
                     )
                 response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            result = response.json()
+            if not isinstance(result, dict):
+                raise TypeError("model response is not an object")
+            request_id = str(response.headers.get("x-request-id") or result.get("id") or uuid4().hex)[:200]
+            return result, request_id, reasoning_fallback
+        except httpx.HTTPStatusError as error:
+            raise HTTPException(status_code=502, detail=f"模型服务返回 HTTP {error.response.status_code}") from error
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as error:
+            raise HTTPException(status_code=502, detail="模型服务未返回有效会话结果") from error
+
+    async def _completion(self, payload: dict[str, Any], base_url: str, api_key: str) -> str:
+        result, _, _ = await self._completion_response(payload, base_url, api_key)
+        try:
+            content = result["choices"][0]["message"]["content"]
             if isinstance(content, list):
                 content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
             if not isinstance(content, str):
                 raise TypeError("model content is not text")
             return content
-        except httpx.HTTPStatusError as error:
-            raise HTTPException(status_code=502, detail=f"模型服务返回 HTTP {error.response.status_code}") from error
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as error:
+        except (KeyError, IndexError, TypeError, ValueError) as error:
             raise HTTPException(status_code=502, detail="模型服务未返回有效会话计划") from error
+
+
+def _optional_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    number = int(value) if isinstance(value, (int, float)) else None
+    return number if number is not None and number >= 0 else None

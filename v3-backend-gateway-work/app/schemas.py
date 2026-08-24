@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date as CalendarDate, datetime
 from enum import Enum
+import json
 import re
 from typing import Annotated, Any, Literal
 
@@ -598,3 +599,146 @@ class AgentTurnResponse(BaseModel):
     status: Literal["planned", "failed"]
     plan: AgentPlan | None = None
     failure_code: Annotated[str | None, Field(max_length=100)] = None
+
+
+class NativeToolFunction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
+    arguments: Annotated[str, Field(max_length=16_000)] = "{}"
+
+
+class NativeToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: Annotated[str, Field(min_length=1, max_length=200)]
+    type: Literal["function"] = "function"
+    function: NativeToolFunction
+
+
+class NativeAgentMessage(BaseModel):
+    """OpenAI-compatible message retained without collapsing conversation history."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | list[dict[str, Any]] | None = None
+    tool_calls: Annotated[list[NativeToolCall], Field(max_length=12)] = Field(default_factory=list)
+    tool_call_id: Annotated[str | None, Field(max_length=200)] = None
+    name: Annotated[str | None, Field(max_length=64)] = None
+
+    @model_validator(mode="after")
+    def validate_role_fields(self) -> "NativeAgentMessage":
+        if self.role == "tool" and not self.tool_call_id:
+            raise ValueError("tool messages require tool_call_id")
+        if self.role != "assistant" and self.tool_calls:
+            raise ValueError("only assistant messages may contain tool_calls")
+        if len(str(self.content or "")) > 100_000:
+            raise ValueError("message content is too large")
+        return self
+
+
+class AgentReasoningConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    effort: Literal["low", "medium", "high"] = "medium"
+    max_output_tokens: Annotated[int, Field(ge=256, le=4096)] = 1600
+
+
+class AgentKnowledgeSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Annotated[str, Field(max_length=128)] = ""
+    entries: Annotated[list[str], Field(max_length=100)] = Field(default_factory=list)
+
+    @field_validator("entries")
+    @classmethod
+    def validate_entries(cls, entries: list[str]) -> list[str]:
+        normalized = [str(entry).strip() for entry in entries if str(entry).strip()]
+        if any(len(entry) > 4_000 for entry in normalized) or sum(map(len, normalized)) > 32_000:
+            raise ValueError("knowledge snapshot is too large")
+        return normalized
+
+
+class AgentCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: Annotated[str, Field(min_length=1, max_length=128)]
+    conversation_id: Annotated[str, Field(min_length=1, max_length=240)]
+    run_id: Annotated[str, Field(min_length=1, max_length=240)]
+    messages: Annotated[list[NativeAgentMessage], Field(min_length=1, max_length=200)]
+    available_tools: Annotated[list[str], Field(max_length=32)] = Field(default_factory=list)
+    knowledge_scene: Literal["general", "intake", "quote_followup", "order", "fulfillment", "aftersale"] = "general"
+    knowledge_snapshot: AgentKnowledgeSnapshot = Field(default_factory=AgentKnowledgeSnapshot)
+    reasoning: AgentReasoningConfig = Field(default_factory=AgentReasoningConfig)
+
+    @field_validator("available_tools")
+    @classmethod
+    def unique_tools(cls, tools: list[str]) -> list[str]:
+        from .agent_tool_registry import available_tool_names
+        if len(tools) != len(set(tools)) or any(tool not in available_tool_names() for tool in tools):
+            raise ValueError("available_tools must be unique and registered")
+        return tools
+
+    @model_validator(mode="after")
+    def validate_native_transcript(self) -> "AgentCompletionRequest":
+        if self.knowledge_snapshot.entries or self.knowledge_snapshot.version:
+            raise ValueError("knowledge is loaded by the server")
+        if any(message.role == "system" for message in self.messages):
+            raise ValueError("caller system messages are forbidden")
+        encoded = json.dumps(self.model_dump(mode="json"), ensure_ascii=False).encode("utf-8")
+        if len(encoded) > 1_000_000 or sum(len(str(message.content or "")) for message in self.messages) > 80_000:
+            raise ValueError("agent request exceeds context limits")
+        pending: set[str] = set()
+        completed: set[str] = set()
+        for message in self.messages:
+            if message.role == "assistant":
+                for call in message.tool_calls:
+                    if call.id in pending or call.id in completed:
+                        raise ValueError("duplicate tool call id")
+                    try:
+                        arguments = json.loads(call.function.arguments)
+                    except json.JSONDecodeError as error:
+                        raise ValueError("tool arguments must be JSON") from error
+                    if not isinstance(arguments, dict) or call.function.name not in self.available_tools:
+                        raise ValueError("tool call is not available")
+                    pending.add(call.id)
+            elif message.role == "tool":
+                call_id = str(message.tool_call_id)
+                if call_id not in pending or call_id in completed:
+                    raise ValueError("orphan or duplicate tool result")
+                pending.remove(call_id)
+                completed.add(call_id)
+        if pending:
+            raise ValueError("tool calls require matching results")
+        return self
+
+
+class AgentCompletionVersions(BaseModel):
+    prompt: str
+    knowledge: str
+    tools: str
+
+
+class AgentCompletionUsage(BaseModel):
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+class AgentReasoningResult(BaseModel):
+    requested: bool
+    applied: bool
+    fallback_reason: str | None = None
+
+
+class AgentCompletionResponse(BaseModel):
+    assistant: NativeAgentMessage
+    finish_reason: Annotated[str, Field(max_length=64)]
+    model: Annotated[str, Field(max_length=200)]
+    versions: AgentCompletionVersions
+    usage: AgentCompletionUsage
+    latency_ms: int
+    request_id: Annotated[str, Field(min_length=1, max_length=200)]
+    reasoning: AgentReasoningResult

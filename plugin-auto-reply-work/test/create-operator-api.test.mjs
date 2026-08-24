@@ -40,11 +40,11 @@ test('exposes the complete frozen operator API contract', () => {
   const { api } = harness();
   assert.equal(Object.isFrozen(api), true);
   assert.deepEqual(Object.keys(api).sort(), [
-    'createKnowledgeEntry', 'getAgentCanaryReadiness', 'getAgentOfflineEvaluation', 'getAgentTrace',
+    'createAgentCorrection', 'createKnowledgeEntry', 'getAgentCanaryReadiness', 'getAgentOfflineEvaluation', 'getAgentTrace',
     'getConversationLearningSummary', 'getSettings', 'listAgentEvaluations', 'listAgentHumanComparisons',
-    'listKnowledgeBase', 'listLogs', 'listManualTasks', 'listOperations', 'listOwnedShops',
+    'listCorrections', 'listKnowledgeBase', 'listLogs', 'listManualTasks', 'listOperations', 'listOwnedShops',
     'listQuoteAnalytics', 'listTicketOrders', 'overview', 'resolveManualTask', 'reviewAgentEvaluation',
-    'reviewAgentHumanComparison', 'updateKnowledgeEntry', 'updateManualTask', 'updateSettings',
+    'reviewAgentHumanComparison', 'reviewCorrection', 'updateKnowledgeEntry', 'updateManualTask', 'updateSettings',
     'updateShopEnabled', 'uploadReplyTemplateImage',
   ]);
 });

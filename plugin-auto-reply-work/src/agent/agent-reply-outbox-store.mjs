@@ -37,7 +37,8 @@ function external(entry) {
   return Object.freeze({
     action_id: entry.actionId, run_id: entry.runId, tenant_id: entry.tenantId, mode: entry.mode,
     account_unb: entry.accountUnb, chat_id: entry.chatId, peer_unb: entry.peerUnb,
-    source_message_id: entry.sourceMessageId ?? '', text: entry.text,
+    source_message_id: entry.sourceMessageId ?? '', projection_version: entry.projectionVersion ?? '', reply_provenance: clone(entry.replyProvenance ?? {}),
+    expires_at: Number(entry.expiresAt) || null, text: entry.text,
     status: entry.status, attempts: entry.attempts, available_at: entry.availableAt,
     lease_id: entry.leaseId, lease_until: entry.leaseUntil,
     platform_message_id: entry.platformMessageId, delivery: clone(entry.delivery ?? null), last_error: entry.lastError,
@@ -60,13 +61,19 @@ export class AgentReplyOutboxStore {
     const accountUnb = bounded(input?.accountUnb, 128); const chatId = bounded(input?.chatId, 128); const peerUnb = bounded(input?.peerUnb, 128);
     const sourceMessageId = bounded(input?.sourceMessageId, 240);
     const text = bounded(input?.text, 1_000); const mode = bounded(input?.mode, 16); const delivery = quoteDelivery(input?.delivery);
+    const projectionVersion = bounded(input?.projectionVersion, 128); const expiresAt = Number(input?.expiresAt);
+    const replyProvenance = input?.replyProvenance && typeof input.replyProvenance === 'object' && !Array.isArray(input.replyProvenance) ? clone(input.replyProvenance) : {};
     if (mode !== 'active') throw new TypeError('reply outbox accepts only active agent runs');
     if (!actionId || !runId || !tenantId || !accountUnb || !chatId || !peerUnb || !text) throw new TypeError('invalid agent reply outbox entry');
+    if (replyProvenance.runtime_version === 'wanda-agent-runtime-v37-model-led-native-tools'
+      && (!sourceMessageId || !projectionVersion || !Number.isFinite(expiresAt))) {
+      throw new TypeError('v37 reply requires source message, projection version, provenance, and deadline');
+    }
     return this.#mutate((state) => {
       const existing = state.entries[actionId];
       if (existing) return { created: false, entry: external(existing) };
       const now = this.#now(); const timestamp = new Date(now).toISOString();
-      const entry = { actionId, runId, tenantId, mode, accountUnb, chatId, peerUnb, sourceMessageId, text, delivery, status: 'pending', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, platformMessageId: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
+      const entry = { actionId, runId, tenantId, mode, accountUnb, chatId, peerUnb, sourceMessageId, projectionVersion, replyProvenance, expiresAt: Number.isFinite(expiresAt) ? expiresAt : null, text, delivery, status: 'pending', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, platformMessageId: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
       state.entries[actionId] = entry;
       return { created: true, entry: external(entry) };
     });
@@ -81,6 +88,11 @@ export class AgentReplyOutboxStore {
           entry.status = 'unknown'; entry.leaseId = null; entry.leaseUntil = null; entry.lastError = 'send_result_unknown'; entry.updatedAt = new Date(now).toISOString(); changed = true;
         } else if (entry.status === 'committing' && Number(entry.leaseUntil) <= now) {
           entry.status = 'sent_pending_commit'; entry.availableAt = now; entry.leaseId = null; entry.leaseUntil = null; entry.lastError = 'delivery_commit_lease_expired'; entry.updatedAt = new Date(now).toISOString(); changed = true;
+        }
+      }
+      for (const entry of Object.values(state.entries)) {
+        if (entry.status === 'pending' && Number(entry.expiresAt) > 0 && Number(entry.expiresAt) <= now) {
+          entry.status = 'skipped'; entry.lastError = 'agent_deadline_exceeded'; entry.updatedAt = new Date(now).toISOString(); changed = true;
         }
       }
       const candidate = Object.values(state.entries).filter((entry) => ['pending', 'sent_pending_commit'].includes(entry.status) && entry.availableAt <= now).sort((a, b) => a.availableAt - b.availableAt || a.createdAt.localeCompare(b.createdAt))[0];

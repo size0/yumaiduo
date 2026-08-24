@@ -63,6 +63,35 @@ def test_legacy_knowledge_entries_default_to_general_scene(tmp_path: Path) -> No
     assert entry["scene"] == "general"
 
 
+def test_operator_correction_stays_tenant_scoped_and_only_enters_active_knowledge_after_review(tmp_path: Path) -> None:
+    store = KnowledgeBaseStore(tmp_path / "knowledge.json")
+    payload = {
+        "conversation_id": "tenant-a:shop:chat:buyer", "run_id": "active:event-1", "event_id": "tenant-a:event-1",
+        "buyer_message": "这个场次还能买吗", "assistant_reply": "请转人工", "corrected_answer": "可以先查询当前场次实时状态。",
+        "handling_guidance": "买家追问已有场次时，结合当前会话事实回答，不重复索要已经提供的信息。",
+        "tool_trajectory": [{"tool": "resolve_showtime", "status": "completed"}],
+        "versions": {"model": "reasoning-model", "prompt": "p1", "tools": "t1"},
+    }
+    correction = store.record_correction("tenant-a", payload)
+    assert correction["status"] == "draft"
+    assert store.active("reply", "tenant-a") == []
+    assert store.list_corrections("tenant-b") == []
+
+    approved = store.review_correction("tenant-a", str(correction["id"]), {"status": "approved", "scene": "quote_followup", "reviewer": "operator-1", "revision": 1})
+    knowledge_entry_id = approved["knowledge_entry_id"]
+    assert knowledge_entry_id
+    assert store.active("reply", "tenant-a") == [payload["handling_guidance"]]
+    assert store.active("reply", "tenant-b") == []
+
+    rejected = store.review_correction("tenant-a", str(correction["id"]), {"status": "rejected", "scene": "quote_followup", "reviewer": "operator-2", "revision": 2})
+    assert rejected["knowledge_entry_id"] == knowledge_entry_id
+    assert store.active("reply", "tenant-a") == []
+    reapproved = store.review_correction("tenant-a", str(correction["id"]), {"status": "approved", "scene": "order", "reviewer": "operator-3", "revision": 3})
+    assert reapproved["knowledge_entry_id"] == knowledge_entry_id
+    assert len([entry for entry in store.list("tenant-a") if entry.get("source_correction_id") == correction["id"]]) == 1
+    assert store.active("reply", "tenant-a") == [payload["handling_guidance"]]
+
+
 def test_conversation_experience_endpoint_requires_bridge_auth_and_rejects_sensitive_content(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WANDA_PLUGIN_BRIDGE_KEY", "bridge-secret")
     monkeypatch.setenv("WANDA_KNOWLEDGE_BASE_PATH", str(tmp_path / "knowledge.json"))

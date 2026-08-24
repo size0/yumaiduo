@@ -18,8 +18,11 @@ def test_plugin_bridge_router_owns_expected_operator_endpoints() -> None:
     }
     assert ("GET", "/api/xianyu-plugin/bridge/runtime-settings") in routes
     assert ("PUT", "/api/xianyu-plugin/bridge/agent-canary-approval") in routes
+    assert ("PUT", "/api/xianyu-plugin/bridge/agent-release") in routes
     assert ("PUT", "/api/xianyu-plugin/bridge/quote-policy") in routes
     assert ("POST", "/api/xianyu-plugin/bridge/conversation-experiences") in routes
+    assert ("POST", "/api/xianyu-plugin/bridge/corrections") in routes
+    assert ("PUT", "/api/xianyu-plugin/bridge/corrections/{correction_id}") in routes
 
 
 def test_quote_preview_and_agent_routers_own_ai_execution_endpoints() -> None:
@@ -37,6 +40,7 @@ def test_quote_preview_and_agent_routers_own_ai_execution_endpoints() -> None:
     assert ("POST", "/api/quotes/preview-quote") in quote_routes
     assert ("POST", "/api/quotes/preview-ingest") in quote_routes
     assert ("POST", "/api/agents/turn") in agent_routes
+    assert ("POST", "/api/agents/v2/completions") in agent_routes
     assert ("POST", "/api/replies/preview-ingest") in agent_routes
 
 

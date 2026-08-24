@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -12,7 +13,7 @@ from ..quote_reply import validate_quote_reply_template
 from ..schemas import ConversationExperienceIngestRequest, ModelSettingsUpdate
 
 
-FULL_AGENT_RUNTIME_VERSION = "wanda-agent-runtime-v36-contextual-fallbacks"
+FULL_AGENT_RUNTIME_VERSION = "wanda-agent-runtime-v37-model-led-native-tools"
 
 
 def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
@@ -77,30 +78,11 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
                 continue
             value = payload[field]
             if field == "conversation_agent_mode":
-                if value not in {"off", "shadow", "active"}:
+                if value == "active":
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="agent_release_endpoint_required")
+                if value not in {"off", "shadow"}:
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid conversation_agent_mode")
                 patch[field] = value
-                if value == "active":
-                    # This authenticated operator write is the explicit full
-                    # rollout command. Durable Agent owns all buyer IM turns;
-                    # platform order lifecycle events remain deterministic.
-                    patch.update({
-                        "agent_canary_enabled": True,
-                        "agent_canary_kill_switch": False,
-                        "agent_canary_percentage": 100,
-                        "agent_canary_approved": True,
-                        "agent_canary_runtime_version": FULL_AGENT_RUNTIME_VERSION,
-                        "agent_canary_approved_at": datetime.now(UTC).isoformat(),
-                    })
-                else:
-                    patch.update({
-                        "agent_canary_enabled": False,
-                        "agent_canary_kill_switch": True,
-                        "agent_canary_percentage": 0,
-                        "agent_canary_approved": False,
-                        "agent_canary_runtime_version": "",
-                        "agent_canary_approved_at": None,
-                    })
             elif field == "low_confidence_threshold":
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
@@ -216,6 +198,49 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
     ) -> dict[str, object]:
         return {"settings": patch_runtime_settings(payload)}
 
+    @router.put("/api/xianyu-plugin/bridge/agent-release")
+    async def update_agent_release(
+        payload: dict[str, object] = Body(...),
+        _: None = Depends(require_plugin_bridge_key),
+    ) -> dict[str, object]:
+        action = payload.get("action")
+        if action == "rollback":
+            rolled_back = app.state.plugin_bridge_store.rollback_agent_release()
+            return {"settings": {**bridge_runtime_settings(), **rolled_back}}
+        if action != "activate":
+            raise HTTPException(status_code=422, detail="invalid agent release action")
+        release_id = str(payload.get("release_id", "")).strip()
+        runtime_version = str(payload.get("runtime_version", "")).strip()
+        source_commit = str(payload.get("source_commit", "")).strip().lower()
+        manifest_sha256 = str(payload.get("manifest_sha256", "")).strip().lower()
+        health = payload.get("health")
+        evaluation = payload.get("evaluation")
+        if not release_id or len(release_id) > 160 or runtime_version != FULL_AGENT_RUNTIME_VERSION:
+            raise HTTPException(status_code=422, detail="invalid agent release identity")
+        if not re.fullmatch(r"[a-f0-9]{40}", source_commit) or not re.fullmatch(r"[a-f0-9]{64}", manifest_sha256):
+            raise HTTPException(status_code=422, detail="invalid agent release digest")
+        if payload.get("rollback_verified") is not True or not isinstance(health, dict) or health.get("v3") != runtime_version or health.get("plugin") != runtime_version:
+            raise HTTPException(status_code=422, detail="agent release health evidence incomplete")
+        if not isinstance(evaluation, dict):
+            raise HTTPException(status_code=422, detail="agent release evaluation missing")
+        minimums = {
+            "failure_replay_count": 100, "image_sample_count": 100,
+            "tool_selection_accuracy": 95, "image_full_path_rate": 95, "completion_rate": 95,
+        }
+        if any(float(evaluation.get(field, -1)) < minimum for field, minimum in minimums.items()) or float(evaluation.get("p95_latency_ms", 999_999)) > 60_000:
+            raise HTTPException(status_code=422, detail="agent release evaluation thresholds not met")
+        zero_fields = (
+            "high_risk_actions", "false_transaction_facts", "duplicate_writes", "unknown_result_retries",
+            "cross_tenant_access", "authoritative_inconsistencies", "unsafe_final_replies", "post_deadline_effects",
+        )
+        if any(evaluation.get(field) != 0 for field in zero_fields):
+            raise HTTPException(status_code=422, detail="agent release zero-tolerance metric failed")
+        released = app.state.plugin_bridge_store.activate_agent_release({
+            "release_id": release_id, "runtime_version": runtime_version,
+            "source_commit": source_commit, "manifest_sha256": manifest_sha256,
+        })
+        return {"settings": {**bridge_runtime_settings(), **released}}
+
     @router.put("/api/xianyu-plugin/bridge/agent-canary-approval")
     async def update_agent_canary_approval(
         payload: dict[str, object] = Body(...),
@@ -324,6 +349,45 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
             return {"entry": app.state.knowledge_base_store.update(entry_id, payload, bridge_tenant_id(x_yumaiduo_tenant_id))}
         except KeyError as error:
             raise HTTPException(status_code=404, detail="knowledge entry not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.get("/api/xianyu-plugin/bridge/corrections")
+    async def list_conversation_corrections(
+        x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
+        _: None = Depends(require_plugin_bridge_key),
+    ) -> dict[str, object]:
+        tenant_id = bridge_tenant_id(x_yumaiduo_tenant_id)
+        return {"corrections": app.state.knowledge_base_store.list_corrections(tenant_id)}
+
+    @router.post("/api/xianyu-plugin/bridge/corrections", status_code=201)
+    async def create_conversation_correction(
+        payload: dict[str, object] = Body(...),
+        x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
+        _: None = Depends(require_plugin_bridge_key),
+    ) -> dict[str, object]:
+        try:
+            correction = app.state.knowledge_base_store.record_correction(
+                bridge_tenant_id(x_yumaiduo_tenant_id), payload,
+            )
+            return {"correction": correction}
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.put("/api/xianyu-plugin/bridge/corrections/{correction_id}")
+    async def review_conversation_correction(
+        correction_id: str,
+        payload: dict[str, object] = Body(...),
+        x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
+        _: None = Depends(require_plugin_bridge_key),
+    ) -> dict[str, object]:
+        try:
+            correction = app.state.knowledge_base_store.review_correction(
+                bridge_tenant_id(x_yumaiduo_tenant_id), correction_id, payload,
+            )
+            return {"correction": correction}
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="correction not found") from error
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 

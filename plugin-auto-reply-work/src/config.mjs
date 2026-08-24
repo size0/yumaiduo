@@ -245,6 +245,7 @@ export async function loadConfig({ env = process.env, projectRoot = PROJECT_ROOT
       });
       conversationAgent = Object.freeze({
         url: new URL('/api/agents/turn', ingestUrl).toString(),
+        nativeUrl: new URL('/api/agents/v2/completions', ingestUrl).toString(),
         ingestKey,
       });
     }

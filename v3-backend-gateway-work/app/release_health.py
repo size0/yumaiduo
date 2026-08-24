@@ -7,8 +7,8 @@ from typing import Any, Final
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-EXPECTED_V3_RUNTIME_CONTRACT: Final = "wanda-v3-v19-contextual-agent-fallbacks"
-EXPECTED_AGENT_RUNTIME_VERSION: Final = "wanda-agent-runtime-v36-contextual-fallbacks"
+EXPECTED_V3_RUNTIME_CONTRACT: Final = "wanda-agent-runtime-v37-model-led-native-tools"
+EXPECTED_AGENT_RUNTIME_VERSION: Final = "wanda-agent-runtime-v37-model-led-native-tools"
 MAX_HEALTH_RESPONSE_BYTES: Final = 64 * 1024
 
 

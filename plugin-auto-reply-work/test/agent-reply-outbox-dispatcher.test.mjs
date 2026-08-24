@@ -32,6 +32,15 @@ test('reply outbox dispatcher sends one claimed active reply and records its pla
   assert.equal(await dispatcher.tick(), null);
 });
 
+test('reply outbox rejects a superseded projection before platform send', async () => {
+  const store = await fixture();
+  let sends = 0;
+  const dispatcher = createAgentReplyOutboxDispatcher({ store, async validateReply() { return false; }, async executeReply() { sends += 1; } });
+  const result = await dispatcher.tick();
+  assert.equal(result.reason, 'reply_projection_superseded');
+  assert.equal(sends, 0);
+});
+
 test('quote outbox commits authoritative quote state only after a successful platform send', async () => {
   const store = new AgentReplyOutboxStore(join(await mkdtemp(join(tmpdir(), 'wanda-agent-quote-dispatch-')), 'outbox.json'));
   await store.initialize();

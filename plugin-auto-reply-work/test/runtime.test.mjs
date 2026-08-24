@@ -111,6 +111,7 @@ test('quote preview configuration uses the V3 recognize and quote endpoints', as
   assert.equal(config.quotePreview.quoteUrl, 'http://127.0.0.1:8010/api/quotes/preview-quote');
   assert.equal('ingestUrl' in config.quotePreview, false);
   assert.equal(config.conversationAgent.url, 'http://127.0.0.1:8010/api/agents/turn');
+  assert.equal(config.conversationAgent.nativeUrl, 'http://127.0.0.1:8010/api/agents/v2/completions');
 });
 
 test('retired external advisory environment variables do not create a secondary provider', async () => {

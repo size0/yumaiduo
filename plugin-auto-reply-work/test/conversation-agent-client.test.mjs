@@ -35,6 +35,36 @@ test('conversation agent client sends only bounded state and returns a typed pla
   ]);
 });
 
+test('conversation agent client forwards native standard messages and tool calls without planner JSON', async () => {
+  let sent;
+  const client = createConversationAgentClient({ conversationAgent: {
+    url: 'http://127.0.0.1:8010/api/agents/turn',
+    nativeUrl: 'http://127.0.0.1:8010/api/agents/v2/completions',
+    ingestKey: 'a'.repeat(32),
+  } }, {
+    async fetchImpl(url, options) {
+      assert.equal(String(url), 'http://127.0.0.1:8010/api/agents/v2/completions');
+      sent = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        assistant: { role: 'assistant', content: '', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_active_quote', arguments: '{}' } }] },
+        finish_reason: 'tool_calls', model: 'reasoning-model',
+        versions: { prompt: 'p1', knowledge: 'k1', tools: 't1' },
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }, latency_ms: 8, request_id: 'request-1',
+      }), { status: 200 });
+    },
+  });
+  const result = await client.complete({
+    tenant_id: 'tenant-1', conversation_id: 'conversation-1', run_id: 'run-1',
+    messages: [{ role: 'user', content: '这个多少钱' }],
+    available_tools: ['read_active_quote'], reasoning: { enabled: true, effort: 'high', max_output_tokens: 1600 },
+  });
+  assert.deepEqual(sent.messages, [{ role: 'user', content: '这个多少钱' }]);
+  assert.deepEqual(sent.available_tools, ['read_active_quote']);
+  assert.equal(sent.reasoning.max_output_tokens, 1600);
+  assert.equal(result.assistant.tool_calls[0].function.name, 'read_active_quote');
+  assert.equal(result.request_id, 'request-1');
+});
+
 test('conversation agent client fails closed on invalid or failed backend responses', async () => {
   const failed = createConversationAgentClient({ conversationAgent: { url: 'http://127.0.0.1/api/agents/turn', ingestKey: 'a'.repeat(32) } }, {
     async fetchImpl() { return new Response(JSON.stringify({ status: 'failed', failure_code: 'model_unavailable' }), { status: 200 }); },

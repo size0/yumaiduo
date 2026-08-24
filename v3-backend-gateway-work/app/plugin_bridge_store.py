@@ -65,6 +65,7 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
     "agent_canary_approved": False,
     "agent_canary_runtime_version": "",
     "agent_canary_approved_at": None,
+    "agent_v2_strict_tenant_validation": False,
     "ai_reply_system_prompt": "仅基于已确认的会话事实和已启用知识库回复；不编造价格、库存、订单或承诺。只追问当前缺失的最少字段，不得要求买家重复已提供的信息；文字座位仅作偏好，不得声称正在核对其库存或逐座价格。",
     "ai_reply_shop_background": "",
     "ai_reply_precautions": "",
@@ -140,6 +141,60 @@ class PluginBridgeStore:
             current = _merged_runtime(data.get("runtime", {}))
             current.update(patch)
             current["updated_at"] = datetime.now(UTC).isoformat()
+            data["runtime"] = current
+            self._write_unlocked(data)
+            return current.copy()
+
+    def activate_agent_release(self, release: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            data = self._read_unlocked()
+            current = _merged_runtime(data.get("runtime", {}))
+            release_id = str(release["release_id"])
+            if current.get("agent_release_id") == release_id and current.get("conversation_agent_mode") == "active":
+                return current.copy()
+            snapshot_fields = (
+                "conversation_agent_mode", "agent_canary_enabled", "agent_canary_kill_switch",
+                "agent_canary_percentage", "agent_canary_approved", "agent_canary_runtime_version",
+                "agent_canary_approved_at", "agent_v2_strict_tenant_validation",
+            )
+            data["agent_release_snapshot"] = {field: current.get(field) for field in snapshot_fields}
+            now = datetime.now(UTC).isoformat()
+            current.update({
+                "conversation_agent_mode": "active",
+                "agent_canary_enabled": True,
+                "agent_canary_kill_switch": False,
+                "agent_canary_percentage": 100,
+                "agent_canary_approved": True,
+                "agent_canary_runtime_version": str(release["runtime_version"]),
+                "agent_canary_approved_at": now,
+                "agent_v2_strict_tenant_validation": True,
+                "agent_release_id": release_id,
+                "agent_release_source_commit": str(release["source_commit"]),
+                "agent_release_manifest_sha256": str(release["manifest_sha256"]),
+                "agent_release_activated_at": now,
+                "updated_at": now,
+            })
+            data["runtime"] = current
+            self._write_unlocked(data)
+            return current.copy()
+
+    def rollback_agent_release(self) -> dict[str, Any]:
+        with self._lock:
+            data = self._read_unlocked()
+            current = _merged_runtime(data.get("runtime", {}))
+            snapshot = data.get("agent_release_snapshot")
+            if isinstance(snapshot, dict):
+                current.update(snapshot)
+            current.update({
+                "conversation_agent_mode": "shadow",
+                "agent_canary_enabled": False,
+                "agent_canary_kill_switch": True,
+                "agent_canary_percentage": 0,
+                "agent_canary_approved": False,
+                "agent_v2_strict_tenant_validation": True,
+                "agent_release_rolled_back_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
+            })
             data["runtime"] = current
             self._write_unlocked(data)
             return current.copy()

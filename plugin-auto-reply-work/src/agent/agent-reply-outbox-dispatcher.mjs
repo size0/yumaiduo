@@ -1,4 +1,4 @@
-export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDelivery = null, logger = console, leaseMs = 30_000 } = {}) {
+export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDelivery = null, validateReply = null, logger = console, leaseMs = 30_000 } = {}) {
   if (!store || typeof executeReply !== 'function') throw new TypeError('agent reply outbox dispatcher dependencies are required');
 
   async function tick() {
@@ -21,6 +21,10 @@ export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDe
         }
       }
     }
+    if (typeof validateReply === 'function' && await validateReply(entry) !== true) {
+      await store.markSkipped(entry.action_id, entry.lease_id, 'reply_projection_superseded');
+      return { status: 'skipped', action_id: entry.action_id, reason: 'reply_projection_superseded' };
+    }
     const action = {
       action_id: entry.action_id,
       kind: 'reply',
@@ -31,6 +35,7 @@ export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDe
       source_message_id: entry.source_message_id,
       text: entry.text,
       reply_origin: 'conversation_agent_outbox',
+      reply_provenance: entry.reply_provenance,
     };
     try {
       const result = await executeReply(action);
