@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v16-vision-consistency-gates",
+        "runtime_contract": "wanda-v3-v17-full-agent-owner",
     }
 
 
@@ -422,7 +422,7 @@ def test_plugin_bridge_settings_and_quote_policy_require_the_bridge_key(tmp_path
     }
 
 
-def test_plugin_bridge_rejects_active_agent_until_durable_execution_owner_is_ready(tmp_path: Path, monkeypatch) -> None:
+def test_plugin_bridge_explicit_active_mode_enables_full_durable_agent_owner(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WANDA_PLUGIN_BRIDGE_KEY", "test-bridge-key")
     client = TestClient(create_app(plugin_bridge_store=PluginBridgeStore(tmp_path / "plugin_bridge_settings.json")))
     response = client.put(
@@ -430,16 +430,16 @@ def test_plugin_bridge_rejects_active_agent_until_durable_execution_owner_is_rea
         headers={"X-Plugin-Bridge-Key": "test-bridge-key"},
         json={"conversation_agent_mode": "active"},
     )
-    assert response.status_code == 422
-    assert response.json()["detail"] == "conversation_agent_active_not_ready"
-    current = client.get(
-        "/api/xianyu-plugin/bridge/settings",
-        headers={"X-Plugin-Bridge-Key": "test-bridge-key"},
-        params={"account_unb": "shop-1"},
-    )
-    assert current.status_code == 200
-    assert current.json()["settings"]["conversation_agent_mode"] == "shadow"
-    assert current.json()["settings"]["execution_owner"] == "deterministic"
+    assert response.status_code == 200
+    settings = response.json()["settings"]
+    assert settings["conversation_agent_mode"] == "active"
+    assert settings["conversation_agent_active_ready"] is True
+    assert settings["execution_owner"] == "agent"
+    assert settings["agent_canary_enabled"] is True
+    assert settings["agent_canary_kill_switch"] is False
+    assert settings["agent_canary_percentage"] == 100
+    assert settings["agent_canary_approved"] is True
+    assert settings["agent_canary_runtime_version"] == "wanda-agent-runtime-v34-full-active"
 
 
 def test_agent_canary_approval_is_independent_fail_closed_and_revocable(tmp_path: Path, monkeypatch) -> None:

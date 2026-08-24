@@ -7,8 +7,8 @@ from typing import Any, Final
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-EXPECTED_V3_RUNTIME_CONTRACT: Final = "wanda-v3-v16-vision-consistency-gates"
-EXPECTED_AGENT_RUNTIME_VERSION: Final = "wanda-agent-runtime-v33-shadow-evaluation-switch"
+EXPECTED_V3_RUNTIME_CONTRACT: Final = "wanda-v3-v17-full-agent-owner"
+EXPECTED_AGENT_RUNTIME_VERSION: Final = "wanda-agent-runtime-v34-full-active"
 MAX_HEALTH_RESPONSE_BYTES: Final = 64 * 1024
 
 

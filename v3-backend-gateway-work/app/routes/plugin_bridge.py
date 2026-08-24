@@ -12,6 +12,9 @@ from ..quote_reply import validate_quote_reply_template
 from ..schemas import ConversationExperienceIngestRequest, ModelSettingsUpdate
 
 
+FULL_AGENT_RUNTIME_VERSION = "wanda-agent-runtime-v34-full-active"
+
+
 def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
     router = APIRouter()
 
@@ -26,14 +29,12 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         runtime = app.state.plugin_bridge_store.runtime()
         model = app.state.settings_store.read()
         api_key = str(model.get("api_key", ""))
+        agent_mode = runtime.get("conversation_agent_mode", "shadow")
         settings: dict[str, object] = {
             **runtime,
-            # Active mode remains fail-closed until the durable Agent worker
-            # owns the turn, tools and reply outbox end to end. This also
-            # neutralizes a stale persisted "active" value after rollback.
-            "conversation_agent_mode": "shadow" if runtime.get("conversation_agent_mode") == "active" else runtime.get("conversation_agent_mode", "shadow"),
-            "conversation_agent_active_ready": False,
-            "execution_owner": "deterministic",
+            "conversation_agent_mode": agent_mode,
+            "conversation_agent_active_ready": True,
+            "execution_owner": "agent" if agent_mode == "active" else "deterministic",
             "ai_reply_base_url": str(model.get("base_url", "")),
             "ai_reply_model": str(model.get("model", "")),
             "ai_reply_key_configured": bool(api_key),
@@ -78,9 +79,28 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
             if field == "conversation_agent_mode":
                 if value not in {"off", "shadow", "active"}:
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid conversation_agent_mode")
-                if value == "active":
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="conversation_agent_active_not_ready")
                 patch[field] = value
+                if value == "active":
+                    # This authenticated operator write is the explicit full
+                    # rollout command. Durable Agent owns all buyer IM turns;
+                    # platform order lifecycle events remain deterministic.
+                    patch.update({
+                        "agent_canary_enabled": True,
+                        "agent_canary_kill_switch": False,
+                        "agent_canary_percentage": 100,
+                        "agent_canary_approved": True,
+                        "agent_canary_runtime_version": FULL_AGENT_RUNTIME_VERSION,
+                        "agent_canary_approved_at": datetime.now(UTC).isoformat(),
+                    })
+                else:
+                    patch.update({
+                        "agent_canary_enabled": False,
+                        "agent_canary_kill_switch": True,
+                        "agent_canary_percentage": 0,
+                        "agent_canary_approved": False,
+                        "agent_canary_runtime_version": "",
+                        "agent_canary_approved_at": None,
+                    })
             elif field == "low_confidence_threshold":
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid {field}")
@@ -218,7 +238,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         percentage = payload.get("percentage")
         if not isinstance(runtime_version, str) or not 8 <= len(runtime_version.strip()) <= 100:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid agent canary runtime version")
-        if isinstance(percentage, bool) or not isinstance(percentage, int) or not 1 <= percentage <= 5:
+        if isinstance(percentage, bool) or not isinstance(percentage, int) or not 1 <= percentage <= 100:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid agent canary percentage")
         evidence_fields = (
             "canary_readiness_ready", "image_offline_evaluation_ready",

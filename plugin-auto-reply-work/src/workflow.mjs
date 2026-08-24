@@ -1173,7 +1173,7 @@ export function createWorkflow({
       execution_owner: executionOwner,
       agent_canary_enabled: settings.agent_canary_enabled === true,
       agent_canary_kill_switch: settings.agent_canary_kill_switch !== false,
-      agent_canary_percentage: boundedInteger(settings.agent_canary_percentage, 1, 5, 0),
+      agent_canary_percentage: boundedInteger(settings.agent_canary_percentage, 1, 100, 0),
       agent_canary_approved: settings.agent_canary_approved === true,
       agent_canary_runtime_version: String(settings.agent_canary_runtime_version ?? '').trim().slice(0, 100),
       ai_only_mode_enabled: settings.ai_only_mode_enabled === true,

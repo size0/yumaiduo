@@ -2188,6 +2188,28 @@ test('durable active owner schedules a low-risk turn and completes the business 
   assert.equal(completion.agent_run_scheduled, true);
 });
 
+test('approved full Agent rollout schedules every buyer message including screenshots', async () => {
+  const scheduled = [];
+  const { workflow, calls } = harness({
+    runtimeSettings: {
+      automation_enabled: true, ai_reply_enabled: true, conversation_agent_mode: 'active', execution_owner: 'agent',
+      ...approvedCanarySettings, agent_canary_percentage: 100,
+    },
+    shadowAgentScheduler: { async schedule(envelope, options) { scheduled.push([envelope.id, options]); } },
+    conversationAgentPlanner: { async plan() { throw new Error('must run in durable Agent worker'); } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    autoReplyEnabled: true,
+  });
+  await workflow.processClaimed(record({
+    id: 'evt-full-agent-image', tenantId: 'tenant-1', event: 'im.message.received', ts: Date.now(),
+    payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', imageUrls: ['https://img.alicdn.com/seat.png'], content: '这场两张多少钱' },
+  }));
+  assert.equal(scheduled[0][0], 'evt-full-agent-image');
+  assert.equal(scheduled[0][1].mode, 'active');
+  assert.equal(calls.find(([name]) => name === 'complete')[3].execution_owner, 'agent');
+  assert.equal(calls.some(([name]) => name === 'send'), false);
+});
+
 test('durable active owner may schedule an order-status turn only when a linked unpaid order exists', async () => {
   const scheduled = [];
   const eventId = selectedCanaryEventId('evt-active-order-read');

@@ -11,8 +11,8 @@ sys.path.insert(0, str(REPOSITORY / "v3-backend-gateway-work"))
 from app.release_bundle import verify_component_archive
 
 EXPECTED_CONTRACTS = {
-    "v3": "wanda-v3-v16-vision-consistency-gates",
-    "plugin": "wanda-agent-runtime-v33-shadow-evaluation-switch",
+    "v3": "wanda-v3-v17-full-agent-owner",
+    "plugin": "wanda-agent-runtime-v34-full-active",
 }
 
 

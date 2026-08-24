@@ -440,16 +440,11 @@ function toReplyHistoryMessage(message, source = 'unknown') {
   };
 }
 
-function isDurableActiveLowRiskTurn(envelope, quoteContext) {
-  if (firstImageUrl(envelope?.payload)) return false;
-  const facts = quoteContext?.facts ?? {};
-  if (hasActiveQuote(facts)) return false;
-  const stage = String(facts.stage ?? '');
-  if (['paid', 'paid_manual_delivery', 'ticket_issued', 'ticket_sent', 'fulfillment_exception', 'exception_review'].includes(stage)) return false;
-  const message = String(envelope?.payload?.content ?? envelope?.payload?.text ?? '').replace(/\s+/gu, '').trim();
-  if (facts.order_id) return /(?:订单|拍下|付款|支付|改价|改好|进度|状态|出票|发货)/u.test(message);
-  if (['quoted', 'quote_confirmed', 'waiting_payment'].includes(stage)) return false;
-  return /^(?:你好|您好|在吗|怎么购买|怎么买票|图片怎么发|需要发什么|要提供什么|购买流程|怎么下单)[？?。!！]*$/u.test(message);
+function isDurableActiveLowRiskTurn(envelope) {
+  // Full Agent owns every real buyer IM turn. Platform lifecycle events remain
+  // on the deterministic transaction worker, and known system notices are
+  // discarded before they can become an Agent prompt.
+  return envelope?.event === 'im.message.received' && !isPlatformSystemMessage(envelope?.payload ?? {});
 }
 
 function isPlatformSystemMessage(payload = {}) {

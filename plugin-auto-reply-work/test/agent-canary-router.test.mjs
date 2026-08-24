@@ -23,10 +23,19 @@ test('canary defaults to zero traffic and fails closed on every missing gate', (
   const base = { tenantId: 'tenant-1', eventId: selectedEventId(), runtimeVersion: version, eligible: true };
   assert.equal(agentCanaryDecision({ ...base, settings: {} }).reason, 'kill_switch_enabled');
   assert.equal(agentCanaryDecision({ ...base, settings: { ...approved, agent_canary_enabled: false } }).selected, false);
-  assert.equal(agentCanaryDecision({ ...base, settings: { ...approved, agent_canary_percentage: 6 } }).reason, 'invalid_or_zero_percentage');
+  assert.equal(agentCanaryDecision({ ...base, settings: { ...approved, agent_canary_percentage: 101 } }).reason, 'invalid_or_zero_percentage');
   assert.equal(agentCanaryDecision({ ...base, settings: { ...approved, agent_canary_approved: false } }).reason, 'approval_missing');
   assert.equal(agentCanaryDecision({ ...base, settings: { ...approved, agent_canary_runtime_version: 'old' } }).reason, 'runtime_version_mismatch');
   assert.equal(agentCanaryDecision({ ...base, settings: approved, eligible: false }).reason, 'turn_not_low_risk');
+});
+
+test('approved full rollout selects every eligible event', () => {
+  const decision = agentCanaryDecision({
+    settings: { ...approved, agent_canary_percentage: 100 },
+    tenantId: 'tenant-1', eventId: 'any-event', runtimeVersion: version, eligible: true,
+  });
+  assert.equal(decision.selected, true);
+  assert.equal(decision.percentage, 100);
 });
 
 test('approved five-percent canary uses a stable tenant and event bucket', () => {

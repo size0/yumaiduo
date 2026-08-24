@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 function boundedPercent(value) {
   const number = Number(value);
-  return Number.isInteger(number) && number >= 1 && number <= 5 ? number : 0;
+  return Number.isInteger(number) && number >= 1 && number <= 100 ? number : 0;
 }
 
 export function agentCanaryBucket(tenantId, eventId) {
