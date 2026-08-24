@@ -60,7 +60,9 @@ test('local UI preview serves assets and tenant-scoped API without exposing a se
   assert.equal(page.status, 200);
   assert.doesNotMatch(page.headers.get('content-security-policy') ?? '', /frame-ancestors/u);
   const pageHtml = await page.text();
-  assert.match(pageHtml, /人工回复，系统守住交易边界/u);
+  assert.match(pageHtml, /万达电影票 AI 客服/u);
+  assert.match(pageHtml, /id="knowledge-base-form"/u);
+  assert.match(pageHtml, /仅“已审核 \+ 已启用”的条目会提供给 AI/u);
   assert.doesNotMatch(pageHtml, /reference-run|待报价预览|闲鱼改价金额核验/u);
 
   const retiredSettingsPage = await fetch(`http://127.0.0.1:${port}/ui/settings`);
