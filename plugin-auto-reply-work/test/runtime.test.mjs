@@ -50,6 +50,8 @@ async function registeredRuntime(config, clientCalls = []) {
 test('configuration validates required secrets and the fixed manifest contract', async () => {
   const config = await loadConfig({ env: validEnv, manifest });
   assert.equal(config.manifest.id, 'wanda-seat-autoquote');
+  assert.equal(config.manifest.version, '1.0.0');
+  assert.equal(config.manifest.name, '万达电影票 AI 客服 V4');
   assert.equal(config.webhookAckTimeoutMs, 4_500);
   assert.deepEqual(config.manifest.permissions, [
     'order.read',
