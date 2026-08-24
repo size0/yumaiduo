@@ -449,7 +449,7 @@ function isDurableActiveLowRiskTurn(envelope) {
 
 function isPlatformSystemMessage(payload = {}) {
   const content = String(payload.content ?? payload.text ?? '').replace(/\s+/gu, '').trim();
-  return /^(?:买家已确认收货[，,]?交易成功|交易已关闭|订单已关闭|你关闭了订单[，,]?钱款已原路退返|快给ta一个评价吧[～~]?|我完成了评价|你已发货|你人真不错[，,]?送你闲鱼小红花)$/u.test(content)
+  return /^(?:买家已确认收货[，,]?交易成功|交易已关闭|订单已关闭|你关闭了订单[，,]?钱款已原路退返|快给ta一个评价吧[～~]?|我完成了评价|你已发货|卖家已发货|你人真不错[，,]?送你闲鱼小红花|卖家人不错[？?]?送ta闲鱼小红花|请问您想咨询闲鱼放心充的什么问题呢[？?]?|请稍等[，,]?小闲鱼正在努力工作中|小蜜消息)$/iu.test(content)
     || /^不想宝贝被砍价\?.*message_no_bargain/iu.test(content);
 }
 

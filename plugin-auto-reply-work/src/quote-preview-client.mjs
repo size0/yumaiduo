@@ -353,7 +353,12 @@ export function createQuotePreviewClient(config, { fetchImpl = globalThis.fetch,
     return result;
   }
 
-  return Object.freeze({ recognize, resolveShowtime, resolveCandidates: resolveMatchCandidates, quote, availableSeats, capture });
+  // The V4 Agent uses this explicit adapter name to make its transaction
+  // boundary unambiguous: the request goes to the authenticated V3 endpoint,
+  // whose quote service talks directly to Wanda. Legacy deterministic callers
+  // retain `quote` during migration, but the Agent does not route through them.
+  const quoteDirect = quote;
+  return Object.freeze({ recognize, resolveShowtime, resolveCandidates: resolveMatchCandidates, quote, quoteDirect, availableSeats, capture });
 }
 
 function previewHeaders(ingestKey) {

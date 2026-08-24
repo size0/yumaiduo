@@ -319,6 +319,30 @@ test('bounded quote progress may send after an earlier message from the same plu
   assert.equal(sends, 1);
 });
 
+test('Agent Outbox verified quote may follow an earlier plugin progress message', async () => {
+  let sends = 0;
+  const executor = createActionExecutor({
+    messageRegistry: registry(['plugin-progress-1']),
+    coreFor: () => ({ im: {
+      listMessages: async () => ({ items: [
+        { direction: 'outbound', messageId: 'plugin-progress-1', content: '正在实时核价，请稍候。' },
+        { direction: 'inbound', messageId: 'buyer-source-1', content: '[图片]' },
+      ] }),
+      sendMessage: async () => { sends += 1; return { messageId: 'plugin-quote-1' }; },
+    } }),
+  });
+  const result = await executor.execute({
+    ...replyAction(),
+    source_message_id: 'buyer-source-1',
+    reply_origin: 'conversation_agent_outbox',
+    allow_plugin_followup: true,
+    delivery_type: 'quote',
+    text: '实时单价50.00元/张，1张合计50.00元。',
+  });
+  assert.deepEqual(result, { status: 'succeeded', message_id: 'plugin-quote-1' });
+  assert.equal(sends, 1);
+});
+
 test('verified quote follow-up may send after the recognition message from the same plugin', async () => {
   let sends = 0;
   const executor = createActionExecutor({

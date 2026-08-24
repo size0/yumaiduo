@@ -48,14 +48,17 @@ test('quote outbox commits authoritative quote state only after a successful pla
     actionId: 'active:quote:reply', runId: 'active:quote', tenantId: 'tenant-1', mode: 'active', accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', text: '权威报价',
     delivery: { type: 'quote', unit_quote_cents: 5000, total_quote_cents: 10000, ticket_count: 2, pricing_rule_version: 'quote-policy-test', cinema: '测试万达' },
   });
-  let sends = 0; const commits = [];
+  let sends = 0; const commits = []; const actions = [];
   const dispatcher = createAgentReplyOutboxDispatcher({
     store,
-    async executeReply() { sends += 1; return { status: 'succeeded', message_id: 'platform-quote-1' }; },
+    async executeReply(action) { actions.push(action); sends += 1; return { status: 'succeeded', message_id: 'platform-quote-1' }; },
     async commitDelivery(entry) { commits.push(entry); },
   });
   assert.equal((await dispatcher.tick()).status, 'sent_pending_commit');
   assert.equal(sends, 1); assert.equal(commits.length, 0);
+  assert.equal(actions[0].reply_origin, 'conversation_agent_outbox');
+  assert.equal(actions[0].allow_plugin_followup, true);
+  assert.equal(actions[0].delivery_type, 'quote');
   assert.equal((await dispatcher.tick()).status, 'sent');
   assert.equal(sends, 1); assert.equal(commits.length, 1);
   assert.equal(commits[0].platform_message_id, 'platform-quote-1');

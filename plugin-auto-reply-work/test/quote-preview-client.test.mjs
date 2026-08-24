@@ -38,7 +38,7 @@ test('quote preview client sends only a masked buyer label and never a reply add
   });
 });
 
-test('quote preview client recognizes a seat map before it asks the realtime quote endpoint', async () => {
+test('quote preview client recognizes a seat map before its direct Wanda quote adapter', async () => {
   const requests = [];
   const client = createQuotePreviewClient({
     quotePreview: {
@@ -76,7 +76,7 @@ test('quote preview client recognizes a seat map before it asks the realtime quo
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, 'http://127.0.0.1:8010/api/quotes/preview-recognize');
 
-  const quote = await client.quote(recognized);
+  const quote = await client.quoteDirect(recognized);
   assert.equal(quote.status, 'preview_ready');
   assert.equal(quote.reply_text, '※【北京的】| 北京万达影城通州店\n电影：奥德赛\n影厅：5号厅\n场次：2026-08-18 19:30-22:10\n\n62.90元/张，1张合计62.90元。');
   assert.equal(requests.length, 2);

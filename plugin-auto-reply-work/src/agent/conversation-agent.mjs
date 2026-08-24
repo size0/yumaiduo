@@ -25,6 +25,9 @@ function safeObservation(value, tool) {
     facts: Object.freeze(facts),
     authoritative_reply: String(input.authoritative_reply ?? '').trim().slice(0, 1_000),
     next_actions: Array.isArray(input.next_actions) ? input.next_actions.slice(0, 8).map((item) => String(item).slice(0, 64)) : [],
+    code: String(input.code ?? input.stop_reason ?? '').trim().slice(0, 100),
+    missing: Array.isArray(input.missing) ? input.missing.slice(0, 20).map((item) => String(item).slice(0, 100)) : [],
+    retryable: input.retryable === true,
     stop_reason: String(input.stop_reason ?? '').trim().slice(0, 100) || null,
   });
 }

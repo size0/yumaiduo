@@ -318,7 +318,7 @@ test('shadow and evaluation write-shaped plans remain externally side-effect-fre
         quotePreviewClient: {
           async recognize() { throw new Error(`${mode} must not recognize again`); },
           async resolveShowtime() { throw new Error(`${mode} must not resolve showtimes`); },
-          async quote() { throw new Error(`${mode} must not quote again`); },
+          async quoteDirect() { throw new Error(`${mode} must not quote again`); },
         },
       });
       const scheduled = await runtime.schedule(preferenceEnvelope, { mode });
@@ -624,7 +624,7 @@ test('Active W+ seat lookup uses the read-only realtime endpoint with a system-p
     getSettings: async () => withRelease({ quote_enabled: true }),
     quotePreviewClient: {
       async availableSeats(input) { calls.push(input); return { row: 8, seats: ['8排10座', '8排11座'], available_count: 2, wplus_offer_available: true, matched_cinema_name: '测试万达影城' }; },
-      async quote() { throw new Error('seat lookup must not start a temporary price probe'); },
+      async quoteDirect() { throw new Error('seat lookup must not start a temporary price probe'); },
     },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -693,7 +693,7 @@ test('Active text-only W+ question resolves identity then reads all current W+ s
       async recognize(input) { calls.push(['recognize', input.payload.content]); return { status: 'recognized', tenant_id: 'tenant-1', recognition, text_quote: true }; },
       async resolveShowtime(input) { calls.push(['resolve', input.recognition]); return { ...input, status: 'resolved', recognition }; },
       async availableSeats(input) { calls.push(['seats', input]); return { row: null, seats: ['8排10座', '8排11座'], available_count: 2, wplus_offer_available: true, matched_cinema_name: '晋江万达广场店' }; },
-      async quote() { throw new Error('availability lookup must not create a temporary price probe'); },
+      async quoteDirect() { throw new Error('availability lookup must not create a temporary price probe'); },
     },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -743,13 +743,13 @@ test('durable active image turn invokes real recognition, read-only resolution, 
     quotePreviewClient: {
       async recognize(input) { calls.push(['recognize', input.id]); return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 }, hand_drawn_circle: { exists: true } } }; },
       async resolveShowtime(input) { calls.push(['resolve', input.recognition.cinema]); return { ...input, status: 'resolved' }; },
-      async quote(input) { calls.push(['quote', input.status]); return { status: 'preview_ready', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1, pricing_rule_version: 'quote-policy-test', pricing_account_ref: 'a'.repeat(32), recognition: input.recognition, reply_text: '实时单价50.00元/张，1张合计50.00元。' }; },
+      async quoteDirect(input) { calls.push(['quoteDirect', input.status]); return { status: 'preview_ready', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1, pricing_rule_version: 'quote-policy-test', pricing_account_ref: 'a'.repeat(32), recognition: input.recognition, reply_text: '实时单价50.00元/张，1张合计50.00元。' }; },
     },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
   await runtime.schedule(envelope, { mode: 'active' });
   await runtime.tick();
-  assert.deepEqual(calls, [['recognize', 'event-1'], ['resolve', '测试万达'], ['quote', 'resolved']]);
+  assert.deepEqual(calls, [['recognize', 'event-1'], ['resolve', '测试万达'], ['quoteDirect', 'resolved']]);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].text, '实时单价50.00元/张，1张合计50.00元。\n接受本次报价请回复“确认”。');
   assert.doesNotMatch(queued[0].text, /模型报价不得采用/u);
@@ -763,6 +763,35 @@ test('durable active image turn invokes real recognition, read-only resolution, 
   assert.deepEqual(run.observations.map((item) => item.tool), ['recognize_image', 'resolve_showtime', 'quote_realtime']);
   assert.equal(run.result.reason, 'authoritative_tool_response');
   assert.equal(run.result.authoritative_reply_used, true);
+});
+
+test('direct Wanda transport failure is recorded with a stable non-retryable observation', async () => {
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-direct-failure-')), 'runs.json'));
+  await store.initialize();
+  const plans = ['recognize_image', 'resolve_showtime', 'quote_realtime'].map((action) => ({
+    intent: '选座核价', confidence: 0.99, goal: '取得权威报价', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '按工具顺序执行',
+  }));
+  let quoteExecutions = 0;
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner: { async plan() { return plans.shift(); } }, getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
+    quotePreviewClient: {
+      async recognize() { return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 } } }; },
+      async resolveShowtime(input) { return { ...input, status: 'resolved' }; },
+      async quoteDirect() { quoteExecutions += 1; const error = new Error('upstream timeout'); error.code = 'ETIMEDOUT'; throw error; },
+    },
+    replyOutboxStore: { async enqueue() { return { created: true }; } },
+  });
+  await runtime.schedule(envelope, { mode: 'active' });
+  await runtime.tick();
+  const run = await store.get('active:tenant-1:event-1');
+  const quoteObservation = run.observations.find((item) => item.tool === 'quote_realtime');
+  assert.equal(quoteExecutions, 1);
+  assert.equal(quoteObservation.status, 'error');
+  assert.equal(quoteObservation.code, 'direct_wanda_transport_failed');
+  assert.equal(quoteObservation.retryable, false);
 });
 
 test('active quote tool cannot execute before read-only showtime resolution', async () => {
@@ -780,7 +809,7 @@ test('active quote tool cannot execute before read-only showtime resolution', as
     quotePreviewClient: {
       async recognize() { return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 }, hand_drawn_circle: { exists: false } } }; },
       async resolveShowtime(input) { return { ...input, status: 'resolved' }; },
-      async quote(input) { quoteExecutions += 1; return { status: 'preview_ready', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1, pricing_rule_version: 'v1', recognition: input.recognition, reply_text: '实时单价50.00元/张，1张合计50.00元。' }; },
+      async quoteDirect(input) { quoteExecutions += 1; return { status: 'preview_ready', unit_quote_cents: 5000, total_quote_cents: 5000, ticket_count: 1, pricing_rule_version: 'v1', recognition: input.recognition, reply_text: '实时单价50.00元/张，1张合计50.00元。' }; },
     },
     replyOutboxStore: { async enqueue() { return { created: true }; } },
   });

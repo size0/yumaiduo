@@ -109,6 +109,11 @@ test('platform transaction notices are ignored before conversation history or AI
     '你关闭了订单，钱款已原路退返',
     '你已发货',
     '你人真不错，送你闲鱼小红花',
+    '卖家人不错？送Ta闲鱼小红花',
+    '卖家已发货',
+    '请问您想咨询闲鱼放心充的什么问题呢？',
+    '请稍等，小闲鱼正在努力工作中',
+    '小蜜消息',
     '不想宝贝被砍价? <a size=13 href="fleamarket://message_no_bargain?flutter=true&bizId=bargain">去设置</a>',
   ];
   for (const [index, content] of notices.entries()) {

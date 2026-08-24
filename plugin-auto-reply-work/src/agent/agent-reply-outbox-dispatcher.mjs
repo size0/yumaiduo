@@ -39,6 +39,8 @@ export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDe
       source_message_id: entry.source_message_id,
       text: entry.text,
       reply_origin: 'conversation_agent_outbox',
+      allow_plugin_followup: entry.delivery?.type === 'quote',
+      delivery_type: entry.delivery?.type ?? null,
       reply_provenance: entry.reply_provenance,
     };
     try {

@@ -106,8 +106,10 @@ export function createActionExecutor({ coreFor, messageRegistry, imageLoader = n
       const sentByThisPlugin = await messageRegistry.wasSentMessage(action.tenant_id, address.chatId, latest.messageId);
       const latestText = String(latest.content ?? latest.text ?? '').trim();
       if (sentByThisPlugin && latestText && latestText === text) return { status: 'skipped', reason: 'duplicate_reply' };
+      const isVerifiedAgentQuote = action.reply_origin === 'conversation_agent_outbox'
+        && action.delivery_type === 'quote';
       const isVerifiedQuoteFollowup = action.allow_plugin_followup === true
-        && ['verified_quote', 'quote_follow_up', 'quote_processing'].includes(String(action.reply_origin));
+        && (isVerifiedAgentQuote || ['verified_quote', 'quote_follow_up', 'quote_processing'].includes(String(action.reply_origin)));
       // Recognition and its deterministic realtime result are a bounded pair
       // from one buyer event. Permit the second, price/follow-up message only
       // after our own recognition message; all ordinary replies stay deduped.

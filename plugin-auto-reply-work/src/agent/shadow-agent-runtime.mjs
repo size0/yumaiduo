@@ -235,8 +235,20 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       if (!showtimeResolved) return { status: 'error', tool: 'quote_realtime', summary: '必须先完成只读场次匹配', facts: {}, next_actions: ['resolve_showtime'], stop_reason: 'showtime_resolution_required' };
       if (mode !== 'active') return sourceObservation(source, 'quote_realtime');
       if (!quoteInput) return { status: 'error', tool: 'quote_realtime', summary: '缺少已匹配的场次事实', facts: {}, next_actions: ['create_manual_task'], stop_reason: 'showtime_artifact_missing' };
-      if (typeof quotePreviewClient?.quote !== 'function') return { status: 'error', tool: 'quote_realtime', summary: '实时核价工具不可用', facts: {}, next_actions: ['create_manual_task'], stop_reason: 'quote_tool_unavailable' };
-      const quoted = await quotePreviewClient.quote(quoteInput);
+      if (typeof quotePreviewClient?.quoteDirect !== 'function') return {
+        status: 'error', code: 'direct_wanda_quote_unavailable', tool: 'quote_realtime', summary: '万达直连核价工具不可用',
+        facts: {}, missing: [], retryable: false, next_actions: ['create_manual_task'], stop_reason: 'direct_wanda_quote_unavailable',
+      };
+      let quoted;
+      try {
+        quoted = await quotePreviewClient.quoteDirect(quoteInput);
+      } catch (error) {
+        return {
+          status: 'error', code: 'direct_wanda_transport_failed', tool: 'quote_realtime',
+          summary: '万达直连核价请求结果未知，已停止自动重试', facts: {}, missing: [], retryable: false,
+          next_actions: ['create_manual_task'], stop_reason: 'direct_wanda_transport_failed',
+        };
+      }
       let authoritativeReply = text(quoted?.reply_text, 500);
       if (quoted?.status !== 'preview_ready') {
         return authoritativeReply
