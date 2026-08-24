@@ -5,7 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .quote_preview_store import QuotePreviewStore
@@ -24,6 +24,7 @@ from .plugin_bridge_store import PluginBridgeStore
 from .knowledge_base_store import KnowledgeBaseStore
 from .conversation_agent import ConversationAgentService
 from .reply_preview import ReplyPreviewService
+from .release_evidence import ReleaseEvidenceService, ReleaseEvidenceStore, release_identity_from_env
 from .match_candidate_resolver import MatchCandidateResolver
 from .local_catalog import LocalWandaCatalog
 from .schemas import ImageUploadResponse, ModelSettingsUpdate, ModelSettingsView, QuoteRealtimeRequest, QuoteRealtimeResponse, StorageSettingsView, VisionRecognizeRequest, VisionRecognizeResponse, WandaQuoteSettingsUpdate, WandaQuoteSettingsView
@@ -89,6 +90,7 @@ def create_app(
     match_candidate_resolver: MatchCandidateResolver | None = None,
     plugin_bridge_store: PluginBridgeStore | None = None,
     local_catalog: LocalWandaCatalog | None = None,
+    release_evidence_service: ReleaseEvidenceService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="万达 AI 客服", version="0.1.0", lifespan=lifespan)
     configured_path = os.getenv("WANDA_SETTINGS_PATH")
@@ -119,6 +121,9 @@ def create_app(
     configured_bridge_path = os.getenv("WANDA_PLUGIN_BRIDGE_SETTINGS_PATH")
     bridge_store_path = Path(configured_bridge_path) if configured_bridge_path else Path(__file__).resolve().parents[1] / "data" / "plugin_bridge_settings.json"
     app.state.plugin_bridge_store = plugin_bridge_store or PluginBridgeStore(bridge_store_path)
+    evidence_path = Path(os.getenv("WANDA_RELEASE_EVIDENCE_PATH", str(Path(__file__).resolve().parents[1] / "data" / "release_evidence.json")))
+    app.state.release_evidence_service = release_evidence_service or ReleaseEvidenceService(ReleaseEvidenceStore(evidence_path))
+    app.state.release_identity = release_identity_from_env()
     knowledge_path = Path(os.getenv("WANDA_KNOWLEDGE_BASE_PATH", str(Path(__file__).resolve().parents[1] / "data" / "knowledge_base.json")))
     app.state.knowledge_base_store = KnowledgeBaseStore(knowledge_path)
     app.add_middleware(
@@ -131,8 +136,13 @@ def create_app(
     app.include_router(create_plugin_bridge_router(app))
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime_contract": V3_RUNTIME_CONTRACT}
+    async def health() -> dict[str, object]:
+        runtime = app.state.plugin_bridge_store.runtime()
+        return {
+            "status": "ok", "runtime_contract": V3_RUNTIME_CONTRACT,
+            **app.state.release_identity,
+            "release_generation": int(runtime.get("release_generation", 1)),
+        }
 
     def reply_model_settings() -> dict[str, object]:
         """Attach editable operator guidance without exposing the API key."""
@@ -158,6 +168,8 @@ def create_app(
 
     @app.put("/api/settings/model", response_model=ModelSettingsView)
     async def save_model_settings(update: ModelSettingsUpdate) -> ModelSettingsView:
+        if app.state.plugin_bridge_store.runtime().get("conversation_agent_mode") == "active":
+            raise HTTPException(status_code=409, detail="active_release_settings_locked")
         return app.state.settings_store.save(update)
 
     @app.get("/api/settings/storage", response_model=StorageSettingsView)
@@ -170,6 +182,8 @@ def create_app(
 
     @app.put("/api/settings/wanda-quote", response_model=WandaQuoteSettingsView)
     async def save_wanda_quote_settings(update: WandaQuoteSettingsUpdate) -> WandaQuoteSettingsView:
+        if app.state.plugin_bridge_store.runtime().get("conversation_agent_mode") == "active":
+            raise HTTPException(status_code=409, detail="active_release_settings_locked")
         saved = app.state.wanda_quote_store.save(update)
         app.state.quote_service = RealtimeQuoteService(
             LocalTicketGateway(account_phone=saved.account_phone),

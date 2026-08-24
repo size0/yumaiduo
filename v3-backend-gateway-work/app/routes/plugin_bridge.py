@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hmac
 import os
-import re
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -31,10 +30,12 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         model = app.state.settings_store.read()
         api_key = str(model.get("api_key", ""))
         agent_mode = runtime.get("conversation_agent_mode", "shadow")
+        readiness = app.state.release_evidence_service.active_readiness(runtime, model)
         settings: dict[str, object] = {
             **runtime,
             "conversation_agent_mode": agent_mode,
-            "conversation_agent_active_ready": True,
+            "conversation_agent_active_ready": readiness.get("ready") is True,
+            "conversation_agent_active_readiness": readiness,
             "execution_owner": "agent" if agent_mode == "active" else "deterministic",
             "ai_reply_base_url": str(model.get("base_url", "")),
             "ai_reply_model": str(model.get("model", "")),
@@ -51,7 +52,13 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="invalid account_unb")
         return account_unb
 
+    def ensure_release_mutation_allowed() -> None:
+        if app.state.plugin_bridge_store.runtime().get("conversation_agent_mode") == "active":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="active_release_settings_locked")
+
     def patch_runtime_settings(payload: dict[str, object]) -> dict[str, object]:
+        if payload:
+            ensure_release_mutation_allowed()
         bridge_fields = {
             "automation_enabled",
             "recognition_enabled",
@@ -184,6 +191,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         payload: dict[str, object] = Body(...),
         _: None = Depends(require_plugin_bridge_key),
     ) -> dict[str, object]:
+        ensure_release_mutation_allowed()
         account_unb = bridge_account_unb(payload.get("account_unb") if isinstance(payload.get("account_unb"), str) else None)
         enabled = payload.get("automation_enabled")
         if not isinstance(enabled, bool):
@@ -205,40 +213,33 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
     ) -> dict[str, object]:
         action = payload.get("action")
         if action == "rollback":
+            if set(payload) != {"action"}:
+                raise HTTPException(status_code=422, detail="untrusted_agent_release_fields")
             rolled_back = app.state.plugin_bridge_store.rollback_agent_release()
             return {"settings": {**bridge_runtime_settings(), **rolled_back}}
         if action != "activate":
             raise HTTPException(status_code=422, detail="invalid agent release action")
-        release_id = str(payload.get("release_id", "")).strip()
-        runtime_version = str(payload.get("runtime_version", "")).strip()
-        source_commit = str(payload.get("source_commit", "")).strip().lower()
-        manifest_sha256 = str(payload.get("manifest_sha256", "")).strip().lower()
-        health = payload.get("health")
-        evaluation = payload.get("evaluation")
-        if not release_id or len(release_id) > 160 or runtime_version != FULL_AGENT_RUNTIME_VERSION:
-            raise HTTPException(status_code=422, detail="invalid agent release identity")
-        if not re.fullmatch(r"[a-f0-9]{40}", source_commit) or not re.fullmatch(r"[a-f0-9]{64}", manifest_sha256):
-            raise HTTPException(status_code=422, detail="invalid agent release digest")
-        if payload.get("rollback_verified") is not True or not isinstance(health, dict) or health.get("v3") != runtime_version or health.get("plugin") != runtime_version:
-            raise HTTPException(status_code=422, detail="agent release health evidence incomplete")
-        if not isinstance(evaluation, dict):
-            raise HTTPException(status_code=422, detail="agent release evaluation missing")
-        minimums = {
-            "failure_replay_count": 100, "image_sample_count": 100,
-            "tool_selection_accuracy": 95, "image_full_path_rate": 95, "completion_rate": 95,
-        }
-        if any(float(evaluation.get(field, -1)) < minimum for field, minimum in minimums.items()) or float(evaluation.get("p95_latency_ms", 999_999)) > 60_000:
-            raise HTTPException(status_code=422, detail="agent release evaluation thresholds not met")
-        zero_fields = (
-            "high_risk_actions", "false_transaction_facts", "duplicate_writes", "unknown_result_retries",
-            "cross_tenant_access", "authoritative_inconsistencies", "unsafe_final_replies", "post_deadline_effects",
-        )
-        if any(evaluation.get(field) != 0 for field in zero_fields):
-            raise HTTPException(status_code=422, detail="agent release zero-tolerance metric failed")
-        released = app.state.plugin_bridge_store.activate_agent_release({
-            "release_id": release_id, "runtime_version": runtime_version,
-            "source_commit": source_commit, "manifest_sha256": manifest_sha256,
-        })
+        if set(payload) != {"action", "evidence_id"}:
+            raise HTTPException(status_code=422, detail="untrusted_agent_release_fields")
+        evidence_id = str(payload.get("evidence_id", "")).strip()
+        if not evidence_id or len(evidence_id) > 160:
+            raise HTTPException(status_code=422, detail="invalid release evidence id")
+        runtime = app.state.plugin_bridge_store.runtime()
+        model = app.state.settings_store.read()
+        if not all(str(model.get(field, "")).strip() for field in ("base_url", "model", "api_key")):
+            raise HTTPException(status_code=409, detail="agent_model_not_configured")
+        if runtime.get("conversation_agent_mode") == "active" and runtime.get("agent_release_evidence_id") == evidence_id:
+            return {"settings": bridge_runtime_settings()}
+        try:
+            evidence = app.state.release_evidence_service.validate_for_activation(
+                evidence_id, current_generation=int(runtime.get("release_generation", 1)),
+            )
+            promote_guard = getattr(app.state.release_evidence_service, "promote_guard_for_activation", None)
+            if callable(promote_guard):
+                promote_guard(evidence)
+            released = app.state.plugin_bridge_store.activate_agent_release(evidence)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         return {"settings": {**bridge_runtime_settings(), **released}}
 
     @router.put("/api/xianyu-plugin/bridge/agent-canary-approval")
@@ -246,6 +247,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         payload: dict[str, object] = Body(...),
         _: None = Depends(require_plugin_bridge_key),
     ) -> dict[str, object]:
+        ensure_release_mutation_allowed()
         action = payload.get("action")
         if action == "revoke":
             app.state.plugin_bridge_store.update_runtime({
@@ -295,6 +297,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         payload: dict[str, object] = Body(...),
         _: None = Depends(require_plugin_bridge_key),
     ) -> dict[str, object]:
+        ensure_release_mutation_allowed()
         tenant_id = bridge_tenant_id(payload.get("tenant_id") if isinstance(payload.get("tenant_id"), str) else None)
         patch: dict[str, int] = {}
         for field in ("wplus_adjustment_cents", "wplus_member_price_threshold_cents", "regular_adjustment_cents", "max_auto_order_amount_cents"):
@@ -333,6 +336,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
         _: None = Depends(require_plugin_bridge_key),
     ) -> dict[str, object]:
+        ensure_release_mutation_allowed()
         try:
             return {"entry": app.state.knowledge_base_store.create(payload, bridge_tenant_id(x_yumaiduo_tenant_id))}
         except ValueError as error:
@@ -345,6 +349,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
         _: None = Depends(require_plugin_bridge_key),
     ) -> dict[str, object]:
+        ensure_release_mutation_allowed()
         try:
             return {"entry": app.state.knowledge_base_store.update(entry_id, payload, bridge_tenant_id(x_yumaiduo_tenant_id))}
         except KeyError as error:
@@ -381,6 +386,7 @@ def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
         x_yumaiduo_tenant_id: str | None = Header(default=None, alias="X-Yumaiduo-Tenant-Id"),
         _: None = Depends(require_plugin_bridge_key),
     ) -> dict[str, object]:
+        ensure_release_mutation_allowed()
         try:
             correction = app.state.knowledge_base_store.review_correction(
                 bridge_tenant_id(x_yumaiduo_tenant_id), correction_id, payload,

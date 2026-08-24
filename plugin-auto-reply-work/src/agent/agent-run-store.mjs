@@ -129,6 +129,7 @@ function external(record) {
   const toolCalls = Object.values(record.toolCalls ?? {}).sort((left, right) => Number(left.step) - Number(right.step));
   return Object.freeze({
     run_id: record.runId, event_key: record.eventKey, tenant_id: record.tenantId, mode: record.mode,
+    release_id: record.releaseId ?? '', release_generation: Number(record.releaseGeneration) || null,
     status: record.status, attempts: record.attempts, available_at: record.availableAt,
     lease_id: record.leaseId, lease_until: record.leaseUntil, deadline_at: Number(record.deadlineAt) || null,
     context_snapshot: clone(record.contextSnapshot ?? null),
@@ -165,16 +166,17 @@ export class AgentRunStore {
     catch (error) { if (error?.code !== 'ENOENT') throw error; this.#state = emptyState(); await this.#write(this.#state); }
   }
 
-  async enqueue({ runId, eventKey, tenantId, mode = 'shadow', deadlineMs = 180_000, contextSnapshot = null }) {
+  async enqueue({ runId, eventKey, tenantId, mode = 'shadow', deadlineMs = 180_000, contextSnapshot = null, releaseId = '', releaseGeneration = null }) {
     const id = bounded(runId, 240); const event = bounded(eventKey, 240); const tenant = bounded(tenantId, 128);
-    const deadline = Number(deadlineMs);
+    const deadline = Number(deadlineMs); const safeReleaseId = bounded(releaseId, 160); const safeReleaseGeneration = Number(releaseGeneration);
     if (!id || !event || !tenant || !['shadow', 'active', 'evaluation'].includes(mode)) throw new TypeError('invalid agent run');
+    if ((safeReleaseId || releaseGeneration != null) && (!safeReleaseId || !Number.isSafeInteger(safeReleaseGeneration) || safeReleaseGeneration < 1)) throw new TypeError('invalid agent run release generation');
     if (!Number.isSafeInteger(deadline) || deadline < 30_000 || deadline > 600_000) throw new TypeError('agent run deadlineMs must be between 30000 and 600000');
     return this.#mutate((state) => {
       if (state.runs[id]) return { created: false, run: external(state.runs[id]) };
       const now = this.#now();
       const timestamp = new Date(now).toISOString();
-      state.runs[id] = { runId: id, eventKey: event, tenantId: tenant, mode, status: 'queued', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, deadlineAt: now + deadline, contextSnapshot: sanitizeContextSnapshot(contextSnapshot), trace: [], observations: [], toolCalls: {}, result: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
+      state.runs[id] = { runId: id, eventKey: event, tenantId: tenant, mode, releaseId: safeReleaseId, releaseGeneration: Number.isSafeInteger(safeReleaseGeneration) ? safeReleaseGeneration : null, status: 'queued', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, deadlineAt: now + deadline, contextSnapshot: sanitizeContextSnapshot(contextSnapshot), trace: [], observations: [], toolCalls: {}, result: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
       return { created: true, run: external(state.runs[id]) };
     });
   }
@@ -199,11 +201,16 @@ export class AgentRunStore {
     });
   }
 
-  async claimDue({ leaseMs = 60_000 } = {}) {
-    const now = this.#now();
+  async claimDue({ leaseMs = 60_000, releaseGeneration = null } = {}) {
+    const now = this.#now(); const currentGeneration = Number(releaseGeneration); const generationProvided = releaseGeneration != null;
     const result = await this.#mutate((state) => {
       let expired = false;
       for (const run of Object.values(state.runs)) {
+        if (generationProvided && Number.isSafeInteger(currentGeneration) && run.mode === 'active' && ['queued', 'retry', 'processing'].includes(run.status) && Number(run.releaseGeneration) !== currentGeneration) {
+          run.status = 'release_superseded'; run.leaseId = null; run.leaseUntil = null;
+          run.result = { status: 'handoff', reason: 'release_superseded' };
+          run.updatedAt = new Date(now).toISOString(); expired = true; continue;
+        }
         const due = (CLAIMABLE.has(run.status) && run.availableAt <= now) || (run.status === 'processing' && run.leaseUntil <= now);
         if (due && Number(run.deadlineAt) > 0 && Number(run.deadlineAt) <= now) {
           run.status = 'timed_out'; run.leaseId = null; run.leaseUntil = null;
@@ -222,10 +229,11 @@ export class AgentRunStore {
     return result?.noClaim === true ? null : result;
   }
 
-  async beginTool(runId, leaseId, input, { leaseMs = 60_000 } = {}) {
-    const callId = bounded(input?.callId, 300); const tool = bounded(input?.tool, 64); const step = Number(input?.step);
+  async beginTool(runId, leaseId, input, { leaseMs = 60_000, releaseGeneration = null } = {}) {
+    const callId = bounded(input?.callId, 300); const tool = bounded(input?.tool, 64); const step = Number(input?.step); const currentGeneration = Number(releaseGeneration); const generationProvided = releaseGeneration != null;
     if (!callId || !tool || !Number.isSafeInteger(step) || step < 1 || step > 12) throw new TypeError('invalid agent tool call');
     return this.#finish(runId, leaseId, (run) => {
+      if (run.mode === 'active' && generationProvided && Number.isSafeInteger(currentGeneration) && Number(run.releaseGeneration) !== currentGeneration) return { state: 'release_superseded' };
       run.toolCalls ??= {};
       const existing = run.toolCalls[callId];
       if (existing) return existing.status === 'completed'
@@ -270,6 +278,12 @@ export class AgentRunStore {
 
   async timeout(runId, leaseId, result = { status: 'handoff', reason: 'agent_deadline_exceeded' }) {
     return this.#finish(runId, leaseId, (run) => { run.status = 'timed_out'; run.result = clone(result); run.lastError = null; });
+  }
+
+  async supersede(runId, leaseId) {
+    return this.#finish(runId, leaseId, (run) => {
+      run.status = 'release_superseded'; run.result = { status: 'handoff', reason: 'release_superseded' }; run.lastError = null;
+    });
   }
 
   async defer(runId, leaseId, { delayMs = 2_000, reason = 'source_event_pending' } = {}) {

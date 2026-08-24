@@ -21,9 +21,13 @@ export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDe
         }
       }
     }
-    if (typeof validateReply === 'function' && await validateReply(entry) !== true) {
-      await store.markSkipped(entry.action_id, entry.lease_id, 'reply_projection_superseded');
-      return { status: 'skipped', action_id: entry.action_id, reason: 'reply_projection_superseded' };
+    if (typeof validateReply === 'function') {
+      const validation = await validateReply(entry);
+      if (validation !== true && validation?.valid !== true) {
+        const reason = validation?.reason === 'release_superseded' ? 'release_superseded' : 'reply_projection_superseded';
+        await store.markSkipped(entry.action_id, entry.lease_id, reason);
+        return { status: 'skipped', action_id: entry.action_id, reason };
+      }
     }
     const action = {
       action_id: entry.action_id,

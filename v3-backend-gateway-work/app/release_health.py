@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any, Final
 from urllib.parse import urlsplit
@@ -12,13 +13,14 @@ EXPECTED_AGENT_RUNTIME_VERSION: Final = "wanda-agent-runtime-v37-model-led-nativ
 MAX_HEALTH_RESPONSE_BYTES: Final = 64 * 1024
 
 
-def _report(*, ready: bool, code: str, v3_match: bool, plugin_match: bool, registered: bool) -> dict[str, object]:
+def _report(*, ready: bool, code: str, v3_match: bool, plugin_match: bool, registered: bool, identity_match: bool) -> dict[str, object]:
     return {
         "ready": ready,
         "code": code,
         "v3_contract_match": v3_match,
         "plugin_contract_match": plugin_match,
         "plugin_registered": registered,
+        "release_identity_match": identity_match,
     }
 
 
@@ -31,6 +33,18 @@ def validate_runtime_health(v3_health: object, plugin_health: object) -> dict[st
     v3_match = v3.get("runtime_contract") == EXPECTED_V3_RUNTIME_CONTRACT
     plugin_match = application.get("agent_runtime_version") == EXPECTED_AGENT_RUNTIME_VERSION
     registered = plugin.get("registered") is True
+    identity_match = (
+        v3.get("runtime_version") == EXPECTED_AGENT_RUNTIME_VERSION
+        and application.get("agent_runtime_version") == EXPECTED_AGENT_RUNTIME_VERSION
+        and isinstance(v3.get("source_commit"), str) and re.fullmatch(r"[a-f0-9]{40}", v3["source_commit"]) is not None
+        and v3.get("source_commit") == application.get("source_commit")
+        and isinstance(v3.get("manifest_sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", v3["manifest_sha256"]) is not None
+        and v3.get("manifest_sha256") == application.get("manifest_sha256")
+        and isinstance(v3.get("artifact_sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", v3["artifact_sha256"]) is not None
+        and isinstance(application.get("artifact_sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", application["artifact_sha256"]) is not None
+        and isinstance(v3.get("release_generation"), int) and v3.get("release_generation", 0) >= 1
+        and v3.get("release_generation") == application.get("release_generation")
+    )
     if v3.get("status") != "ok":
         code = "v3_unhealthy"
     elif not v3_match:
@@ -41,6 +55,8 @@ def validate_runtime_health(v3_health: object, plugin_health: object) -> dict[st
         code = "plugin_not_registered"
     elif not plugin_match:
         code = "plugin_runtime_contract_mismatch"
+    elif not identity_match:
+        code = "release_identity_mismatch"
     else:
         code = "ready"
     return _report(
@@ -49,6 +65,7 @@ def validate_runtime_health(v3_health: object, plugin_health: object) -> dict[st
         v3_match=v3_match,
         plugin_match=plugin_match,
         registered=registered,
+        identity_match=identity_match,
     )
 
 

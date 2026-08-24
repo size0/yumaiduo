@@ -27,6 +27,7 @@ def main() -> int:
             "v3_contract_match": False,
             "plugin_contract_match": False,
             "plugin_registered": False,
+            "release_identity_match": False,
         }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0 if report["ready"] is True else 1

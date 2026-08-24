@@ -95,6 +95,12 @@ function parseBoolean(value, name, fallback = false) {
   throw new ConfigurationError(`${name} must be a boolean`);
 }
 
+function optionalDigest(value, name, length) {
+  const result = String(value ?? '').trim().toLowerCase();
+  if (result && !new RegExp(`^[a-f0-9]{${length}}$`, 'u').test(result)) throw new ConfigurationError(`${name} must be a ${length}-character hex digest`);
+  return result;
+}
+
 function parseOptionalEncryptionKey(value) {
   const encoded = String(value ?? '').trim();
   if (!encoded) return null;
@@ -303,6 +309,11 @@ export async function loadConfig({ env = process.env, projectRoot = PROJECT_ROOT
     quotePreview,
     replyPreview,
     conversationAgent,
+    releaseMetadata: Object.freeze({
+      sourceCommit: optionalDigest(env.WANDA_SOURCE_COMMIT, 'WANDA_SOURCE_COMMIT', 40),
+      manifestSha256: optionalDigest(env.WANDA_RELEASE_MANIFEST_SHA256, 'WANDA_RELEASE_MANIFEST_SHA256', 64),
+      artifactSha256: optionalDigest(env.WANDA_PLUGIN_ARTIFACT_SHA256, 'WANDA_PLUGIN_ARTIFACT_SHA256', 64),
+    }),
     imageHostAllowlist: parseHostAllowlist(env.IMAGE_HOST_ALLOWLIST),
     logLevel,
     backend: Object.freeze({

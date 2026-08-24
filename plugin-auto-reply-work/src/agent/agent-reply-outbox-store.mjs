@@ -36,6 +36,7 @@ function quoteDelivery(value) {
 function external(entry) {
   return Object.freeze({
     action_id: entry.actionId, run_id: entry.runId, tenant_id: entry.tenantId, mode: entry.mode,
+    release_id: entry.releaseId ?? '', release_generation: Number(entry.releaseGeneration) || null,
     account_unb: entry.accountUnb, chat_id: entry.chatId, peer_unb: entry.peerUnb,
     source_message_id: entry.sourceMessageId ?? '', projection_version: entry.projectionVersion ?? '', reply_provenance: clone(entry.replyProvenance ?? {}),
     expires_at: Number(entry.expiresAt) || null, text: entry.text,
@@ -62,27 +63,37 @@ export class AgentReplyOutboxStore {
     const sourceMessageId = bounded(input?.sourceMessageId, 240);
     const text = bounded(input?.text, 1_000); const mode = bounded(input?.mode, 16); const delivery = quoteDelivery(input?.delivery);
     const projectionVersion = bounded(input?.projectionVersion, 128); const expiresAt = Number(input?.expiresAt);
+    const releaseId = bounded(input?.releaseId, 160); const releaseGeneration = Number(input?.releaseGeneration);
     const replyProvenance = input?.replyProvenance && typeof input.replyProvenance === 'object' && !Array.isArray(input.replyProvenance) ? clone(input.replyProvenance) : {};
     if (mode !== 'active') throw new TypeError('reply outbox accepts only active agent runs');
     if (!actionId || !runId || !tenantId || !accountUnb || !chatId || !peerUnb || !text) throw new TypeError('invalid agent reply outbox entry');
+    if ((releaseId || Number.isFinite(releaseGeneration)) && (!releaseId || !Number.isSafeInteger(releaseGeneration) || releaseGeneration < 1)) throw new TypeError('invalid outbox release generation');
     if (replyProvenance.runtime_version === 'wanda-agent-runtime-v37-model-led-native-tools'
-      && (!sourceMessageId || !projectionVersion || !Number.isFinite(expiresAt))) {
-      throw new TypeError('v37 reply requires source message, projection version, provenance, and deadline');
+      && (!sourceMessageId || !projectionVersion || !Number.isFinite(expiresAt) || !releaseId || !Number.isSafeInteger(releaseGeneration))) {
+      throw new TypeError('v37 reply requires source message, projection version, provenance, deadline, and release generation');
     }
     return this.#mutate((state) => {
       const existing = state.entries[actionId];
       if (existing) return { created: false, entry: external(existing) };
       const now = this.#now(); const timestamp = new Date(now).toISOString();
-      const entry = { actionId, runId, tenantId, mode, accountUnb, chatId, peerUnb, sourceMessageId, projectionVersion, replyProvenance, expiresAt: Number.isFinite(expiresAt) ? expiresAt : null, text, delivery, status: 'pending', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, platformMessageId: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
+      const entry = { actionId, runId, tenantId, mode, releaseId, releaseGeneration: Number.isSafeInteger(releaseGeneration) ? releaseGeneration : null, accountUnb, chatId, peerUnb, sourceMessageId, projectionVersion, replyProvenance, expiresAt: Number.isFinite(expiresAt) ? expiresAt : null, text, delivery, status: 'pending', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, platformMessageId: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
       state.entries[actionId] = entry;
       return { created: true, entry: external(entry) };
     });
   }
 
-  async claimDue({ leaseMs = 30_000 } = {}) {
-    const now = this.#now();
+  async claimDue({ leaseMs = 30_000, releaseGeneration = null } = {}) {
+    const now = this.#now(); const currentGeneration = Number(releaseGeneration); const generationProvided = releaseGeneration != null;
     const result = await this.#mutate((state) => {
       let changed = false;
+      if (generationProvided && Number.isSafeInteger(currentGeneration)) {
+        for (const entry of Object.values(state.entries)) {
+          if (entry.status === 'pending' && Number(entry.releaseGeneration) !== currentGeneration) {
+            entry.status = 'release_superseded'; entry.leaseId = null; entry.leaseUntil = null;
+            entry.lastError = 'release_superseded'; entry.updatedAt = new Date(now).toISOString(); changed = true;
+          }
+        }
+      }
       for (const entry of Object.values(state.entries)) {
         if (entry.status === 'sending' && Number(entry.leaseUntil) <= now) {
           entry.status = 'unknown'; entry.leaseId = null; entry.leaseUntil = null; entry.lastError = 'send_result_unknown'; entry.updatedAt = new Date(now).toISOString(); changed = true;

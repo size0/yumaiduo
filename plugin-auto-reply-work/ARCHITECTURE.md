@@ -153,3 +153,11 @@ Webhook验签并持久入队
 - 插件报价编排与V3报价服务：前者管理会话和调用顺序，后者掌管交易事实。
 - Shadow/Evaluation/Canary代码：生产Active虽关闭，但它们是上线门禁和审计设施。
 - 取消、0/2/5秒复核、15/30秒后台复核与账号租约：都属于交易安全链，不能为了精简而合并或删除。
+
+## 9. v37 Active 发布边界
+
+- `/agent-release activate` 只接受服务端签发的 `evidence_id`；客户端健康、SHA 或评测数字一律拒绝。
+- Evidence 必须绑定最终 commit、Manifest/Plugin/V3 SHA、两个 systemd WorkingDirectory、三次冻结评测、真实回滚演练和最近60秒守卫检查。
+- AgentRun、Tool journal 与 Outbox 携带 `release_id/release_generation`。rollback 递增 generation；旧代任务只能停止或对账，不能继续写入或发送。
+- `wanda-agent-release-guard.timer` 每30秒检查服务、重启数、运行身份、窗口指标和零容忍事故，触发时只调用原子 rollback，不自动恢复 Active。
+- `npm run eval:v37` 只接受独立人工/权威 Gold 的冻结数据，图片结果必须声明重新执行当前识图及完整工具路径；最终 Evidence 要求同一数据和版本连续三次通过。

@@ -66,6 +66,9 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
     "agent_canary_runtime_version": "",
     "agent_canary_approved_at": None,
     "agent_v2_strict_tenant_validation": False,
+    "release_generation": 1,
+    "agent_release_id": "",
+    "agent_release_evidence_id": "",
     "ai_reply_system_prompt": "仅基于已确认的会话事实和已启用知识库回复；不编造价格、库存、订单或承诺。只追问当前缺失的最少字段，不得要求买家重复已提供的信息；文字座位仅作偏好，不得声称正在核对其库存或逐座价格。",
     "ai_reply_shop_background": "",
     "ai_reply_precautions": "",
@@ -150,12 +153,17 @@ class PluginBridgeStore:
             data = self._read_unlocked()
             current = _merged_runtime(data.get("runtime", {}))
             release_id = str(release["release_id"])
-            if current.get("agent_release_id") == release_id and current.get("conversation_agent_mode") == "active":
+            if current.get("agent_release_id") == release_id and current.get("agent_release_evidence_id") == release.get("evidence_id") and current.get("conversation_agent_mode") == "active":
                 return current.copy()
+            base_generation = int(release["base_generation"])
+            target_generation = int(release["target_generation"])
+            if int(current.get("release_generation", 1)) != base_generation or target_generation != base_generation + 1:
+                raise ValueError("release generation changed")
             snapshot_fields = (
                 "conversation_agent_mode", "agent_canary_enabled", "agent_canary_kill_switch",
                 "agent_canary_percentage", "agent_canary_approved", "agent_canary_runtime_version",
                 "agent_canary_approved_at", "agent_v2_strict_tenant_validation",
+                "automation_enabled", "ai_reply_enabled", "shadow_evaluation_enabled",
             )
             data["agent_release_snapshot"] = {field: current.get(field) for field in snapshot_fields}
             now = datetime.now(UTC).isoformat()
@@ -168,9 +176,16 @@ class PluginBridgeStore:
                 "agent_canary_runtime_version": str(release["runtime_version"]),
                 "agent_canary_approved_at": now,
                 "agent_v2_strict_tenant_validation": True,
+                "automation_enabled": True,
+                "ai_reply_enabled": True,
+                "shadow_evaluation_enabled": True,
+                "release_generation": target_generation,
                 "agent_release_id": release_id,
+                "agent_release_evidence_id": str(release["evidence_id"]),
                 "agent_release_source_commit": str(release["source_commit"]),
                 "agent_release_manifest_sha256": str(release["manifest_sha256"]),
+                "agent_release_plugin_artifact_sha256": str(release["plugin_artifact_sha256"]),
+                "agent_release_v3_artifact_sha256": str(release["v3_artifact_sha256"]),
                 "agent_release_activated_at": now,
                 "updated_at": now,
             })
@@ -182,9 +197,18 @@ class PluginBridgeStore:
         with self._lock:
             data = self._read_unlocked()
             current = _merged_runtime(data.get("runtime", {}))
+            already_safe = (
+                current.get("conversation_agent_mode") == "shadow"
+                and current.get("agent_canary_kill_switch") is True
+                and int(current.get("agent_canary_percentage", 0)) == 0
+                and not current.get("agent_release_evidence_id")
+            )
+            if already_safe:
+                return current.copy()
             snapshot = data.get("agent_release_snapshot")
             if isinstance(snapshot, dict):
                 current.update(snapshot)
+            current_generation = int(current.get("release_generation", 1))
             current.update({
                 "conversation_agent_mode": "shadow",
                 "agent_canary_enabled": False,
@@ -192,6 +216,8 @@ class PluginBridgeStore:
                 "agent_canary_percentage": 0,
                 "agent_canary_approved": False,
                 "agent_v2_strict_tenant_validation": True,
+                "release_generation": current_generation + 1,
+                "agent_release_evidence_id": "",
                 "agent_release_rolled_back_at": datetime.now(UTC).isoformat(),
                 "updated_at": datetime.now(UTC).isoformat(),
             })

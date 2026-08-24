@@ -58,7 +58,11 @@ export function createAgentRuntimeBundle({
     executeReply: (action) => outboxReplyOrchestrator.deliver(action),
     commitDelivery: (entry) => commitQuoteDelivery(storage.conversationContextStore, entry),
     validateReply: async (entry) => {
-      if (!entry.projection_version) return false;
+      const settings = await getSettings(entry.tenant_id);
+      if (Number(entry.release_generation) !== Number(settings?.release_generation) || String(entry.release_id) !== String(settings?.agent_release_id ?? '')) {
+        return { valid: false, reason: 'release_superseded' };
+      }
+      if (!entry.projection_version) return { valid: false, reason: 'reply_projection_superseded' };
       const state = await storage.conversationContextStore.get(entry.tenant_id, { accountUnb: entry.account_unb, chatId: entry.chat_id, peerUnb: entry.peer_unb });
       return conversationProjectionVersion(state?.facts) === entry.projection_version;
     },

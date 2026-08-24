@@ -329,9 +329,12 @@ export class ConversationContextStore {
     const orderId = String(input.orderId ?? '').trim().slice(0, 128);
     const totalCents = Number(input.totalCents);
     const ticketCount = Number(input.ticketCount);
+    const releaseId = String(input.releaseId ?? '').trim().slice(0, 160);
+    const releaseGeneration = Number(input.releaseGeneration);
     if (!actionId || !quoteRecordId || !orderId || !Number.isSafeInteger(totalCents) || totalCents <= 0 || !Number.isSafeInteger(ticketCount) || ticketCount <= 0) {
       throw new TypeError('invalid price change command claim');
     }
+    if ((releaseId || input.releaseGeneration != null) && (!releaseId || !Number.isSafeInteger(releaseGeneration) || releaseGeneration < 1)) throw new TypeError('invalid price change release generation');
     return this.#mutate((state) => {
       const key = conversationKey(tenantId, payload);
       const current = state[key] ?? { facts: {}, messages: [] };
@@ -352,6 +355,7 @@ export class ConversationContextStore {
       const command = {
         action_id: actionId, quote_record_id: quoteRecordId, order_id: orderId,
         total_cents: totalCents, ticket_count: ticketCount,
+        ...(releaseId ? { release_id: releaseId, release_generation: releaseGeneration } : {}),
         status: 'pending', started_at: this.now(), updated_at: this.now(),
       };
       current.facts = { ...facts, price_change_command: command };

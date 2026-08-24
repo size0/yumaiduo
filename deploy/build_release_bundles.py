@@ -55,12 +55,17 @@ def main() -> int:
         "v3": [
             "v3-backend-gateway-work/app/main.py",
             "v3-backend-gateway-work/app/agent_tool_registry.py",
+            "v3-backend-gateway-work/app/release_evidence.py",
+            "v3-backend-gateway-work/app/release_guard.py",
+            "v3-backend-gateway-work/scripts/issue_release_evidence.py",
             "v3-backend-gateway-work/requirements.txt",
         ],
         "plugin": [
             "plugin-auto-reply-work/index.mjs",
             "plugin-auto-reply-work/src/agent/model-driven-agent-loop.mjs",
             "plugin-auto-reply-work/src/agent/native-tool-registry.mjs",
+            "plugin-auto-reply-work/src/agent/release-guard-metrics.mjs",
+            "plugin-auto-reply-work/scripts/eval-v37.mjs",
             "plugin-auto-reply-work/package-lock.json",
             "plugin-auto-reply-work/vendor/plugin-sdk-server/dist/index.js",
         ],

@@ -317,6 +317,7 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       const actionId = `${String(envelope.id)}:${String(facts.quote_record_id)}:native-agent-price-change`;
       const claim = await conversationContextStore.claimPriceChangeCommand(envelope.tenantId, payload, {
         actionId, quoteRecordId: String(facts.quote_record_id), orderId, totalCents: total, ticketCount: quantity,
+        releaseId: String(settings?.agent_release_id ?? ''), releaseGeneration: Number(settings?.release_generation),
       });
       if (claim?.status === 'replay') {
         if (claim.code === 'completed') return { status: 'success', code: 'price_change_reconciled', tool: 'change_order_price', summary: '平台订单金额已与确认报价一致', facts: { price_change_requested: true, reconciled: true }, missing: [], retryable: false };
@@ -331,6 +332,7 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
         result = await executeAction({
           action_id: actionId, kind: 'change_price',
           tenant_id: String(envelope.tenantId), account_unb: accountUnb, order_id: orderId,
+          release_id: String(settings?.agent_release_id ?? ''), release_generation: Number(settings?.release_generation),
           price_fee: total, transport_fee: 0, expected_total_cents: total, expected_quantity: quantity,
           order_quantity_policy: 'listing_unit',
           gates: {
@@ -645,7 +647,11 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
     const sourceContext = mode === 'evaluation'
       ? null
       : contextSnapshot ?? await sourceTimeState(envelope, conversationContextStore);
-    return runStore.enqueue({ runId: runIdFor(envelope, mode), eventKey: eventKey(envelope), tenantId: envelope.tenantId, mode, deadlineMs, contextSnapshot: sourceContext });
+    const release = mode === 'active' ? await getSettings(envelope.tenantId) : null;
+    return runStore.enqueue({
+      runId: runIdFor(envelope, mode), eventKey: eventKey(envelope), tenantId: envelope.tenantId, mode, deadlineMs, contextSnapshot: sourceContext,
+      ...(mode === 'active' ? { releaseId: String(release?.agent_release_id ?? ''), releaseGeneration: Number(release?.release_generation) } : {}),
+    });
   }
 
   async function tick() {
@@ -673,6 +679,12 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         await runStore.complete(run.run_id, run.lease_id, withSourceSnapshot({ runtime_version: AGENT_RUNTIME_VERSION, status: 'skipped', reason: `source_event_${source.status}`, trace: run.trace }, source));
         return { status: 'completed', run_id: run.run_id };
       }
+      const settings = await getSettings(source.envelope.tenantId);
+      if (run.mode === 'active' && (Number(run.release_generation) !== Number(settings?.release_generation) || String(run.release_id) !== String(settings?.agent_release_id ?? ''))) {
+        await heartbeat.stop();
+        await runStore.supersede(run.run_id, run.lease_id);
+        return { status: 'release_superseded', run_id: run.run_id };
+      }
       if (run.mode === 'active' && source.result?.execution_owner !== 'agent') {
         const result = { runtime_version: AGENT_RUNTIME_VERSION, status: 'skipped', reason: 'execution_owner_mismatch', trace: run.trace, reply_generated: false, reply_queued: false, authoritative_outcome: 'not_available' };
         await heartbeat.stop();
@@ -687,7 +699,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
           const payload = source.envelope?.payload ?? {};
           const fallbackState = typeof conversationContextStore?.get === 'function' ? await conversationContextStore.get(source.envelope.tenantId, payload) : { facts: {} };
           await replyOutboxStore.enqueue({
-            actionId: `${run.run_id}:fallback`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
+            actionId: `${run.run_id}:fallback`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active', releaseId: run.release_id, releaseGeneration: run.release_generation,
             accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
             sourceMessageId: sourcePlatformMessageId(payload) || String(source.envelope.id),
             projectionVersion: conversationProjectionVersion(fallbackState?.facts), expiresAt: Number(run.deadline_at),
@@ -707,7 +719,6 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         return { status: 'completed', run_id: run.run_id, result: persistedResult };
       }
       const payload = source.envelope?.payload ?? {};
-      const settings = await getSettings(source.envelope.tenantId);
       const state = run.mode === 'evaluation'
         ? sourceStateSnapshot(source)
         : run.context_snapshot ?? await sourceTimeState(source.envelope, conversationContextStore);
@@ -734,10 +745,11 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
           });
       const outcome = await agent.runTurn(context, {
         onToolStart: async (call) => {
+          const liveRelease = run.mode === 'active' ? await getSettings(source.envelope.tenantId) : settings;
           const journal = await runStore.beginTool(run.run_id, run.lease_id, {
             callId: `tool:${call.step}:${call.tool}`, step: call.step, tool: call.tool,
             trace: call.trace, observations: call.observations,
-          }, { leaseMs });
+          }, { leaseMs, ...(run.mode === 'active' ? { releaseGeneration: Number(liveRelease?.release_generation) } : {}) });
           if (journal?.state === 'started' && typeof conversationContextStore.appendAgentEvent === 'function') {
             await conversationContextStore.appendAgentEvent(source.envelope.tenantId, payload, {
               id: `${run.run_id}:tool:${call.step}:call`, at: now(), role: 'assistant', content: '',
@@ -761,6 +773,14 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
         onCheckpoint: (checkpoint) => runStore.checkpoint(run.run_id, run.lease_id, checkpoint, { leaseMs }),
         shouldContinue: () => now() < Number(run.deadline_at),
       });
+      if (run.mode === 'active') {
+        const finalRelease = await getSettings(source.envelope.tenantId);
+        if (outcome.reason === 'release_superseded' || Number(run.release_generation) !== Number(finalRelease?.release_generation) || String(run.release_id) !== String(finalRelease?.agent_release_id ?? '')) {
+          await heartbeat.stop();
+          await runStore.supersede(run.run_id, run.lease_id);
+          return { status: 'release_superseded', run_id: run.run_id };
+        }
+      }
       if (deadlineExceeded || now() >= Number(run.deadline_at)) {
         await heartbeat.stop();
         const persistedResult = withSourceSnapshot({ runtime_version: AGENT_RUNTIME_VERSION, status: 'handoff', reason: 'agent_deadline_exceeded', trace: outcome.trace, reply_generated: false, authoritative_outcome: 'not_available' }, source);
@@ -815,7 +835,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
           ? [...(persistedRun?.observations ?? [])].reverse().find((item) => item?.facts?._quote_delivery)?.facts?._quote_delivery ?? null
           : null;
         await replyOutboxStore.enqueue({
-          actionId: `${run.run_id}:${actionSuffix}`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
+          actionId: `${run.run_id}:${actionSuffix}`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active', releaseId: run.release_id, releaseGeneration: run.release_generation,
           accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
           sourceMessageId: sourcePlatformMessageId(payload) || String(source.envelope.id),
           projectionVersion: conversationProjectionVersion(deliveryState?.facts), expiresAt: Number(run.deadline_at),

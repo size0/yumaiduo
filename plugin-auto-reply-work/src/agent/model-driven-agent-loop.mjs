@@ -278,6 +278,7 @@ export function createModelDrivenAgentLoop({ model, tools = {}, maxToolCalls = 1
         if (typeof onToolStart === 'function') journal = await onToolStart(invocation);
         if (journal?.state === 'replay') observation = normalizeNativeObservation(journal.observation, tool);
         else if (journal?.state === 'unknown') observation = normalizeNativeObservation({ status: 'error', code: 'tool_result_unknown', summary: '上次工具执行结果未知，为避免重复写入未再次执行', retryable: false }, tool);
+        else if (journal?.state === 'release_superseded') observation = normalizeNativeObservation({ status: 'error', code: 'release_superseded', summary: '当前任务属于已失效发布代，禁止继续执行工具', retryable: false }, tool);
         else {
           const implementation = resolveNativeTool(tools, tool);
           if (!implementation) observation = normalizeNativeObservation({ status: 'error', code: 'tool_unavailable', summary: `工具 ${tool} 当前不可用`, retryable: false }, tool);
@@ -305,6 +306,9 @@ export function createModelDrivenAgentLoop({ model, tools = {}, maxToolCalls = 1
       // batch serial so write ordering and journal state remain unambiguous.
       if (nativeToolsCanRunInParallel(calls)) await Promise.all(calls.map(executeCall));
       else for (const call of calls) await executeCall(call);
+      if (observations.some((item) => item?.code === 'release_superseded')) {
+        return { status: 'handoff', reason: 'release_superseded', reply: null, trace, metadata: lastMetadata, messages };
+      }
       if (typeof onCheckpoint === 'function') await onCheckpoint({ trace: structuredClone(trace), observations: structuredClone(observations) });
     }
     return { status: 'handoff', reason: 'agent_tool_call_limit', reply: null, trace, metadata: lastMetadata, messages };

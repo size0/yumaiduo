@@ -1,0 +1,16 @@
+[Unit]
+Description=Wanda v37 agent release safety guard
+After=wanda-v3-backend.service wanda-seat-autoquote.service
+Requires=wanda-v3-backend.service wanda-seat-autoquote.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/wanda-v3-backend.env
+WorkingDirectory=/
+ExecStart=/opt/wanda-v3-backend/bin/run_agent_release_guard.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ticket-system
+ProtectHome=true

@@ -28,10 +28,12 @@ from app.quote_preview_store import QuotePreviewStore, empty_pending_record
 def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     response = TestClient(create_app()).get("/health")
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "runtime_contract": "wanda-agent-runtime-v37-model-led-native-tools",
-    }
+    health = response.json()
+    assert health["status"] == "ok"
+    assert health["runtime_contract"] == "wanda-agent-runtime-v37-model-led-native-tools"
+    assert health["runtime_version"] == "wanda-agent-runtime-v37-model-led-native-tools"
+    assert health["release_generation"] >= 1
+    assert "source_commit" in health and "manifest_sha256" in health and "artifact_sha256" in health
 
 
 def test_quote_service_waits_for_delayed_release_rechecks_on_close() -> None:
@@ -434,35 +436,91 @@ def test_runtime_settings_cannot_bypass_atomic_agent_release(tmp_path: Path, mon
     assert response.json()["detail"] == "agent_release_endpoint_required"
 
 
-def test_agent_release_atomically_activates_v37_and_rolls_back(tmp_path: Path, monkeypatch) -> None:
+def test_agent_release_accepts_only_server_evidence_and_fences_rollback(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WANDA_PLUGIN_BRIDGE_KEY", "test-bridge-key")
-    client = TestClient(create_app(plugin_bridge_store=PluginBridgeStore(tmp_path / "plugin_bridge_settings.json")))
+
+    class EvidenceService:
+        def validate_for_activation(self, evidence_id: str, *, current_generation: int) -> dict[str, object]:
+            assert evidence_id == "evidence-v37-test"
+            assert current_generation == 1
+            return {
+                "evidence_id": evidence_id, "release_id": "v37-test",
+                "runtime_version": "wanda-agent-runtime-v37-model-led-native-tools",
+                "source_commit": "a" * 40, "manifest_sha256": "b" * 64,
+                "plugin_artifact_sha256": "c" * 64, "v3_artifact_sha256": "d" * 64,
+                "base_generation": 1, "target_generation": 2,
+            }
+
+        def active_readiness(self, *_args, **_kwargs) -> dict[str, object]:
+            return {"ready": True, "checks": {"evidence": True, "release_guard": True}}
+
+    store = PluginBridgeStore(tmp_path / "plugin_bridge_settings.json")
+    client = TestClient(create_app(
+        store=ModelSettingsStore(tmp_path / "model_config.json"), plugin_bridge_store=store,
+        release_evidence_service=EvidenceService(),
+    ))
+    client.put("/api/settings/model", json={"base_url": "https://model.example", "model": "agent-model", "api_key": "test-key"})
     headers = {"X-Plugin-Bridge-Key": "test-bridge-key"}
-    evaluation = {
-        "failure_replay_count": 100, "image_sample_count": 100,
-        "tool_selection_accuracy": 95, "image_full_path_rate": 95, "completion_rate": 95,
-        "p95_latency_ms": 60_000,
-        "high_risk_actions": 0, "false_transaction_facts": 0, "duplicate_writes": 0,
-        "unknown_result_retries": 0, "cross_tenant_access": 0,
-        "authoritative_inconsistencies": 0, "unsafe_final_replies": 0, "post_deadline_effects": 0,
-    }
-    payload = {
-        "action": "activate", "release_id": "v37-test", "runtime_version": "wanda-agent-runtime-v37-model-led-native-tools",
-        "source_commit": "a" * 40, "manifest_sha256": "b" * 64,
-        "health": {"v3": "wanda-agent-runtime-v37-model-led-native-tools", "plugin": "wanda-agent-runtime-v37-model-led-native-tools"},
-        "evaluation": evaluation, "rollback_verified": True,
-    }
-    activated = client.put("/api/xianyu-plugin/bridge/agent-release", headers=headers, json=payload)
+    forged = client.put(
+        "/api/xianyu-plugin/bridge/agent-release", headers=headers,
+        json={"action": "activate", "evidence_id": "missing", "evaluation": {"completion_rate": 100}, "health": {"v3": "ok"}},
+    )
+    assert forged.status_code == 422
+    assert forged.json()["detail"] == "untrusted_agent_release_fields"
+
+    activated = client.put(
+        "/api/xianyu-plugin/bridge/agent-release", headers=headers,
+        json={"action": "activate", "evidence_id": "evidence-v37-test"},
+    )
     assert activated.status_code == 200
     settings = activated.json()["settings"]
     assert (settings["conversation_agent_mode"], settings["execution_owner"], settings["agent_canary_percentage"], settings["agent_canary_kill_switch"]) == ("active", "agent", 100, False)
-    assert settings["agent_canary_runtime_version"] == "wanda-agent-runtime-v37-model-led-native-tools"
-    assert settings["agent_v2_strict_tenant_validation"] is True
-    repeated = client.put("/api/xianyu-plugin/bridge/agent-release", headers=headers, json=payload)
+    assert settings["release_generation"] == 2
+    assert settings["automation_enabled"] is settings["ai_reply_enabled"] is settings["shadow_evaluation_enabled"] is True
+    repeated = client.put(
+        "/api/xianyu-plugin/bridge/agent-release", headers=headers,
+        json={"action": "activate", "evidence_id": "evidence-v37-test"},
+    )
     assert repeated.status_code == 200
+    assert repeated.json()["settings"]["release_generation"] == 2
+    locked = client.put(
+        "/api/xianyu-plugin/bridge/runtime-settings", headers=headers,
+        json={"ai_reply_enabled": False},
+    )
+    assert locked.status_code == 409
+    assert locked.json()["detail"] == "active_release_settings_locked"
+    model_locked = client.put("/api/settings/model", json={"base_url": "https://other.example", "model": "other", "api_key": "other-key"})
+    assert model_locked.status_code == 409
+    assert model_locked.json()["detail"] == "active_release_settings_locked"
+
     rolled_back = client.put("/api/xianyu-plugin/bridge/agent-release", headers=headers, json={"action": "rollback"})
     rollback_settings = rolled_back.json()["settings"]
     assert (rollback_settings["conversation_agent_mode"], rollback_settings["execution_owner"], rollback_settings["agent_canary_percentage"], rollback_settings["agent_canary_kill_switch"]) == ("shadow", "deterministic", 0, True)
+    assert rollback_settings["release_generation"] == 3
+
+
+def test_health_exposes_immutable_release_identity_and_computed_active_readiness(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WANDA_SOURCE_COMMIT", "a" * 40)
+    monkeypatch.setenv("WANDA_RELEASE_MANIFEST_SHA256", "b" * 64)
+    monkeypatch.setenv("WANDA_V3_ARTIFACT_SHA256", "c" * 64)
+
+    class EvidenceService:
+        def active_readiness(self, *_args, **_kwargs) -> dict[str, object]:
+            return {"ready": False, "checks": {"release_guard": False}}
+
+    client = TestClient(create_app(
+        plugin_bridge_store=PluginBridgeStore(tmp_path / "plugin_bridge_settings.json"),
+        release_evidence_service=EvidenceService(),
+    ))
+    health = client.get("/health").json()
+    assert health["source_commit"] == "a" * 40
+    assert health["manifest_sha256"] == "b" * 64
+    assert health["artifact_sha256"] == "c" * 64
+    assert health["release_generation"] == 1
+    monkeypatch.setenv("WANDA_PLUGIN_BRIDGE_KEY", "test-bridge-key")
+    settings = client.get("/api/xianyu-plugin/bridge/runtime-settings", headers={"X-Plugin-Bridge-Key": "test-bridge-key"}).json()["settings"]
+    assert settings["conversation_agent_active_ready"] is False
+    assert settings["conversation_agent_active_readiness"]["checks"]["release_guard"] is False
 
 
 def test_agent_canary_approval_is_independent_fail_closed_and_revocable(tmp_path: Path, monkeypatch) -> None:

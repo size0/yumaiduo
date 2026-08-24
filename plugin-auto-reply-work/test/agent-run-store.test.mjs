@@ -180,6 +180,32 @@ test('pending write observations survive durable persistence without becoming er
   assert.equal(persisted.tool_calls[0].observation.status, 'pending');
 });
 
+test('release generation fences stale active runs before tool authorization', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-generation-')), 'runs.json');
+  const store = new AgentRunStore(file);
+  await store.initialize();
+  await store.enqueue({
+    runId: 'active:generation', eventKey: 'tenant-1:generation', tenantId: 'tenant-1', mode: 'active',
+    releaseId: 'release-7', releaseGeneration: 7,
+  });
+  assert.equal(await store.claimDue({ releaseGeneration: 8 }), null);
+  const superseded = await store.get('active:generation');
+  assert.equal(superseded.status, 'release_superseded');
+  assert.equal(superseded.release_generation, 7);
+
+  await store.enqueue({
+    runId: 'active:tool-generation', eventKey: 'tenant-1:tool-generation', tenantId: 'tenant-1', mode: 'active',
+    releaseId: 'release-8', releaseGeneration: 8,
+  });
+  const running = await store.claimDue({ releaseGeneration: 8 });
+  const authorization = await store.beginTool(running.run_id, running.lease_id, {
+    callId: 'call-1', step: 1, tool: 'change_order_price', trace: [], observations: [],
+  }, { releaseGeneration: 9 });
+  assert.equal(authorization.state, 'release_superseded');
+  await store.supersede(running.run_id, running.lease_id);
+  assert.equal((await store.get(running.run_id)).status, 'release_superseded');
+});
+
 test('agent run checkpoint rejects stale leases and stores only bounded observation fields', async () => {
   const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-runs-')), 'runs.json');
   const store = new AgentRunStore(file);

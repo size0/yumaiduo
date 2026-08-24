@@ -73,6 +73,21 @@ test('reply outbox never claims a reply after the shared agent deadline', async 
   assert.equal((await store.get('active:expired')).last_error, 'agent_deadline_exceeded');
 });
 
+test('release generation fences queued active replies before claim', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'wanda-agent-generation-outbox-')), 'outbox.json');
+  const store = new AgentReplyOutboxStore(file);
+  await store.initialize();
+  await store.enqueue({
+    actionId: 'reply-generation-1', runId: 'active:generation', tenantId: 'tenant-1', mode: 'active',
+    accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', text: '不会发送',
+    releaseId: 'release-7', releaseGeneration: 7,
+  });
+  assert.equal(await store.claimDue({ releaseGeneration: 8 }), null);
+  const entry = await store.get('reply-generation-1');
+  assert.equal(entry.status, 'release_superseded');
+  assert.equal(entry.release_generation, 7);
+});
+
 test('reply outbox rejects shadow writes and never blindly retries an unknown send result', async () => {
   let now = 10_000;
   const store = new AgentReplyOutboxStore(join(await mkdtemp(join(tmpdir(), 'wanda-agent-outbox-')), 'outbox.json'), { now: () => now });

@@ -6,6 +6,8 @@ import test from 'node:test';
 import { AgentRunStore } from '../src/agent/agent-run-store.mjs';
 import { AGENT_RUNTIME_VERSION, createShadowAgentRuntime } from '../src/agent/shadow-agent-runtime.mjs';
 
+const withRelease = (settings = {}) => ({ agent_release_id: 'test-release', release_generation: 1, ...settings });
+
 const envelope = {
   id: 'event-1', tenantId: 'tenant-1', event: 'im.message.received', ts: 1,
   payload: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', content: '两张多少钱', imageUrls: ['https://img.alicdn.com/a.png'] },
@@ -29,7 +31,7 @@ test('scheduling persists a workflow-projected source-time buyer and seller hist
       { direction: 'outbound', messageId: 'seller-plugin', content: '未来插件回复', sentAt: '2026-08-23T04:00:03Z' },
     ] }; } } }; },
     planner: { async plan() { throw new Error('not used'); } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
   });
 
   await runtime.schedule(sourceEnvelope, { contextSnapshot: {
@@ -60,7 +62,7 @@ test('live shadow planning uses the durable source-time snapshot instead of muta
       planned.push(input);
       return { intent: '其他', confidence: 0.99, goal: '安全结束', action: 'wait', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '测试快照' };
     } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
   });
   await runtime.schedule({ ...envelope, payload: { ...envelope.payload, imageUrls: [], content: '还有W座位吗' } });
   state = { facts: { stage: 'paid_manual_delivery', paid: true }, messages: [{ at: 2, role: 'buyer', text: '未来已付款' }] };
@@ -85,7 +87,7 @@ test('shadow agent fails closed when a successful source quote lacks its authori
       const action = actions[input.observations.length];
       return { intent: '选座核价', confidence: 0.98, goal: '按权威观察推进', action, arguments: {}, missing_fields: [], reply: action === 'respond' ? '影子建议不会发送' : '', needs_human: false, reason: '根据观察继续' };
     } },
-    getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
   });
   await runtime.schedule(envelope);
   const result = await runtime.tick();
@@ -115,7 +117,7 @@ test('live Shadow runs ignore retired secondary advisory hooks', async () => {
       async plan() { return { intent: '其他', confidence: 0.99, goal: '问候', action: 'respond', arguments: {}, missing_fields: [], reply: '您好，请问需要查询什么？', needs_human: false, reason: '普通问候' }; },
       evaluateShadow() { retiredProviderCalls += 1; throw new Error('retired provider must not run'); },
     },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
   });
   await runtime.schedule(advisoryEnvelope);
   await runtime.tick();
@@ -139,7 +141,7 @@ test('shadow runtime replays a persisted authoritative reply without asking the 
       const action = ['recognize_image', 'resolve_showtime', 'quote_realtime'][input.observations.length];
       return { intent: '选座核价', confidence: 0.99, goal: '按顺序读取权威结果', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '工具推进' };
     } },
-    getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
   });
   await runtime.schedule(envelope);
   await runtime.tick();
@@ -162,7 +164,7 @@ test('shadow runtime stops a silent duplicate draft without asking the model to 
       const action = ['recognize_image', 'resolve_showtime', 'quote_realtime'][input.observations.length];
       return { intent: '选座核价', confidence: 0.99, goal: '按顺序读取结果', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '工具推进' };
     } },
-    getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
   });
   await runtime.schedule(envelope);
   await runtime.tick();
@@ -183,7 +185,7 @@ test('shadow runtime uses a delivered deterministic follow-up as the authoritati
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: followUpEnvelope, result: { agent_reply_snapshot: { kind: 'conversation_follow_up', text: '当前实时可选座位以系统列表为准。' } } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
     planner: { async plan() { planned += 1; return { intent: '选座核价', confidence: 0.99, goal: '查询座位', action: 'show_available_wplus_seats', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '座位咨询' }; } },
-    getSettings: async () => ({ quote_enabled: true }),
+    getSettings: async () => withRelease({ quote_enabled: true }),
   });
   await runtime.schedule(followUpEnvelope);
   await runtime.tick();
@@ -203,7 +205,7 @@ test('shadow seat-preference simulation preserves a delivered deterministic foll
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: preferenceEnvelope, result: { agent_reply_snapshot: { kind: 'conversation_follow_up', text: '已记录文字座位偏好，具体以出票时实时可选为准。' } } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
     planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '记录偏好', action: 'record_seat_preference', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '文字座位' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
   });
   await runtime.schedule(preferenceEnvelope);
   await runtime.tick();
@@ -228,7 +230,7 @@ test('historical confirmation uses the source-time quote snapshot instead of lat
     }; } },
     conversationContextStore: { async get() { return { facts: { stage: 'paid_manual_delivery' }, messages: [] }; } },
     planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '处理确认', action: 'wait', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '模型误判' }; } },
-    getSettings: async () => ({}), now: () => 1_000,
+    getSettings: async () => withRelease(), now: () => 1_000,
   });
   await runtime.schedule(confirmationEnvelope, { mode: 'evaluation' });
   await runtime.tick();
@@ -252,7 +254,7 @@ test('historical evaluation runs are versioned, side-effect-free, and independen
       const action = actions[input.observations.length];
       return { intent: '选座核价', confidence: 0.99, goal: '历史离线评测', action, arguments: {}, missing_fields: [], reply: action === 'respond' ? '只记录不发送' : '', needs_human: false, reason: '按只读观察推进' };
     } },
-    getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
   });
   const scheduled = await runtime.schedule(envelope, { mode: 'evaluation' });
   assert.equal(scheduled.created, true);
@@ -280,7 +282,7 @@ test('Active semantic seat preference is persisted without claiming an official 
       async recordSeatPreference(tenantId, payload, value) { recorded.push([tenantId, payload.peerUnb, value]); return true; },
     },
     planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '记录位置偏好', action: 'record_seat_preference', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家描述靠后偏好' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
   await runtime.schedule(preferenceEnvelope, { mode: 'active' });
@@ -309,7 +311,7 @@ test('shadow and evaluation write-shaped plans remain externally side-effect-fre
           async recordCircledDeliveryInstruction() { throw new Error(`${mode} must not write conversation state`); },
         },
         planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '记录偏好', action: 'record_seat_preference', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '文字座位' }; } },
-        getSettings: async () => ({}),
+        getSettings: async () => withRelease(),
         manualTaskStore: { async create() { throw new Error(`${mode} must not create manual tasks`); } },
         replyOutboxStore: { async enqueue() { throw new Error(`${mode} must not enqueue replies`); } },
         coreFor() { throw new Error(`${mode} must not call platform APIs`); },
@@ -343,7 +345,7 @@ test('durable active agent queues a bounded reply in the outbox instead of sendi
     planner: {
       async plan() { return { intent: '其他', confidence: 0.98, goal: '说明流程', action: 'respond', arguments: {}, missing_fields: [], reply: '请发送完整选座页截图并说明张数。', needs_human: false, reason: '流程咨询' }; },
     },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue(input) { queuedReplies.push(input); return { created: true, entry: { status: 'pending' } }; } },
   });
   await runtime.schedule(activeEnvelope, { mode: 'active' });
@@ -352,6 +354,7 @@ test('durable active agent queues a bounded reply in the outbox instead of sendi
   assert.equal(result.result.reply_queued, true);
   assert.deepEqual(queuedReplies, [{
     actionId: 'active:tenant-1:event-1:reply', runId: 'active:tenant-1:event-1', tenantId: 'tenant-1', mode: 'active',
+    releaseId: 'test-release', releaseGeneration: 1,
     accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', sourceMessageId: 'event-1',
     projectionVersion: '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
     expiresAt: queuedReplies[0].expiresAt,
@@ -375,7 +378,7 @@ test('durable active confirmation delegates to the deterministic quote confirmat
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: contextStore,
     planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '确认报价', action: 'confirm_quote', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家确认' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
   await runtime.schedule(activeEnvelope, { mode: 'active' });
@@ -402,7 +405,7 @@ test('native unsafe transaction claims never reach the outbox after the one repa
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { stage: 'quoted', quote_confirmed: false }, messages: [] }; } },
     planner,
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     manualTaskStore: { async create(input) { tasks.push(input); return { created: true }; } },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -437,7 +440,7 @@ test('native confirmation tool rejects a model miscall without explicit buyer co
       async markQuoteConfirmed() { throw new Error('native tool must not use the legacy confirmation gate'); },
     },
     planner,
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue() { return { created: true }; } },
   });
   await runtime.schedule(activeEnvelope, { mode: 'active' });
@@ -475,7 +478,7 @@ test('native price change always reloads and claims the latest confirmed quote v
       async completePriceChangeCommand() { return true; },
     },
     planner,
-    getSettings: async () => ({ automation_enabled: true, price_change_enabled: true, max_auto_order_amount_cents: 20_000 }),
+    getSettings: async () => withRelease({ automation_enabled: true, price_change_enabled: true, max_auto_order_amount_cents: 20_000 }),
     executeAction: async (action) => { executed.push(action); return { status: 'submitted', amount_cents: action.price_fee }; },
     replyOutboxStore: { async enqueue() { return { created: true }; } },
   });
@@ -501,7 +504,7 @@ test('active confirmation refuses an expired or undelivered quote without claimi
       async confirmQuoteFromBuyerMessage() { return false; },
     },
     planner: { async plan() { return { intent: '补充信息', confidence: 0.99, goal: '确认报价', action: 'confirm_quote', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家确认' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
   await runtime.schedule(activeEnvelope, { mode: 'active' });
@@ -524,7 +527,7 @@ test('manual task status is read by exact conversation without exposing task or 
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
     planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '查询人工进度', action: 'respond', arguments: {}, missing_fields: [], reply: '模型不得猜测进度', needs_human: false, reason: '进度咨询' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     manualTaskStore: { async findLatestForConversation(tenantId, address) { lookups.push([tenantId, address]); return { task_id: 'secret-task', order_id: 'secret-order', assignee: 'secret-operator', status: 'resolved' }; } },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -551,7 +554,7 @@ test('historical manual task evaluation never reads mutable current task state',
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: statusEnvelope, result: {} }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
     planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '查询人工进度', action: 'get_manual_task_status', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '进度咨询' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     manualTaskStore: { async findLatestForConversation() { reads += 1; return null; } },
   });
   const scheduled = await runtime.schedule(statusEnvelope, { mode: 'evaluation' });
@@ -574,7 +577,7 @@ test('Shadow can evaluate a parameterless price-change request without executing
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: requestEnvelope, result: {} }; } },
     conversationContextStore: { async get() { return { facts: { order_id: 'system-only', quote_confirmed: true, quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000 }, messages: [] }; } },
-    planner: { async plan() { return plans.shift(); } }, getSettings: async () => ({}),
+    planner: { async plan() { return plans.shift(); } }, getSettings: async () => withRelease(),
     coreFor() { platformCalls += 1; throw new Error('Shadow must not access platform writes'); },
   });
   await runtime.schedule(requestEnvelope, { mode: 'shadow' });
@@ -595,7 +598,7 @@ test('Active price-change requests remain hard-disabled before any tool executio
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: requestEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { order_id: 'system-only', quote_confirmed: true, quote_total_cents: 10_000, quote_ticket_count: 2, quote_expires_at: Date.now() + 60_000 }, messages: [] }; } },
     planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '申请改价', action: 'request_price_change', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '订单待付款' }; } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue() { writes += 1; return { created: true }; } },
     coreFor() { writes += 1; throw new Error('disabled request must not reach platform'); },
   });
@@ -618,7 +621,7 @@ test('Active W+ seat lookup uses the read-only realtime endpoint with a system-p
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: seatEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { quote_draft: { recognition_artifact: { status: 'recognized', tenant_id: 'tenant-1', recognition } } }, messages: [] }; } },
     planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '查询W+座位', action: 'show_available_wplus_seats', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '买家询问8排' }; } },
-    getSettings: async () => ({ quote_enabled: true }),
+    getSettings: async () => withRelease({ quote_enabled: true }),
     quotePreviewClient: {
       async availableSeats(input) { calls.push(input); return { row: 8, seats: ['8排10座', '8排11座'], available_count: 2, wplus_offer_available: true, matched_cinema_name: '测试万达影城' }; },
       async quote() { throw new Error('seat lookup must not start a temporary price probe'); },
@@ -656,7 +659,7 @@ test('Active ordinal follow-up resolves the persisted cinema candidate before re
       const action = input.observations.length === 0 ? 'resolve_ticket_identity' : 'show_available_wplus_seats';
       return { intent: '补充信息', confidence: 0.99, goal: '解析上一轮影院候选', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '序号指代候选' };
     } },
-    getSettings: async () => ({ recognition_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true }),
     quotePreviewClient: {
       async recognize() { throw new Error('ordinal reference must reuse the candidate set'); },
       async resolveShowtime(input) { resolvedCinemas.push(input.recognition.cinema); return { ...input, status: 'resolved' }; },
@@ -685,7 +688,7 @@ test('Active text-only W+ question resolves identity then reads all current W+ s
       const action = input.observations.length === 0 ? 'resolve_ticket_identity' : 'show_available_wplus_seats';
       return { intent: '选座核价', confidence: 0.99, goal: '查询实时W+库存', action, arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '纯文字场次信息完整' };
     } },
-    getSettings: async () => ({ recognition_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true }),
     quotePreviewClient: {
       async recognize(input) { calls.push(['recognize', input.payload.content]); return { status: 'recognized', tenant_id: 'tenant-1', recognition, text_quote: true }; },
       async resolveShowtime(input) { calls.push(['resolve', input.recognition]); return { ...input, status: 'resolved', recognition }; },
@@ -714,7 +717,7 @@ test('Active W+ seat lookup with reusable identity may list all rows when no row
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: seatEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { quote_draft: { recognition_artifact: { status: 'recognized', tenant_id: 'tenant-1', recognition: { cinema: '测试万达' } } } }, messages: [] }; } },
     planner: { async plan() { return { intent: '选座核价', confidence: 0.99, goal: '查询W+座位', action: 'show_available_wplus_seats', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '座位咨询' }; } },
-    getSettings: async () => ({ quote_enabled: true }),
+    getSettings: async () => withRelease({ quote_enabled: true }),
     quotePreviewClient: { async availableSeats(input) { calls += 1; assert.equal(input.row, null); return { row: null, seats: ['8排10座'], available_count: 1, wplus_offer_available: true, matched_cinema_name: '测试万达' }; } },
     replyOutboxStore: { async enqueue() { return { created: true }; } },
   });
@@ -736,7 +739,7 @@ test('durable active image turn invokes real recognition, read-only resolution, 
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
-    planner: { async plan() { return plans.shift(); } }, getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    planner: { async plan() { return plans.shift(); } }, getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
     quotePreviewClient: {
       async recognize(input) { calls.push(['recognize', input.id]); return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 }, hand_drawn_circle: { exists: true } } }; },
       async resolveShowtime(input) { calls.push(['resolve', input.recognition.cinema]); return { ...input, status: 'resolved' }; },
@@ -773,7 +776,7 @@ test('active quote tool cannot execute before read-only showtime resolution', as
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
-    planner: { async plan() { return plans.shift(); } }, getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    planner: { async plan() { return plans.shift(); } }, getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
     quotePreviewClient: {
       async recognize() { return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 }, hand_drawn_circle: { exists: false } } }; },
       async resolveShowtime(input) { return { ...input, status: 'resolved' }; },
@@ -803,7 +806,7 @@ test('durable active read_linked_order returns a minimal authoritative order obs
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { order_id: 'platform-order-secret', stage: 'waiting_payment' }, messages: [] }; } },
-    planner: { async plan() { return plans.shift(); } }, getSettings: async () => ({}),
+    planner: { async plan() { return plans.shift(); } }, getSettings: async () => withRelease(),
     coreFor() { return { orders: { async get(orderId) { assert.equal(orderId, 'platform-order-secret'); return { orderStatus: 2, orderStatusText: '<b>买家已付款</b>', buyerNick: 'sensitive-buyer', payment: 9999 }; } } }; },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -825,7 +828,7 @@ test('active quote clarification uses the persisted quote instead of a vague man
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { stage: 'quoted', quote_unit_cents: 5950, quote_total_cents: 5950, quote_ticket_count: 1, quote_expires_at: Date.now() + 60_000 }, messages: [] }; } },
-    planner: { async plan() { return {}; } }, getSettings: async () => ({}),
+    planner: { async plan() { return {}; } }, getSettings: async () => withRelease(),
     manualTaskStore: { async create() { return { created: true, task: { status: 'open' } }; } },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -847,7 +850,7 @@ test('durable active order-read failure creates an idempotent manual task and qu
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
     conversationContextStore: { async get() { return { facts: { order_id: 'platform-order-secret', stage: 'waiting_payment' }, messages: [] }; } },
     planner: { async plan() { return { intent: '订单进度', confidence: 0.99, goal: '读取订单', action: 'read_linked_order', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '订单咨询' }; } },
-    getSettings: async () => ({}), coreFor() { return { orders: { async get() { throw new Error('upstream secret failure'); } } }; },
+    getSettings: async () => withRelease(), coreFor() { return { orders: { async get() { throw new Error('upstream secret failure'); } } }; },
     manualTaskStore: { async create(input) { manual.push(input); return { created: true, task: { status: 'open' } }; } },
     replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
   });
@@ -869,7 +872,7 @@ test('durable active agent refuses a source turn not assigned to the agent owner
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'deterministic' } }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
-    planner: { async plan() { planned += 1; throw new Error('must not plan'); } }, getSettings: async () => ({}),
+    planner: { async plan() { planned += 1; throw new Error('must not plan'); } }, getSettings: async () => withRelease(),
     replyOutboxStore: { async enqueue() { queued += 1; } },
   });
   await runtime.schedule(activeEnvelope, { mode: 'active' });
@@ -897,7 +900,7 @@ test('shadow agent renews its independent lease while a model call is slow', asy
       await new Promise((resolve) => setTimeout(resolve, 35));
       return { intent: '其他', confidence: 0.98, goal: '结束', action: 'respond', arguments: {}, missing_fields: [], reply: '影子回复', needs_human: false, reason: '完成' };
     } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     heartbeatMs: 10,
   });
   await runtime.schedule(envelope);
@@ -920,7 +923,7 @@ test('shadow agent shutdown aborts an in-flight model request without waiting fo
         input.signal.addEventListener('abort', () => reject(input.signal.reason ?? new Error('aborted')), { once: true });
       });
     } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
   });
   await runtime.schedule(envelope);
   const tick = runtime.tick();
@@ -946,12 +949,35 @@ test('shadow agent recovery never repeats a tool whose prior result is unknown',
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope, result: {} }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
     planner: { async plan() { planned += 1; throw new Error('must not replan unknown tool'); } },
-    getSettings: async () => ({}), now: () => now,
+    getSettings: async () => withRelease(), now: () => now,
   });
   const result = await runtime.tick();
   assert.equal(result.status, 'completed');
   assert.equal(result.result.reason, 'agent_tool_result_unknown');
   assert.equal(planned, 0);
+});
+
+test('late model results from a rolled-back release generation cannot enqueue a reply', async () => {
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-late-generation-')), 'runs.json'));
+  await store.initialize();
+  let generation = 1; const queued = [];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    planner: { async complete() {
+      generation = 2;
+      return { model: 'test', request_id: 'request-1', assistant: { role: 'assistant', content: '迟到回复' }, usage: {}, versions: {} };
+    } },
+    getSettings: async () => ({ agent_release_id: generation === 1 ? 'release-1' : 'release-rollback', release_generation: generation }),
+    replyOutboxStore: { async enqueue(input) { queued.push(input); } },
+    requireNativeActive: true,
+  });
+  await runtime.schedule(envelope, { mode: 'active' });
+  const result = await runtime.tick();
+  assert.equal(result.status, 'release_superseded');
+  assert.equal(queued.length, 0);
+  assert.equal((await store.get('active:tenant-1:event-1')).status, 'release_superseded');
 });
 
 test('shadow agent persists a timed-out result when the run deadline is crossed', async () => {
@@ -966,7 +992,7 @@ test('shadow agent persists a timed-out result when the run deadline is crossed'
       now = 31_001;
       return { intent: '选座核价', confidence: 0.98, goal: '识图', action: 'recognize_image', arguments: {}, missing_fields: [], reply: '', needs_human: false, reason: '调用工具' };
     } },
-    getSettings: async () => ({}),
+    getSettings: async () => withRelease(),
     deadlineMs: 30_000,
     now: () => now,
   });
@@ -986,7 +1012,7 @@ test('shadow agent defers without model calls until the source business event is
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'processing', envelope, result: null }; } },
     conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
     planner: { async plan() { planned += 1; throw new Error('must wait'); } },
-    getSettings: async () => ({ recognition_enabled: true, quote_enabled: true }),
+    getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
   });
   await runtime.schedule(envelope);
   assert.equal((await runtime.tick()).status, 'deferred');
