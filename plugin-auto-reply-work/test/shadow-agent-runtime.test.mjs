@@ -731,14 +731,17 @@ test('Active W+ seat lookup with reusable identity may list all rows when no row
 test('durable active image turn invokes real recognition, read-only resolution, and realtime quote tools in order', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-real-quote-')), 'runs.json'));
   await store.initialize();
-  const calls = []; const queued = [];
+  const calls = []; const queued = []; const drafts = [];
   const plans = ['recognize_image', 'resolve_showtime', 'quote_realtime', 'respond'].map((action) => ({
     intent: '选座核价', confidence: 0.99, goal: '取得权威报价', action, arguments: {}, missing_fields: [], reply: action === 'respond' ? '模型报价不得采用' : '', needs_human: false, reason: '按工具顺序执行',
   }));
   const runtime = createShadowAgentRuntime({
     runStore: store,
     eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope, result: { execution_owner: 'agent' } }; } },
-    conversationContextStore: { async get() { return { facts: {}, messages: [] }; } },
+    conversationContextStore: {
+      async get() { return { facts: {}, messages: [] }; },
+      async recordQuoteDraft(tenantId, payload, draft) { drafts.push({ tenantId, payload, draft }); return draft; },
+    },
     planner: { async plan() { return plans.shift(); } }, getSettings: async () => withRelease({ recognition_enabled: true, quote_enabled: true }),
     quotePreviewClient: {
       async recognize(input) { calls.push(['recognize', input.id]); return { status: 'recognized', tenant_id: 'tenant-1', ticket_count: 1, recognition: { image_type: 'SEAT_MAP', cinema: '测试万达', movie: '测试电影', date: '2026-08-22', showtime: '19:30', official_selection: { is_selected: true, selected_seat_numbers: ['6排16座'], selected_count: 1 }, hand_drawn_circle: { exists: true } } }; },
@@ -750,6 +753,12 @@ test('durable active image turn invokes real recognition, read-only resolution, 
   await runtime.schedule(envelope, { mode: 'active' });
   await runtime.tick();
   assert.deepEqual(calls, [['recognize', 'event-1'], ['resolve', '测试万达'], ['quoteDirect', 'resolved']]);
+  assert.equal(drafts.length, 2);
+  assert.equal(drafts[0].tenantId, 'tenant-1');
+  assert.equal(drafts[0].draft.recognition.cinema, '测试万达');
+  assert.equal(drafts[0].draft.ticketCount, 1);
+  assert.equal(drafts[0].draft.imageUrl, 'https://img.alicdn.com/a.png');
+  assert.equal(drafts[1].draft.recognitionArtifact.status, 'resolved');
   assert.equal(queued.length, 1);
   assert.equal(queued[0].text, '实时单价50.00元/张，1张合计50.00元。\n接受本次报价请回复“确认”。');
   assert.doesNotMatch(queued[0].text, /模型报价不得采用/u);

@@ -134,7 +134,9 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
     try { quoteInput = compactQuoteInput(state?.facts?.quote_draft?.recognition_artifact); }
     catch { quoteInput = null; }
   }
-  let showtimeResolved = initialObservations.some((item) => item?.tool === 'resolve_showtime' && item?.status === 'success' && (mode !== 'active' || item?.facts?._quote_input));
+  const persistedRecognitionStatus = text(state?.facts?.quote_draft?.recognition_artifact?.status, 32);
+  let showtimeResolved = persistedRecognitionStatus === 'resolved'
+    || initialObservations.some((item) => item?.tool === 'resolve_showtime' && item?.status === 'success' && (mode !== 'active' || item?.facts?._quote_input));
   const identityFacts = Object.fromEntries(['city', 'cinema', 'movie', 'date', 'showtime', 'hall']
     .map((key) => [key, state?.facts?.[key]])
     .filter(([, value]) => value != null && String(value).trim()));
@@ -213,6 +215,15 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       if (recognized?.status !== 'recognized') return { status: 'error', tool: 'recognize_image', summary: '图片未形成可核验的票务事实', facts: {}, authoritative_reply: text(recognized?.reply_text, 500), next_actions: ['create_manual_task'], stop_reason: text(recognized?.failure_code, 100) || 'recognition_not_usable' };
       quoteInput = compactQuoteInput(recognized);
       showtimeResolved = false;
+      if (typeof conversationContextStore?.recordQuoteDraft === 'function') {
+        await conversationContextStore.recordQuoteDraft(source.envelope.tenantId, source.envelope.payload ?? {}, {
+          recognition: recognized.recognition,
+          ticketCount: Number.isInteger(recognized.ticket_count) ? recognized.ticket_count : null,
+          imageUrl: latestSourceImageUrl(source.envelope.payload),
+          fieldSources: recognized.field_sources,
+          recognitionArtifact: recognized,
+        });
+      }
       const facts = { ...boundedIdentity(recognized.recognition), requested_ticket_count: Number.isInteger(recognized.ticket_count) ? recognized.ticket_count : null, _quote_input: quoteInput };
       return { status: 'success', tool: 'recognize_image', summary: '权威识图已完成', facts, next_actions: ['resolve_showtime'] };
     },
@@ -229,6 +240,15 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
       if (resolved?.status !== 'resolved') return { status: 'error', tool: 'resolve_showtime', summary: '影院场次未能唯一匹配', facts: {}, next_actions: ['create_manual_task'], stop_reason: text(resolved?.failure_code, 100) || 'showtime_not_unique' };
       quoteInput = compactQuoteInput(resolved);
       showtimeResolved = true;
+      if (typeof conversationContextStore?.recordQuoteDraft === 'function') {
+        await conversationContextStore.recordQuoteDraft(source.envelope.tenantId, source.envelope.payload ?? {}, {
+          recognition: resolved.recognition,
+          ticketCount: Number.isInteger(resolved.ticket_count) ? resolved.ticket_count : null,
+          imageUrl: latestSourceImageUrl(source.envelope.payload),
+          fieldSources: resolved.field_sources,
+          recognitionArtifact: resolved,
+        });
+      }
       return { status: 'success', tool: 'resolve_showtime', summary: '影院、影片、日期和场次已唯一匹配', facts: { ...boundedIdentity(resolved.recognition), _quote_input: quoteInput }, next_actions: ['quote_realtime'] };
     },
     async quote_realtime() {
