@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v35-source-turn-supersession';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v36-contextual-fallbacks';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -352,7 +352,7 @@ function runtimeTools(source, state, mode, conversationContextStore, manualTaskS
         accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
         orderId: String(state?.facts?.order_id ?? ''), reasonCode: 'agent_requested_manual_review', summary: 'Agent请求人工处理', source: 'agent',
       });
-      return { status: 'success', tool: 'create_manual_task', summary: created.created ? '已创建人工处理任务' : '人工处理任务已存在', facts: { manual_task_created: created.created }, authoritative_reply: '这个问题需要人工进一步确认，已记录处理，请稍候。', next_actions: ['respond'] };
+      return { status: 'success', tool: 'create_manual_task', summary: created.created ? '已创建人工处理任务' : '人工处理任务已存在', facts: { manual_task_created: created.created }, authoritative_reply: '当前问题无法由自动工具核验，已转人工客服在本会话继续处理。', next_actions: ['respond'] };
     },
     async get_manual_task_status() {
       if (mode === 'evaluation') {
@@ -484,7 +484,7 @@ function activeQuoteClarificationReply(state, message, nowValue) {
   const expiresAt = safePositiveInteger(facts.quote_expires_at);
   const active = ['quoted', 'quote_confirmed', 'waiting_payment'].includes(String(facts.stage ?? ''))
     && unit && total && count && expiresAt && expiresAt > nowValue;
-  if (!active || !/(?:灰色|W\+|W座|能买吗|代买|买到|这些?位置|这几个位置)/iu.test(String(message ?? ''))) return '';
+  if (!active || !/(?:灰色|W\+|W座|能买吗|代买|买到|这些?位置|这几个位置|[一二两三四五六七八九十\d]+张)/iu.test(String(message ?? ''))) return '';
   return `系统刚才已通过万达实时核验，当前有效报价是${(unit / 100).toFixed(2)}元/张，${count}张合计${(total / 100).toFixed(2)}元。座位状态可能变化；需要按这份报价购买请回复“确认”。`;
 }
 
@@ -565,7 +565,8 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
           await replyOutboxStore.enqueue({
             actionId: `${run.run_id}:fallback`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
             accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
-            ...(sourcePlatformMessageId(payload) ? { sourceMessageId: sourcePlatformMessageId(payload) } : {}), text: '这个问题需要人工进一步确认，已记录处理，请稍候。',
+            ...(sourcePlatformMessageId(payload) ? { sourceMessageId: sourcePlatformMessageId(payload) } : {}),
+            text: '本次工具执行结果暂时无法确认，为避免重复操作已停止自动处理，并转人工核对。',
           });
           replyQueued = true;
         }
@@ -610,14 +611,20 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
       });
       await heartbeat.stop();
       let replyQueued = false;
-      let queuedReply = outcome.status === 'reply' && typeof outcome.reply === 'string' ? outcome.reply.trim() : '';
+      let queuedReply = typeof outcome.reply === 'string' ? outcome.reply.trim() : '';
       let actionSuffix = 'reply';
       const persistedRun = run.mode === 'active' && typeof runStore.get === 'function' ? await runStore.get(run.run_id) : run;
       if (run.mode === 'active' && outcome.status === 'handoff' && await createFallbackManualTask(manualTaskStore, source, context.state?.facts?.order_id)) {
         const message = payload.content ?? payload.text ?? '';
         const quoteClarification = activeQuoteClarificationReply(context.state, message, now());
-        const attemptedAuthorityTool = Array.isArray(persistedRun?.tool_calls) && persistedRun.tool_calls.length > 0;
-        queuedReply = quoteClarification || (attemptedAuthorityTool ? '这个问题需要人工进一步确认，已记录处理，请稍候。' : '');
+        const toolCalls = Array.isArray(persistedRun?.tool_calls) ? persistedRun.tool_calls : [];
+        const lastTool = String(toolCalls.at(-1)?.tool ?? '');
+        const toolFailureReply = lastTool === 'read_linked_order'
+          ? '当前暂时无法读取订单最新状态，已转人工核对，请以闲鱼订单页显示为准。'
+          : ['recognize_image', 'resolve_showtime', 'quote_realtime'].includes(lastTool)
+            ? '本次实时核验未能安全完成，已停止自动处理，请勿付款，人工客服会继续核对。'
+            : '';
+        queuedReply = quoteClarification || queuedReply || toolFailureReply;
         actionSuffix = quoteClarification ? 'quote-clarification-fallback' : 'fallback';
       }
       if (run.mode === 'active' && queuedReply) {

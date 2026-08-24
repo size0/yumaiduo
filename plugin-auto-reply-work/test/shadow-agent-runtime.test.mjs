@@ -753,7 +753,7 @@ test('durable active order-read failure creates an idempotent manual task and qu
   assert.equal(manual.length, 1);
   assert.equal(manual[0].taskId, 'agent:tenant-1:event-1:fallback');
   assert.equal(manual[0].orderId, 'platform-order-secret');
-  assert.equal(queued[0].text, '这个问题需要人工进一步确认，已记录处理，请稍候。');
+  assert.equal(queued[0].text, '当前暂时无法读取订单最新状态，已转人工核对，请以闲鱼订单页显示为准。');
   assert.doesNotMatch(JSON.stringify(queued), /secret failure|platform-order-secret/u);
 });
 

@@ -1006,7 +1006,7 @@ export function createWorkflow({
           return {
             status: 'success', tool: 'create_manual_task', summary: created.created ? '已创建人工处理任务' : '人工处理任务已存在',
             facts: { manual_task_created: created.created },
-            authoritative_reply: configuredReply(settings, 'manual_handoff', '这个问题需要人工进一步确认，已记录处理，请稍候。'),
+            authoritative_reply: configuredReply(settings, 'manual_handoff', '当前问题无法由自动工具核验，已转人工客服在本会话继续处理。'),
             next_actions: ['respond'],
           };
         },

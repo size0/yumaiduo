@@ -2365,7 +2365,7 @@ test('active create_manual_task derives a persistent task from system context wi
     accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', orderId: 'order-from-system',
     reasonCode: 'agent_requested_manual_review', summary: 'Agent请求人工处理', source: 'agent',
   });
-  assert.equal(calls.find(([name]) => name === 'send')[1].text, '这个问题需要人工进一步确认，已记录处理，请稍候。');
+  assert.equal(calls.find(([name]) => name === 'send')[1].text, '当前问题无法由自动工具核验，已转人工客服在本会话继续处理。');
 });
 
 test('conversation agent receives bounded buyer and seller platform history', async () => {
