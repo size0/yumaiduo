@@ -36,7 +36,8 @@ function quoteDelivery(value) {
 function external(entry) {
   return Object.freeze({
     action_id: entry.actionId, run_id: entry.runId, tenant_id: entry.tenantId, mode: entry.mode,
-    account_unb: entry.accountUnb, chat_id: entry.chatId, peer_unb: entry.peerUnb, text: entry.text,
+    account_unb: entry.accountUnb, chat_id: entry.chatId, peer_unb: entry.peerUnb,
+    source_message_id: entry.sourceMessageId ?? '', text: entry.text,
     status: entry.status, attempts: entry.attempts, available_at: entry.availableAt,
     lease_id: entry.leaseId, lease_until: entry.leaseUntil,
     platform_message_id: entry.platformMessageId, delivery: clone(entry.delivery ?? null), last_error: entry.lastError,
@@ -57,6 +58,7 @@ export class AgentReplyOutboxStore {
   async enqueue(input) {
     const actionId = bounded(input?.actionId, 300); const runId = bounded(input?.runId, 240); const tenantId = bounded(input?.tenantId, 128);
     const accountUnb = bounded(input?.accountUnb, 128); const chatId = bounded(input?.chatId, 128); const peerUnb = bounded(input?.peerUnb, 128);
+    const sourceMessageId = bounded(input?.sourceMessageId, 240);
     const text = bounded(input?.text, 1_000); const mode = bounded(input?.mode, 16); const delivery = quoteDelivery(input?.delivery);
     if (mode !== 'active') throw new TypeError('reply outbox accepts only active agent runs');
     if (!actionId || !runId || !tenantId || !accountUnb || !chatId || !peerUnb || !text) throw new TypeError('invalid agent reply outbox entry');
@@ -64,7 +66,7 @@ export class AgentReplyOutboxStore {
       const existing = state.entries[actionId];
       if (existing) return { created: false, entry: external(existing) };
       const now = this.#now(); const timestamp = new Date(now).toISOString();
-      const entry = { actionId, runId, tenantId, mode, accountUnb, chatId, peerUnb, text, delivery, status: 'pending', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, platformMessageId: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
+      const entry = { actionId, runId, tenantId, mode, accountUnb, chatId, peerUnb, sourceMessageId, text, delivery, status: 'pending', attempts: 0, availableAt: now, leaseId: null, leaseUntil: null, platformMessageId: null, lastError: null, createdAt: timestamp, updatedAt: timestamp };
       state.entries[actionId] = entry;
       return { created: true, entry: external(entry) };
     });

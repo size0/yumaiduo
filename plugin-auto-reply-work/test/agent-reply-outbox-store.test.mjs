@@ -11,12 +11,13 @@ test('active reply outbox is idempotent and records the platform message id', as
   await store.initialize();
   const input = {
     actionId: 'active:tenant-1:event-1:reply', runId: 'active:tenant-1:event-1', tenantId: 'tenant-1',
-    accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', text: '请发送完整选座截图。', mode: 'active',
+    accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1', sourceMessageId: 'buyer-source-1', text: '请发送完整选座截图。', mode: 'active',
   };
   assert.equal((await store.enqueue(input)).created, true);
   assert.equal((await store.enqueue(input)).created, false);
   const claimed = await store.claimDue({ leaseMs: 30_000 });
   assert.equal(claimed.status, 'sending');
+  assert.equal(claimed.source_message_id, 'buyer-source-1');
   await store.markSent(claimed.action_id, claimed.lease_id, 'platform-message-1');
   const sent = await store.get(input.actionId);
   assert.equal(sent.status, 'sent');

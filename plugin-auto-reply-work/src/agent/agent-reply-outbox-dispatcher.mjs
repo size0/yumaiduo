@@ -28,6 +28,7 @@ export function createAgentReplyOutboxDispatcher({ store, executeReply, commitDe
       account_unb: entry.account_unb,
       chat_id: entry.chat_id,
       peer_unb: entry.peer_unb,
+      source_message_id: entry.source_message_id,
       text: entry.text,
       reply_origin: 'conversation_agent_outbox',
     };

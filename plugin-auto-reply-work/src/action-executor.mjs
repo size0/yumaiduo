@@ -89,6 +89,18 @@ export function createActionExecutor({ coreFor, messageRegistry, imageLoader = n
       pageSize: 20,
     });
     const messages = Array.isArray(history?.items) ? history.items : [];
+    const sourceMessageId = String(action.source_message_id ?? '').trim();
+    if (action.reply_origin === 'conversation_agent_outbox' && sourceMessageId) {
+      const sourceIndex = messages.findIndex((message) => platformMessageId(message) === sourceMessageId);
+      if (sourceIndex < 0) return { status: 'skipped', reason: 'source_message_not_recent' };
+      for (const newer of messages.slice(0, sourceIndex)) {
+        const direction = String(newer?.direction ?? '').toLowerCase();
+        if (direction === 'inbound') return { status: 'skipped', reason: 'superseded_by_newer_buyer_message' };
+        if (direction === 'outbound' && !await messageRegistry.wasSentMessage(action.tenant_id, address.chatId, platformMessageId(newer))) {
+          return { status: 'skipped', reason: 'human_takeover' };
+        }
+      }
+    }
     const latest = messages[0] ?? null;
     if (latest?.direction === 'outbound') {
       const sentByThisPlugin = await messageRegistry.wasSentMessage(action.tenant_id, address.chatId, latest.messageId);
@@ -345,6 +357,10 @@ async function hasRecentHumanTakeover(messages, tenantId, chatId, messageRegistr
     if (now >= sentAt && now - sentAt < windowMs) return true;
   }
   return false;
+}
+
+function platformMessageId(message) {
+  return String(message?.messageId ?? message?.message_id ?? message?.remoteMessageId ?? message?.remote_message_id ?? '').trim();
 }
 
 function isPlatformPriceChangeNotice(message) {

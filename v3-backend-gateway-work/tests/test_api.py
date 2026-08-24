@@ -30,7 +30,7 @@ def test_health_exposes_the_deployed_runtime_contract_without_secrets() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "runtime_contract": "wanda-v3-v17-full-agent-owner",
+        "runtime_contract": "wanda-v3-v18-active-reply-supersession",
     }
 
 
@@ -439,7 +439,7 @@ def test_plugin_bridge_explicit_active_mode_enables_full_durable_agent_owner(tmp
     assert settings["agent_canary_kill_switch"] is False
     assert settings["agent_canary_percentage"] == 100
     assert settings["agent_canary_approved"] is True
-    assert settings["agent_canary_runtime_version"] == "wanda-agent-runtime-v34-full-active"
+    assert settings["agent_canary_runtime_version"] == "wanda-agent-runtime-v35-source-turn-supersession"
 
 
 def test_agent_canary_approval_is_independent_fail_closed_and_revocable(tmp_path: Path, monkeypatch) -> None:

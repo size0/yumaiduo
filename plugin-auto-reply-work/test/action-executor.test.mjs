@@ -103,6 +103,27 @@ test('reply pauses for twenty seconds after a human reply even when the buyer se
   assert.equal(sends, 0);
 });
 
+test('Agent outbox reply is superseded by any newer buyer or human message after its source turn', async () => {
+  const now = Date.parse('2026-08-24T00:25:35Z');
+  for (const newer of [
+    { direction: 'inbound', messageId: 'buyer-newer', sentAt: new Date(now - 1_000).toISOString(), expected: 'superseded_by_newer_buyer_message' },
+    { direction: 'outbound', messageId: 'human-newer', sentAt: new Date(now - 70_000).toISOString(), expected: 'human_takeover' },
+  ]) {
+    let sends = 0;
+    const executor = createActionExecutor({
+      now: () => now,
+      messageRegistry: registry(),
+      coreFor: () => ({ im: {
+        listMessages: async () => ({ items: [newer, { direction: 'inbound', messageId: 'buyer-source', sentAt: new Date(now - 80_000).toISOString() }] }),
+        sendMessage: async () => { sends += 1; },
+      } }),
+    });
+    const result = await executor.execute({ ...replyAction(), source_message_id: 'buyer-source', reply_origin: 'conversation_agent_outbox' });
+    assert.deepEqual(result, { status: 'skipped', reason: newer.expected });
+    assert.equal(sends, 0);
+  }
+});
+
 test('verified plugin price-change reminder ignores the platform-generated order notice', async () => {
   let sends = 0;
   const now = Date.parse('2026-08-22T02:04:09Z');

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createConversationAgent } from './conversation-agent.mjs';
 import { inspectTicketRequest } from './ticket-request-inspector.mjs';
 
-export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v34-full-active';
+export const AGENT_RUNTIME_VERSION = 'wanda-agent-runtime-v35-source-turn-supersession';
 
 function eventKey(envelope) { return `${String(envelope?.tenantId ?? '')}:${String(envelope?.id ?? '')}`; }
 function runIdFor(envelope, mode) {
@@ -472,6 +472,22 @@ function quoteDeliverySnapshot(quoted = {}) {
   };
 }
 
+function sourcePlatformMessageId(payload = {}) {
+  return text(payload.remoteMessageId ?? payload.remote_message_id ?? payload.messageId ?? payload.message_id, 240);
+}
+
+function activeQuoteClarificationReply(state, message, nowValue) {
+  const facts = state?.facts ?? {};
+  const unit = safePositiveInteger(facts.quote_unit_cents ?? facts.unit_quote_cents);
+  const total = safePositiveInteger(facts.quote_total_cents ?? facts.total_quote_cents);
+  const count = safePositiveInteger(facts.quote_ticket_count ?? facts.ticket_count);
+  const expiresAt = safePositiveInteger(facts.quote_expires_at);
+  const active = ['quoted', 'quote_confirmed', 'waiting_payment'].includes(String(facts.stage ?? ''))
+    && unit && total && count && expiresAt && expiresAt > nowValue;
+  if (!active || !/(?:灰色|W\+|W座|能买吗|代买|买到|这些?位置|这几个位置)/iu.test(String(message ?? ''))) return '';
+  return `系统刚才已通过万达实时核验，当前有效报价是${(unit / 100).toFixed(2)}元/张，${count}张合计${(total / 100).toFixed(2)}元。座位状态可能变化；需要按这份报价购买请回复“确认”。`;
+}
+
 async function createFallbackManualTask(manualTaskStore, source, orderId = '') {
   if (!manualTaskStore) return false;
   const envelope = source?.envelope ?? {}; const payload = envelope.payload ?? {};
@@ -549,7 +565,7 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
           await replyOutboxStore.enqueue({
             actionId: `${run.run_id}:fallback`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
             accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
-            text: '这个问题需要人工进一步确认，已记录处理，请稍候。',
+            ...(sourcePlatformMessageId(payload) ? { sourceMessageId: sourcePlatformMessageId(payload) } : {}), text: '这个问题需要人工进一步确认，已记录处理，请稍候。',
           });
           replyQueued = true;
         }
@@ -596,20 +612,23 @@ export function createShadowAgentRuntime({ runStore, eventStore, conversationCon
       let replyQueued = false;
       let queuedReply = outcome.status === 'reply' && typeof outcome.reply === 'string' ? outcome.reply.trim() : '';
       let actionSuffix = 'reply';
+      const persistedRun = run.mode === 'active' && typeof runStore.get === 'function' ? await runStore.get(run.run_id) : run;
       if (run.mode === 'active' && outcome.status === 'handoff' && await createFallbackManualTask(manualTaskStore, source, context.state?.facts?.order_id)) {
-        queuedReply = '这个问题需要人工进一步确认，已记录处理，请稍候。';
-        actionSuffix = 'fallback';
+        const message = payload.content ?? payload.text ?? '';
+        const quoteClarification = activeQuoteClarificationReply(context.state, message, now());
+        const attemptedAuthorityTool = Array.isArray(persistedRun?.tool_calls) && persistedRun.tool_calls.length > 0;
+        queuedReply = quoteClarification || (attemptedAuthorityTool ? '这个问题需要人工进一步确认，已记录处理，请稍候。' : '');
+        actionSuffix = quoteClarification ? 'quote-clarification-fallback' : 'fallback';
       }
       if (run.mode === 'active' && queuedReply) {
         const payload = source.envelope?.payload ?? {};
-        const persistedRun = await runStore.get(run.run_id);
         const delivery = actionSuffix === 'reply'
           ? [...(persistedRun?.observations ?? [])].reverse().find((item) => item?.facts?._quote_delivery)?.facts?._quote_delivery ?? null
           : null;
         await replyOutboxStore.enqueue({
           actionId: `${run.run_id}:${actionSuffix}`, runId: run.run_id, tenantId: run.tenant_id, mode: 'active',
           accountUnb: String(payload.accountUnb ?? payload.account_unb ?? ''), chatId: String(payload.chatId ?? payload.chat_id ?? ''), peerUnb: String(payload.peerUnb ?? payload.peer_unb ?? ''),
-          text: queuedReply, ...(delivery ? { delivery } : {}),
+          ...(sourcePlatformMessageId(payload) ? { sourceMessageId: sourcePlatformMessageId(payload) } : {}), text: queuedReply, ...(delivery ? { delivery } : {}),
         });
         replyQueued = true;
       }

@@ -713,6 +713,27 @@ test('durable active read_linked_order returns a minimal authoritative order obs
   assert.equal(queued[0].text, '闲鱼订单显示已付款，正在等待人工出票处理，请勿重复付款。');
 });
 
+test('active quote clarification uses the persisted quote instead of a vague manual fallback when planning fails', async () => {
+  const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-quote-fallback-')), 'runs.json'));
+  await store.initialize();
+  const activeEnvelope = { ...envelope, payload: { ...envelope.payload, content: '是灰色的诶，W+才能买到', imageUrls: [], remoteMessageId: 'buyer-source-1' } };
+  const queued = [];
+  const runtime = createShadowAgentRuntime({
+    runStore: store,
+    eventStore: { async get() { return { key: 'tenant-1:event-1', status: 'completed', envelope: activeEnvelope, result: { execution_owner: 'agent' } }; } },
+    conversationContextStore: { async get() { return { facts: { stage: 'quoted', quote_unit_cents: 5950, quote_total_cents: 5950, quote_ticket_count: 1, quote_expires_at: Date.now() + 60_000 }, messages: [] }; } },
+    planner: { async plan() { return {}; } }, getSettings: async () => ({}),
+    manualTaskStore: { async create() { return { created: true, task: { status: 'open' } }; } },
+    replyOutboxStore: { async enqueue(input) { queued.push(input); return { created: true }; } },
+  });
+  await runtime.schedule(activeEnvelope, { mode: 'active' });
+  await runtime.tick();
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].sourceMessageId, 'buyer-source-1');
+  assert.equal(queued[0].text, '系统刚才已通过万达实时核验，当前有效报价是59.50元/张，1张合计59.50元。座位状态可能变化；需要按这份报价购买请回复“确认”。');
+  assert.doesNotMatch(queued[0].text, /人工进一步确认/u);
+});
+
 test('durable active order-read failure creates an idempotent manual task and queues a safe fallback', async () => {
   const store = new AgentRunStore(join(await mkdtemp(join(tmpdir(), 'wanda-active-order-fail-')), 'runs.json'));
   await store.initialize();

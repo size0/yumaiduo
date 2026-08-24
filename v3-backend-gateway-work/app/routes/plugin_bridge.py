@@ -12,7 +12,7 @@ from ..quote_reply import validate_quote_reply_template
 from ..schemas import ConversationExperienceIngestRequest, ModelSettingsUpdate
 
 
-FULL_AGENT_RUNTIME_VERSION = "wanda-agent-runtime-v34-full-active"
+FULL_AGENT_RUNTIME_VERSION = "wanda-agent-runtime-v35-source-turn-supersession"
 
 
 def create_plugin_bridge_router(app: FastAPI) -> APIRouter:
