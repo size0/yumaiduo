@@ -149,6 +149,12 @@ class MovieImageInfo(BaseModel):
     def seat_display_mode(self) -> Literal["specific", "wplus_fallback"]:
         return "specific" if self.selected_seats else "wplus_fallback"
 
+    @computed_field
+    @property
+    def fulfillment_route(self) -> Literal["LIANGPIAO_AUTO", "WANDA_MANUAL"]:
+        """Choose the provider route from explicit seats, not from price-zone text."""
+        return "LIANGPIAO_AUTO" if self.selected_seats else "WANDA_MANUAL"
+
 
 class RecognitionResponse(BaseModel):
     ok: Literal[True] = True

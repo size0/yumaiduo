@@ -87,7 +87,9 @@ class LiangpiaoRecognitionClient:
         final = data.get("finalResults") if isinstance(data.get("finalResults"), Mapping) else {}
         showtime = _text(final.get("showtime")) or _text(raw.get("showtime"))
         show_date, show_start = _parse_showtime(showtime)
-        seats_raw = final.get("seat") if isinstance(final.get("seat"), list) else raw.get("seat")
+        final_seats = final.get("seat")
+        raw_seats = raw.get("seat")
+        seats_raw = final_seats if isinstance(final_seats, list) and final_seats else raw_seats
         seats: list[SelectedSeat] = []
         if isinstance(seats_raw, list):
             for item in seats_raw:
@@ -95,7 +97,10 @@ class LiangpiaoRecognitionClient:
                     continue
                 name = _text(item.get("seatName")) or _text(item.get("seat_name"))
                 if name:
-                    seats.append(SelectedSeat(seat_number=name))
+                    seats.append(SelectedSeat(
+                        seat_number=name,
+                        displayed_price=_seat_price(item),
+                    ))
         candidates = _map_candidates(final.get("candidates"))
         match_level = _text(final.get("matchLevel"))
         warnings = ["liangpiao_candidate_cinema"] if candidates else []
@@ -125,6 +130,20 @@ class LiangpiaoRecognitionClient:
 def _text(value: Any) -> str | None:
     text = str(value).strip() if value is not None else ""
     return text or None
+
+
+def _seat_price(value: Mapping[str, Any]) -> float | None:
+    fen = value.get("seatPriceFen") or value.get("seat_price_fen")
+    if fen is not None:
+        try:
+            return int(fen) / 100
+        except (TypeError, ValueError):
+            return None
+    price = value.get("seatPrice") or value.get("seat_price")
+    try:
+        return float(price) if price is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _float(value: Any, *, default: float) -> float:

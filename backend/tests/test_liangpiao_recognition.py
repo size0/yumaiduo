@@ -65,6 +65,36 @@ async def test_liangpiao_recognizes_candidates_and_maps_structured_facts() -> No
     assert requests[0].headers["x-sign"]
 
 
+def test_liangpiao_recognition_routes_from_final_seats_even_when_show_is_unmatched() -> None:
+    result = LiangpiaoRecognitionClient._map_result({
+        "recognizeId": "14837",
+        "rawResults": {
+            "isSeatSelection": True,
+            "city": "锦州",
+            "cinema": "万达影城(IMAX锦州万...",
+            "showtime": "2026-08-30 18:50:00",
+            "seat": [{"seatName": "10排17座", "seatPrice": "67.9"}],
+        },
+        "finalResults": {
+            "matchLevel": "NONE",
+            "city": "锦州",
+            "cinema": "万达影城（IMAX锦州万达广场店）",
+            "film": None,
+            "showtime": "2026-08-30 18:50:00",
+            "hall": "5号IMAX厅",
+            "seat": [{"seatName": "10排17座", "seatPriceFen": "6790", "rowNo": 10, "colNo": 17}],
+            "showId": None,
+        },
+    })
+
+    assert result.match_level == "NONE"
+    assert result.movie_name is None
+    assert result.selected_count_visible == 1
+    assert result.selected_seats[0].seat_number == "10排17座"
+    assert result.selected_seats[0].displayed_price == 67.9
+    assert result.fulfillment_route == "LIANGPIAO_AUTO"
+
+
 @pytest.mark.asyncio
 async def test_liangpiao_confirmation_returns_new_recognition_for_repricing() -> None:
     def handler(request: httpx.Request) -> httpx.Response:

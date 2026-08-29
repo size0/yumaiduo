@@ -360,3 +360,4 @@ def test_computed_seat_display_is_in_api_serialization_but_not_accepted_from_mod
     serialized = recognition.model_dump(mode="json")
     assert serialized["seat_display"] == "W+座位"
     assert serialized["seat_display_mode"] == "wplus_fallback"
+    assert serialized["fulfillment_route"] == "WANDA_MANUAL"

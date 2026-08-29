@@ -291,7 +291,7 @@ class MovieImageRecognitionService:
         recognition_started_at = perf_counter()
         prior = list(prior_recognitions or [])[-3:]
         prior_payload = [
-            item.model_dump(mode="json", exclude={"seat_display", "seat_display_mode"})
+            item.model_dump(mode="json", exclude={"seat_display", "seat_display_mode", "fulfillment_route"})
             for item in prior
         ]
         LOGGER.info(
@@ -485,8 +485,8 @@ class MovieImageRecognitionService:
         for previous in reversed(prior):
             if not cls._recognitions_are_compatible(current, previous):
                 continue
-            data = current.model_dump(mode="json", exclude={"seat_display", "seat_display_mode"})
-            previous_data = previous.model_dump(mode="json", exclude={"seat_display", "seat_display_mode"})
+            data = current.model_dump(mode="json", exclude={"seat_display", "seat_display_mode", "fulfillment_route"})
+            previous_data = previous.model_dump(mode="json", exclude={"seat_display", "seat_display_mode", "fulfillment_route"})
             scalar_fields = (
                 "platform", "cinema_name", "city", "movie_name", "date_text", "date",
                 "showtime_start", "showtime_end", "hall_name", "language", "format",
