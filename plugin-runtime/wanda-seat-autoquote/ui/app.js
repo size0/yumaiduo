@@ -208,11 +208,9 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   function showWorkspace(name,focus=false) {
     if(!workspaceMeta[name])name='chat'; activeWorkspace=name;
     const settingsWorkspace=['shops','pricing','quote-records','orders','templates','conversation','model','knowledge'].includes(name);
-    const orderModal=name==='orders';
-    $('mainPage').hidden=settingsWorkspace&&!orderModal;
-    $('workspaceChat').hidden=name!=='chat'&&!orderModal; $('diagnosticsPanel').hidden=name!=='logs';
-    $('settingsDrawer').classList.toggle('show',settingsWorkspace); $('settingsDrawer').classList.toggle('order-modal',orderModal); $('settingsDrawer').setAttribute('aria-hidden',String(!settingsWorkspace));
-    $('settingsBackdrop').classList.toggle('show',orderModal);
+    $('mainPage').hidden=settingsWorkspace;
+    $('workspaceChat').hidden=name!=='chat'; $('diagnosticsPanel').hidden=name!=='logs';
+    $('settingsDrawer').classList.toggle('show',settingsWorkspace); $('settingsDrawer').setAttribute('aria-hidden',String(!settingsWorkspace));
     document.querySelectorAll('[data-workspace]').forEach(button=>{const selected=button.dataset.workspace===name;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1});
     if(settingsWorkspace){
       const model=name==='model'; $('modelSettingsPanel').hidden=!model; $('operationsSettingsPanel').hidden=model;
