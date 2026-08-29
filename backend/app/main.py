@@ -548,7 +548,7 @@ def create_app(
         if end_time:
             payload["endTime"] = end_time
         try:
-            response = await configured_liangpiao_client.order_list(payload)
+            response = await configured_liangpiao_client.order_list(**payload)
         except (ProviderError, ValueError) as error:
             raise HTTPException(status_code=503, detail="liangpiao_order_list_unavailable") from error
         known = {
