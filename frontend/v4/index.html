@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>万达电影票 AI 客服</title>
+  <style>
+    :root { color-scheme:light; --brand:#f04444; --brand-dark:#d92e35; --nav-accent:#20c7c7; --nav-accent-dark:#167f83; --nav-soft:#ecffff; --ink:#232326; --muted:#85858d; --line:#e9e9ed; --canvas:#f5f5f7; --surface:#fff; --assistant:#fff; --buyer:#f04444; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { min-height:100vh; color:var(--ink); font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; background:radial-gradient(circle at 15% 2%,rgba(72,214,205,.16),transparent 29%),radial-gradient(circle at 86% 9%,rgba(111,194,224,.13),transparent 31%),linear-gradient(180deg,#effafa,#f7fbfb 72%,#f3f5f6); }
+    button,textarea { font:inherit; }
+    button { cursor:pointer; }
+    .site-navigation { position:sticky; z-index:18; top:16px; width:min(1180px,calc(100% - 32px)); min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:14px; margin:28px auto 0; padding:7px; overflow:hidden; border:1px solid rgba(255,255,255,.9); border-radius:16px; background:rgba(255,255,255,.94); box-shadow:0 12px 38px rgba(43,117,121,.1); backdrop-filter:blur(16px); }
+    .site-nav-list { min-width:max-content; display:flex; align-items:center; gap:4px; overflow-x:auto; scrollbar-width:none; }.site-nav-list::-webkit-scrollbar { display:none; }
+    .site-nav-button { position:relative; min-width:120px; height:42px; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:0 13px; border:1px solid transparent; border-radius:11px; color:#515b68; font-size:13px; font-weight:600; white-space:nowrap; background:transparent; }
+    .site-nav-button:hover { color:var(--nav-accent-dark); background:#f5ffff; }.site-nav-button.active { color:var(--nav-accent-dark); border-color:var(--nav-accent); background:var(--nav-soft); }.site-nav-button.active::after { content:""; position:absolute; right:13px; bottom:2px; left:13px; height:2px; border-radius:2px; background:var(--nav-accent); }
+    .site-nav-icon { width:17px; color:currentColor; font-size:17px; line-height:1; text-align:center; }.site-brand { flex:0 0 auto; display:flex; align-items:center; gap:9px; padding:0 9px; }.site-brand-dot { width:9px; height:9px; border-radius:50%; background:#2bc56d; box-shadow:0 0 0 4px rgba(43,197,109,.12); }.site-brand strong,.site-brand small { display:block; white-space:nowrap; }.site-brand strong { font-size:11px; }.site-brand small { margin-top:2px; color:#929299; font-size:9px; }
+    .page { width:min(1180px,calc(100% - 32px)); margin:auto; padding:24px 0 38px; }
+    .workspace-page[hidden] { display:none!important; }
+    .chat-app { height:min(820px,calc(100vh - 142px)); min-height:620px; display:grid; grid-template-rows:auto 1fr auto; overflow:hidden; border:1px solid rgba(226,235,236,.95); border-radius:16px; background:var(--surface); box-shadow:0 18px 58px rgba(43,108,112,.1); }
+    .chat-header { min-height:76px; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 20px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.94); }
+    .agent { min-width:0; display:flex; align-items:center; gap:12px; }
+    .avatar { flex:0 0 auto; width:42px; height:42px; display:grid; place-items:center; border-radius:14px; color:#fff; font-size:13px; font-weight:900; background:linear-gradient(145deg,#ff5b55,var(--brand-dark)); box-shadow:0 8px 20px rgba(240,68,68,.24); }
+    .agent-copy { min-width:0; }
+    .agent-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:16px; }
+    .presence { display:flex; align-items:center; gap:6px; margin-top:4px; color:#6c6c73; font-size:12px; }
+    .presence i { width:7px; height:7px; border-radius:50%; background:#34c76f; box-shadow:0 0 0 3px rgba(52,199,111,.12); }
+    .header-actions { display:flex; align-items:center; gap:9px; }
+    .mode { padding:7px 10px; border-radius:999px; color:#8f5f12; font-size:12px; background:#fff5df; }
+    .model-badge { max-width:275px; display:flex; align-items:center; gap:8px; padding:8px 11px; border:1px solid #e7e7eb; border-radius:11px; color:#73737a; background:#f8f8fa; }
+    .model-badge span { font-size:10px; }.model-badge b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#35353a; font-size:11px; }
+    .model-badge:hover { border-color:#f1b2b2; background:#fff8f8; }
+    .icon-btn { width:38px; height:38px; display:grid; place-items:center; border:1px solid var(--line); border-radius:11px; color:#6f6f76; background:#fff; }
+    .icon-btn:hover { color:var(--brand); border-color:#f3b5b5; background:#fff8f8; }
+    .chat-window { position:relative; min-height:0; padding:24px clamp(16px,4vw,42px); overflow-y:auto; overscroll-behavior:contain; background:var(--canvas); scroll-behavior:smooth; }
+    .chat-window::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:.24; background-image:radial-gradient(#c8c8ce .7px,transparent .7px); background-size:19px 19px; }
+    .date-divider { position:relative; margin:0 auto 22px; width:max-content; padding:5px 10px; border-radius:999px; color:#9999a0; font-size:11px; background:#e9e9ed; }
+    .message { position:relative; display:flex; align-items:flex-end; gap:9px; margin:14px 0; animation:arrive .2s ease-out; }
+    @keyframes arrive { from { opacity:0; transform:translateY(7px); } }
+    .message.assistant { justify-content:flex-start; padding-right:18%; }
+    .message.buyer { justify-content:flex-end; padding-left:18%; }
+    .message-avatar { width:32px; height:32px; flex:0 0 auto; display:grid; place-items:center; border-radius:10px; color:#fff; font-size:10px; font-weight:900; background:linear-gradient(145deg,#ff5b55,var(--brand-dark)); }
+    .message-stack { max-width:min(680px,78%); }
+    .sender { margin:0 0 5px 3px; color:#97979e; font-size:11px; }
+    .bubble { padding:12px 15px; border-radius:7px 18px 18px 18px; color:#343439; line-height:1.72; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--assistant); box-shadow:0 3px 14px rgba(39,39,45,.07); }
+    .buyer .bubble { color:#fff; border-radius:18px 7px 18px 18px; background:linear-gradient(145deg,#f75550,var(--brand-dark)); box-shadow:0 7px 22px rgba(240,68,68,.2); }
+    .bubble-image { display:block; width:min(290px,58vw); max-height:380px; margin:-5px -8px 9px; object-fit:cover; border-radius:12px; background:#ddd; }
+    .buyer .bubble-image:last-child { margin-bottom:-5px; }
+    .message-time { margin-top:5px; color:#a1a1a7; font-size:10px; }
+    .buyer .message-time { text-align:right; }
+    .typing { min-width:150px; display:flex; align-items:center; gap:11px; padding:13px 16px; }
+    .typing-dots { display:flex; gap:5px; }
+    .typing i { width:6px; height:6px; border-radius:50%; background:#9a9aa1; animation:pulse 1s infinite ease-in-out; }
+    .typing i:nth-child(2) { animation-delay:.14s; }.typing i:nth-child(3) { animation-delay:.28s; }
+    .typing-status { color:#85858d; font-size:11px; white-space:nowrap; }
+    @keyframes pulse { 0%,60%,100% { transform:translateY(0); opacity:.45; } 30% { transform:translateY(-4px); opacity:1; } }
+    .recognition-card { width:min(560px,100%); margin-top:10px; overflow:hidden; border:1px solid #ededf0; border-radius:13px; background:#fbfbfc; white-space:normal; }
+    .recognition-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #ededf0; }
+    .recognition-head strong { font-size:12px; }.recognition-head span { color:#909097; font-size:10px; }
+    .fact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; background:#ededf0; }
+    .fact { min-width:0; padding:10px 12px; background:#fbfbfc; }
+    .fact small { display:block; margin-bottom:3px; color:#9999a0; font-size:10px; }
+    .fact b { display:block; overflow-wrap:anywhere; font-size:12px; font-weight:650; }
+    .fact.wide { grid-column:1/-1; }
+    .recognition-note { padding:9px 12px; color:#997020; font-size:10px; line-height:1.5; background:#fff9ed; }
+    .drag-overlay { position:absolute; z-index:5; inset:14px; display:none; place-items:center; border:2px dashed var(--brand); border-radius:18px; color:var(--brand-dark); font-weight:800; background:rgba(255,248,248,.94); pointer-events:none; }
+    .drag-overlay span { display:block; margin-top:8px; color:#999097; font-size:12px; font-weight:500; }
+    .chat-window.dragging .drag-overlay { display:grid; }
+    .composer-wrap { border-top:1px solid var(--line); background:#fff; }
+    .pending { display:none; align-items:center; gap:10px; padding:10px 18px 0; }
+    .pending.show { display:flex; }
+    .pending img { width:54px; height:54px; object-fit:cover; border-radius:10px; border:1px solid var(--line); }
+    .pending-copy { min-width:0; flex:1; }
+    .pending-copy strong,.pending-copy span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pending-copy strong { font-size:12px; }.pending-copy span { margin-top:4px; color:var(--muted); font-size:10px; }
+    .remove-file { width:28px; height:28px; border:0; border-radius:50%; color:#777; background:#f1f1f3; }
+    .composer-row { display:flex; align-items:flex-end; gap:10px; padding:13px 17px 9px; }
+    .attach { flex:0 0 auto; width:42px; height:42px; display:grid; place-items:center; border:0; border-radius:12px; color:#68686f; font-size:21px; background:#f2f2f4; }
+    .attach:hover { color:var(--brand); background:#fff0f0; }
+    textarea { flex:1; min-width:0; height:42px; max-height:116px; resize:none; padding:10px 3px; border:0; outline:0; color:#29292d; line-height:22px; background:transparent; }
+    textarea::placeholder { color:#a8a8ae; }
+    .send { flex:0 0 auto; width:76px; height:42px; border:0; border-radius:12px; color:#fff; font-weight:750; background:linear-gradient(145deg,#f75550,var(--brand-dark)); box-shadow:0 7px 17px rgba(240,68,68,.2); }
+    .send:disabled { cursor:not-allowed; opacity:.45; box-shadow:none; }
+    .composer-hint { padding:0 20px 11px; color:#aaaab0; font-size:10px; text-align:center; }
+    .diagnostics-panel { min-height:620px; overflow:hidden; border:1px solid rgba(28,28,30,.09); border-radius:16px; background:#17171a; box-shadow:0 18px 55px rgba(32,80,84,.13); }
+    .diagnostics-head { min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 15px 11px 18px; color:#f1f1f3; border-bottom:1px solid #303035; }
+    .diagnostics-title strong { display:block; font-size:13px; }.diagnostics-title span { display:block; margin-top:4px; color:#8e8e96; font-size:10px; }
+    .diagnostics-actions { display:flex; gap:7px; }.diagnostics-button { min-height:32px; padding:0 10px; border:1px solid #3c3c42; border-radius:8px; color:#c7c7cd; font-size:10px; background:#242428; }.diagnostics-button:hover { color:#fff; border-color:#5a5a62; }
+    .diagnostics-entries { max-height:430px; padding:10px; overflow:auto; }
+    .diagnostic-empty { padding:28px; color:#777780; font-size:11px; text-align:center; }
+    .diagnostic-entry { margin-bottom:8px; overflow:hidden; border:1px solid #303036; border-radius:10px; background:#1e1e22; }
+    .diagnostic-entry summary { display:flex; align-items:center; gap:9px; padding:10px 12px; color:#d8d8dd; cursor:pointer; list-style:none; font-size:11px; }.diagnostic-entry summary::-webkit-details-marker { display:none; }
+    .diagnostic-entry summary::before { content:'›'; color:#85858d; font-size:17px; transition:.15s; }.diagnostic-entry[open] summary::before { transform:rotate(90deg); }
+    .diagnostic-event { color:#77d6a0; font-weight:750; }.diagnostic-schema { color:#ffb96b; }.diagnostic-error { color:#ff8585; }.diagnostic-meta { margin-left:auto; color:#777780; font-size:9px; }
+    .diagnostic-json { margin:0; padding:13px; overflow:auto; color:#c8d4e3; border-top:1px solid #303036; font:11px/1.62 Consolas,"SFMono-Regular",monospace; white-space:pre; tab-size:2; }
+    .settings-backdrop { display:none; }
+    .settings-drawer { position:relative; width:min(1180px,calc(100% - 32px)); min-height:620px; display:none; flex-direction:column; margin:24px auto 38px; overflow:hidden; color:#29292e; border:1px solid rgba(226,235,236,.95); border-radius:16px; background:#fff; box-shadow:0 18px 58px rgba(43,108,112,.1); transform:none; }
+    .settings-drawer.show { display:flex; transform:none; }
+    .settings-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:22px 22px 17px; border-bottom:1px solid var(--line); }
+    .settings-head h2 { margin:0; font-size:20px; }.settings-head p { margin:6px 0 0; color:#929299; font-size:12px; line-height:1.5; }#closeSettings { display:none; }
+    .settings-tabs { display:none; }
+    .settings-tab { min-height:39px; padding:0 14px; border:0; border-bottom:2px solid transparent; color:#85858c; font-size:12px; font-weight:750; background:transparent; }
+    .settings-tab.active { color:var(--brand-dark); border-bottom-color:var(--brand); }
+    .settings-body { flex:1; min-height:0; padding:22px 24px 30px; overflow:visible; }
+    .settings-panel[hidden] { display:none; }
+    .setting-group { margin-bottom:18px; }
+    .setting-group label,.setting-title { display:flex; justify-content:space-between; gap:12px; margin-bottom:8px; color:#56565d; font-size:12px; font-weight:700; }
+    .setting-group input,.setting-group select,.setting-group textarea { width:100%; border:1px solid #dedee3; border-radius:11px; outline:0; color:#29292e; background:#fbfbfc; }
+    .setting-group input,.setting-group select { height:43px; padding:0 12px; }.setting-group textarea { min-height:230px; padding:12px; resize:vertical; line-height:1.65; font-size:12px; }
+    .setting-group input:focus,.setting-group select:focus,.setting-group textarea:focus { border-color:#ef8f8f; box-shadow:0 0 0 3px rgba(240,68,68,.08); }
+    .setting-help { margin-top:6px; color:#9999a0; font-size:10px; line-height:1.55; }
+    .key-line { display:flex; gap:8px; }.key-line input { flex:1; }.key-state { color:#29945a; font-weight:600; }
+    .inline-setting-button { flex:0 0 auto; min-height:39px; padding:0 11px; border:1px solid #e4a4a4; border-radius:9px; color:#d5383e; font-size:10px; font-weight:700; background:#fff7f7; }.inline-setting-button:hover { color:#fff; background:var(--brand); }
+    .model-fetch-message { min-height:15px; margin-top:6px; color:#77777e; font-size:10px; }.model-fetch-message.error-text { color:#d92e35; }
+    .toggle-row { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:13px 14px; border:1px solid #e5e5e9; border-radius:12px; background:#fafafd; }
+    .toggle-copy strong { display:block; font-size:13px; }.toggle-copy span { display:block; margin-top:4px; color:#9999a0; font-size:10px; }
+    .operations-hero { margin-bottom:18px; padding:16px; border:1px solid #f1d5d5; border-radius:15px; background:linear-gradient(135deg,#fff8f8,#fff); }
+    .operations-hero strong { display:block; font-size:15px; }.operations-hero p { margin:7px 0 0; color:#77777e; font-size:11px; line-height:1.65; }
+    .operation-section { margin-bottom:20px; padding:16px; border:1px solid #e7e7eb; border-radius:15px; background:#fcfcfd; }
+    .operation-section h3 { margin:0 0 5px; font-size:14px; }.operation-section>p { margin:0 0 14px; color:#8b8b92; font-size:10px; line-height:1.6; }
+    .money-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .money-field label { display:block; margin-bottom:6px; color:#66666d; font-size:11px; font-weight:700; }.money-field input,.money-field select { width:100%; height:41px; padding:0 11px; border:1px solid #dedee3; border-radius:10px; outline:0; color:#29292e; background:#fff; }.money-field input:focus,.money-field select:focus { border-color:#ef8f8f; box-shadow:0 0 0 3px rgba(240,68,68,.08); }.money-input { position:relative; }.money-input span { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:#9a9aa1; font-size:11px; }.money-input input { padding-right:34px; }
+    .formula-card { margin-top:13px; padding:12px; border-radius:11px; color:#6e581e; font:11px/1.75 Consolas,"Microsoft YaHei",sans-serif; background:#fff8e8; }
+    .pricing-preview { margin-top:13px; padding:13px; border:1px dashed #e0b8b8; border-radius:12px; background:#fff; }.pricing-preview strong { display:block; margin-bottom:9px; font-size:12px; }.preview-result { margin-top:10px; color:#c93138; font-size:18px; font-weight:850; }
+    .gate-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }.gate { padding:11px; border:1px solid #e4e4e8; border-radius:11px; background:#fff; }.gate b { display:block; font-size:11px; }.gate span { display:block; margin-top:4px; color:#29945a; font-size:9px; }
+    .knowledge-stats { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:7px; }.knowledge-stat { padding:10px 6px; border-radius:10px; text-align:center; background:#f3f3f6; }.knowledge-stat b { display:block; font-size:16px; }.knowledge-stat span { display:block; margin-top:3px; color:#8d8d94; font-size:9px; }
+    .knowledge-notice { display:flex; align-items:flex-start; gap:11px; margin-top:13px; padding:12px 13px; border:1px solid #f0dfac; border-radius:11px; color:#735f25; background:#fff9e9; }.knowledge-notice strong { flex:0 0 auto; font-size:11px; }.knowledge-notice span { font-size:10px; line-height:1.6; }
+    .knowledge-list { display:grid; gap:8px; margin-top:13px; }.knowledge-entry { overflow:hidden; border:1px solid #e5e5e9; border-radius:11px; background:#fff; }.knowledge-entry summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 13px; cursor:pointer; list-style:none; }.knowledge-entry summary::-webkit-details-marker { display:none; }.knowledge-entry summary span { min-width:0; }.knowledge-entry summary b,.knowledge-entry summary small { display:block; }.knowledge-entry summary b { font-size:11px; }.knowledge-entry summary small { margin-top:3px; color:#9999a0; font-size:9px; }.knowledge-entry summary::after { content:'›'; order:3; color:#9999a0; font-size:17px; transition:.15s; }.knowledge-entry[open] summary::after { transform:rotate(90deg); }.knowledge-entry p { margin:0; padding:0 13px 12px; color:#68686f; font-size:10px; line-height:1.7; }.knowledge-badge { margin-left:auto; padding:4px 7px; border-radius:999px; font-size:9px; font-style:normal; white-space:nowrap; }.knowledge-badge.retained { color:#26794a; background:#eaf8ef; }.knowledge-badge.revise { color:#9a6418; background:#fff4da; }.knowledge-badge.strategy { color:#356b9a; background:#eaf4ff; }.knowledge-badge.blocked { color:#8c4e52; background:#fbecee; }.knowledge-source { margin-top:11px; }.knowledge-toolbar { display:flex; gap:8px; margin:12px 0 4px; }.knowledge-toolbar select { flex:1; min-width:0; height:39px; padding:0 9px; border:1px solid #dedee3; border-radius:9px; background:#fff; }.knowledge-edit { padding:0 13px 13px; border-top:1px solid #f0f0f2; }.knowledge-edit label { display:block; margin-top:9px; color:#66666d; font-size:10px; font-weight:700; }.knowledge-edit input,.knowledge-edit select,.knowledge-edit textarea { width:100%; margin-top:5px; padding:8px 9px; border:1px solid #dedee3; border-radius:8px; background:#fff; font-size:11px; }.knowledge-edit textarea { min-height:65px; resize:vertical; line-height:1.5; }.knowledge-actions { display:flex; justify-content:flex-end; gap:7px; margin-top:10px; }.knowledge-actions button { min-height:30px; padding:0 10px; border:1px solid #e4a4a4; border-radius:8px; color:#d5383e; font-size:10px; background:#fff7f7; }.knowledge-actions button:first-child { color:#26794a; border-color:#a6d7b7; background:#f3fff6; }
+    .switch { position:relative; width:45px; height:26px; flex:0 0 auto; }.switch input { position:absolute; opacity:0; }.slider { position:absolute; inset:0; border-radius:999px; background:#d3d3d8; transition:.2s; }.slider::after { content:""; position:absolute; width:20px; height:20px; top:3px; left:3px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.18); transition:.2s; }.switch input:checked + .slider { background:var(--brand); }.switch input:checked + .slider::after { transform:translateX(19px); }
+    .prompt-actions { display:flex; justify-content:flex-end; margin-bottom:7px; }.text-button { border:0; color:var(--brand); font-size:11px; background:transparent; }
+    .settings-footer { padding:14px 22px 20px; border-top:1px solid var(--line); background:#fff; }.save-settings { width:100%; height:46px; border:0; border-radius:12px; color:#fff; font-weight:800; background:linear-gradient(145deg,#f75550,var(--brand-dark)); }.save-settings:disabled { opacity:.5; }.save-settings[hidden] { display:none; }
+    .settings-message { min-height:18px; margin-bottom:8px; color:#77777e; font-size:11px; text-align:center; }.settings-message.error-text { color:#d92e35; }
+    @media (max-width:680px) {
+      .site-navigation { top:8px; width:calc(100% - 16px); min-height:52px; margin-top:8px; border-radius:13px; padding:5px; }.site-nav-button { min-width:104px; height:40px; padding:0 10px; font-size:12px; }.site-brand { display:none; }
+      .page { width:calc(100% - 16px); padding:12px 0 22px; }.chat-app { height:calc(100vh - 82px); min-height:560px; border-radius:13px; }
+      .settings-drawer { width:calc(100% - 16px); min-height:calc(100vh - 82px); margin:12px auto 22px; border-radius:13px; }.settings-head { padding:18px 16px 14px; }.settings-body { padding:17px 14px 22px; }.settings-footer { padding:12px 14px 16px; }
+      .chat-header { padding:11px 13px; }.mode,.model-badge span { display:none; }.model-badge { max-width:145px; }.chat-window { padding:19px 12px; }
+      .message.assistant { padding-right:5%; }.message.buyer { padding-left:5%; }.message-stack { max-width:88%; }
+      .composer-row { padding-inline:11px; }.composer-hint { display:none; }.fact-grid { grid-template-columns:1fr; }.fact.wide { grid-column:auto; }
+      .diagnostics-panel { min-height:calc(100vh - 82px); }.diagnostics-title span { display:none; }.diagnostics-entries { max-height:calc(100vh - 150px); }
+      .money-grid,.gate-list { grid-template-columns:1fr; }.knowledge-stats { grid-template-columns:repeat(3,1fr); }.settings-tabs { overflow-x:auto; padding-inline:14px; }.settings-tab { white-space:nowrap; }
+    }
+  </style>
+</head>
+<body>
+<header class="site-navigation" id="siteNavigation">
+  <nav class="site-nav-list" role="tablist" aria-label="万达电影票AI客服功能导航">
+    <button class="site-nav-button active" type="button" role="tab" aria-selected="true" data-workspace="chat"><span class="site-nav-icon" aria-hidden="true">⌂</span><span>客服工作台</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="pricing"><span class="site-nav-icon" aria-hidden="true">▣</span><span>运营报价</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="model"><span class="site-nav-icon" aria-hidden="true">✦</span><span>模型接口</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="reply"><span class="site-nav-icon" aria-hidden="true">✎</span><span>回复话术</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="policy"><span class="site-nav-icon" aria-hidden="true">◈</span><span>会话策略</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="knowledge"><span class="site-nav-icon" aria-hidden="true">▤</span><span>知识库</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="safety"><span class="site-nav-icon" aria-hidden="true">♢</span><span>安全门禁</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="logs"><span class="site-nav-icon" aria-hidden="true">▥</span><span>运行日志</span></button>
+  </nav>
+  <div class="site-brand"><span class="site-brand-dot"></span><div><strong>Wanda AI</strong><small>本地运营管理台</small></div></div>
+</header>
+<div class="page" id="mainPage">
+  <section class="workspace-page" id="workspaceChat" data-workspace-page="chat">
+  <main class="chat-app" aria-label="万达电影票 AI 客服对话">
+    <header class="chat-header">
+      <div class="agent">
+        <div class="avatar">AI</div>
+        <div class="agent-copy"><strong>万达电影票 AI 客服</strong><div class="presence"><i></i>在线 · 图片识别已启用</div></div>
+      </div>
+      <div class="header-actions"><span class="mode">混合识图模式</span><button class="model-badge" id="openSettings" type="button" title="打开模型设置"><span>当前模型</span><b id="currentModel">qwen3.5-flash-2026-02-23</b></button><button class="icon-btn" id="clearChat" type="button" title="清空对话" aria-label="清空对话">↻</button></div>
+    </header>
+
+    <section class="chat-window" id="chatWindow" aria-live="polite">
+      <div class="date-divider">今天</div>
+      <article class="message assistant" data-role="assistant">
+        <div class="message-avatar">AI</div>
+        <div class="message-stack">
+          <div class="sender">AI 客服</div>
+          <div class="bubble">你好，我可以帮你识别电影票或选座截图。请直接发送图片，我会提取影院、影片、场次、影厅和可见座位信息。</div>
+          <div class="message-time">刚刚</div>
+        </div>
+      </article>
+      <div class="drag-overlay"><div>松开即可添加图片<span>拖拽图片到对话区 · 支持 JPG / PNG / WebP</span></div></div>
+    </section>
+
+    <footer class="composer-wrap">
+      <div class="pending" id="pending">
+        <img id="pendingImage" alt="待发送图片">
+        <div class="pending-copy"><strong id="pendingName"></strong><span id="pendingSize"></span></div>
+        <button class="remove-file" id="removeFile" type="button" aria-label="移除图片">×</button>
+      </div>
+      <div class="composer-row">
+        <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        <button class="attach" id="attach" type="button" aria-label="上传图片" title="上传图片">＋</button>
+        <textarea id="composer" rows="1" maxlength="2000" placeholder="输入消息，或拖拽图片到对话区…" aria-label="消息内容"></textarea>
+        <button class="send" id="send" type="button">发送</button>
+      </div>
+      <div class="composer-hint">Enter 发送 · Shift + Enter 换行 · 识别金额仅为截图原文，不代表最终报价</div>
+    </footer>
+  </main>
+  </section>
+  <section class="diagnostics-panel workspace-page" id="diagnosticsPanel" data-workspace-page="logs" aria-label="调试日志" hidden>
+    <div class="diagnostics-head">
+      <div class="diagnostics-title"><strong>调试日志与完整返回参数</strong><span>模型及万达官方只读接口返回仅保存在当前进程内存，重启后自动清空</span></div>
+      <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshDiagnostics" type="button">刷新</button><button class="diagnostics-button" id="clearDiagnostics" type="button">清空</button></div>
+    </div>
+    <div class="diagnostics-entries" id="diagnosticsEntries"><div class="diagnostic-empty">发送图片后，这里会格式化显示模型响应、万达官方场次/座位响应和校验详情。</div></div>
+  </section>
+</div>
+<div class="settings-backdrop" id="settingsBackdrop"></div>
+<aside class="settings-drawer workspace-page" id="settingsDrawer" aria-label="系统设置中心" aria-hidden="true">
+  <div class="settings-head">
+    <div><h2 id="workspaceSettingsTitle">模型与接口</h2><p id="workspaceSettingsDescription">独立管理识图与AI回复服务，保存后立即应用于下一次请求。</p></div>
+    <button class="icon-btn" id="closeSettings" type="button" aria-label="关闭设置">×</button>
+  </div>
+  <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+    <button class="settings-tab active" id="modelSettingsTab" type="button" role="tab" aria-selected="true" aria-controls="modelSettingsPanel">模型与接口</button>
+    <button class="settings-tab" id="operationsSettingsTab" type="button" role="tab" aria-selected="false" aria-controls="operationsSettingsPanel">运营与报价</button>
+  </nav>
+  <div class="settings-body">
+    <section class="settings-panel" id="modelSettingsPanel" role="tabpanel" aria-labelledby="modelSettingsTab">
+    <div class="setting-group">
+      <label for="apiKey">识图接口 API Key <span class="key-state" id="keyState">未配置</span></label>
+      <div class="key-line"><input id="apiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></div>
+      <div class="setting-help">密钥使用当前 Windows 用户的 DPAPI 加密后存放，不会明文写入配置文件。</div>
+      <label style="justify-content:flex-start;margin-top:9px;font-weight:500"><input id="clearApiKey" type="checkbox" style="width:auto;height:auto"> 清除已经保存的密钥</label>
+    </div>
+    <div class="setting-group">
+      <label for="baseUrl">识图接口地址 <button class="text-button" id="useAirelvo" type="button">使用 Airelvo 中转站</button></label>
+      <input id="baseUrl" type="url" value="https://dashscope.aliyuncs.com/compatible-mode/v1">
+    </div>
+    <div class="setting-group">
+      <label for="modelSelect">视觉模型</label>
+      <div class="key-line"><input id="modelSelect" list="visionModelOptions" value="qwen3.5-flash-2026-02-23" autocomplete="off"><button class="inline-setting-button" id="fetchModels" type="button">获取模型</button></div>
+      <datalist id="visionModelOptions">
+        <option value="qwen3.5-flash-2026-02-23"></option>
+        <option value="qwen3-vl-flash"></option>
+        <option value="qwen3-vl-plus"></option>
+        <option value="qwen-vl-max-latest"></option>
+      </datalist>
+      <div class="setting-help">优先直接输出结构化结果；合法且置信度足够时立即返回，不再调用 GPT。</div><div class="model-fetch-message" id="modelFetchMessage"></div>
+    </div>
+    <div class="setting-group">
+      <label for="chatApiKey">AI 回复接口 API Key <span class="key-state" id="chatKeyState">未配置</span></label>
+      <div class="key-line"><input id="chatApiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></div>
+      <div class="setting-help">与识图 Key 分开使用 DPAPI 加密保存。</div>
+      <label style="justify-content:flex-start;margin-top:9px;font-weight:500"><input id="clearChatApiKey" type="checkbox" style="width:auto;height:auto"> 清除已经保存的 AI 回复密钥</label>
+    </div>
+    <div class="setting-group">
+      <label for="chatBaseUrl">AI 回复接口地址 <button class="text-button" id="useChatAirelvo" type="button">使用 Airelvo 中转站</button></label>
+      <input id="chatBaseUrl" type="url" value="https://dashscope.aliyuncs.com/compatible-mode/v1">
+    </div>
+    <div class="setting-group">
+      <label for="chatModelSelect">AI 判断与回复模型</label>
+      <div class="key-line"><input id="chatModelSelect" list="chatModelOptions" value="qwen3.5-flash-2026-02-23" autocomplete="off"><button class="inline-setting-button" id="fetchChatModels" type="button">获取模型</button></div>
+      <datalist id="chatModelOptions"></datalist>
+      <div class="setting-help">仅在千问格式异常、置信度过低或缺少关键字段时兜底；纯文字消息始终使用此模型。</div><div class="model-fetch-message" id="chatModelFetchMessage"></div>
+    </div>
+    <div class="setting-group">
+      <label>万达官方直连 <span class="key-state" style="color:#29945a">已启用</span></label>
+      <div class="setting-help">本机后端读取票务系统中已登录的固定万达账号，直接查询官方场次区域价和实时座位；不需要报价 Key 或租户 ID，也不会把账号凭据发送给模型。</div>
+    </div>
+    <div class="setting-group" id="qwenThinkingGroup">
+      <div class="toggle-row">
+        <div class="toggle-copy"><strong>思考模式</strong><span id="thinkingHint">开启后可能提高复杂图片理解，但响应会更慢。</span></div>
+        <label class="switch"><input id="thinkingToggle" type="checkbox"><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="setting-group" id="gptReasoningGroup" style="display:none">
+      <label for="reasoningEffort">GPT 推理强度 <span>默认最轻</span></label>
+      <select id="reasoningEffort">
+        <option value="none">none — 关闭 / 最轻</option>
+        <option value="minimal">minimal — 最低</option>
+        <option value="low">low — 轻量</option>
+        <option value="medium">medium — 中等</option>
+        <option value="high">high — 高</option>
+      </select>
+      <div class="setting-help">GPT-5.1/5.5 默认使用 none；旧 GPT-5 不支持 none 时自动降级到 minimal。</div>
+    </div>
+    <div class="setting-group">
+      <div class="toggle-row">
+        <div class="toggle-copy"><strong>AI 自动回复</strong><span>关闭后停止大模型自由文本回复；识图、实时核价、固定流程话术、订单绑定与改价继续运行。</span></div>
+        <label class="switch"><input id="aiReplyEnabled" type="checkbox" checked><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="setting-group">
+      <div class="setting-title"><span>文字客服提示词</span><span>文本消息自动回复</span></div>
+      <textarea id="chatPrompt" maxlength="20000" spellcheck="false" style="min-height:180px"></textarea>
+      <div class="setting-help">买家发送纯文字时使用。未配置 Key 时仍返回安全的上传截图引导。</div>
+    </div>
+    <div class="setting-group">
+      <div class="setting-title"><span>识图与兜底判断提示词</span><span id="promptLength">0 / 20000</span></div>
+      <div class="prompt-actions"><button class="text-button" id="resetPrompt" type="button">恢复本次加载内容</button></div>
+      <textarea id="visionPrompt" maxlength="20000" spellcheck="false"></textarea>
+      <div class="setting-help">千问快速直出与 GPT 兜底共用。系统仍会附加不可覆盖的 JSON、安全和禁止猜价约束。</div>
+    </div>
+    </section>
+
+    <section class="settings-panel" id="policySettingsPanel" hidden>
+      <div class="operation-section">
+        <h3>会话策略</h3><p>这些内容会作为客服回复的运行时策略注入 AI；交易、报价、库存和人工接管安全门禁不可被覆盖。</p>
+        <div class="setting-group"><label for="agentPersona">客服人设</label><textarea id="agentPersona" maxlength="500" style="min-height:80px" placeholder="例如：热情、专业、简洁的电影票在线客服"></textarea></div>
+        <div class="setting-group"><label for="businessBackground">业务背景</label><textarea id="businessBackground" maxlength="2000" style="min-height:110px" placeholder="说明店铺服务范围和业务边界"></textarea></div>
+        <div class="setting-group"><label for="customerServiceKnowledge">客服知识与常见问题补充</label><textarea id="customerServiceKnowledge" maxlength="3000" style="min-height:130px" placeholder="填写不适合拆成知识条目的总则；具体问答请在知识库维护"></textarea></div>
+        <div class="setting-group"><label for="replyStyle">回复风格</label><textarea id="replyStyle" maxlength="1000" style="min-height:90px" placeholder="例如：自然、简短、礼貌，先回答问题再给下一步"></textarea></div>
+        <div class="setting-group"><label for="humanServiceHours">人工客服时间</label><input id="humanServiceHours" maxlength="500" placeholder="例如：每日 09:00-24:00"></div>
+        <div class="toggle-row"><div class="toggle-copy"><strong>AI 自动回复</strong><span>关闭后停止自由文本回复，但确定性识图、报价、订单和固定话术继续运行。</span></div><label class="switch"><input id="policyAiReplyEnabled" type="checkbox"><span class="slider"></span></label></div>
+      </div>
+    </section>
+    <section class="settings-panel" id="replySettingsPanel" hidden>
+      <div class="operation-section"><h3>回复话术</h3><p>用于自动回复和订单事件通知。观影提醒会从这里读取，不在模型中生成订单事实。</p>
+        <div class="setting-group"><label for="movieReminderTemplate">观影提醒</label><textarea id="movieReminderTemplate" maxlength="1000" style="min-height:100px" placeholder="可用变量：{movie} {showtime} {cinema} {date} {hall} {seats}"></textarea><div class="setting-help">仅在权威订单已出票且提醒任务到期时发送。</div></div>
+        <div class="setting-group"><label for="orderShippedTemplate">订单已发货</label><textarea id="orderShippedTemplate" maxlength="1000" style="min-height:80px"></textarea></div>
+      </div>
+    </section>
+    <section class="settings-panel" id="operationsSettingsPanel" role="tabpanel" aria-labelledby="operationsSettingsTab" hidden>
+      <div class="operations-hero" data-operation-view="pricing">
+        <strong>确定性运营报价</strong>
+        <p>模型只负责理解和表达。优先使用万达实时座位接口返回的W+会员活动价；未显示会员价时才使用临时探针，并仅在取消订单、确认座位恢复后报价。</p>
+      </div>
+      <div class="operation-section" data-operation-view="pricing">
+        <h3>报价规则</h3>
+        <p id="pricingRuleMeta">正在读取后台规则…</p>
+        <div class="toggle-row" style="margin-bottom:13px">
+          <div class="toggle-copy"><strong>启用后台报价规则</strong><span>关闭时最终报价等于官方实时区域参考价。</span></div>
+          <label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row" style="margin-bottom:13px">
+          <div class="toggle-copy"><strong>启用W+周五会员日特价</strong><span>开启后使用万达实时W+周五会员日价，再叠加下方报价规则；关闭后不使用该活动价。</span></div>
+          <label class="switch"><input id="wplusFridayEnabled" type="checkbox"><span class="slider"></span></label>
+        </div>
+        <div class="money-grid">
+          <div class="money-field"><label for="regularMarkup">普通座调整</label><div class="money-input"><input id="regularMarkup" type="number" min="0" max="1000" step="0.1" value="1.0"><span>元</span></div></div>
+          <div class="money-field"><label for="wplusDiscount">W+原价减免</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
+          <div class="money-field"><label for="wplusThreshold">W+会员价阈值</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
+          <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
+        </div>
+        <div class="formula-card">普通座：实时会员价 + 普通座调整。<br>W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；会员价&gt;阈值：直接取会员价。<br>逐座轮整后求和，报价不得低于会员价或高于实时原价。</div>
+        <div class="pricing-preview">
+          <strong>规则试算（仅本地预览，只读不锁座）</strong>
+          <div class="money-grid">
+            <div class="money-field"><label for="previewSeatType">座位类型</label><select id="previewSeatType"><option value="wplus">W+会员座</option><option value="regular">普通座/其他区域</option></select></div>
+            <div class="money-field"><label for="previewOriginal">实时原价</label><div class="money-input"><input id="previewOriginal" type="number" min="0.01" step="0.1" value="69.9"><span>元</span></div></div>
+            <div class="money-field"><label for="previewMember">实时会员价</label><div class="money-input"><input id="previewMember" type="number" min="0.01" step="0.1" value="55"><span>元</span></div></div>
+          </div>
+          <div class="preview-result" id="pricingPreviewResult">最终报价 ¥69.90</div>
+        </div>
+      </div>
+      <div class="operation-section" data-operation-view="safety">
+        <h3>强制安全门禁</h3><p>以下规则属于交易安全边界，运营人员不可关闭。</p>
+        <div class="gate-list">
+          <div class="gate"><b>价格只来自官方实时区域价格与后台规则</b><span>强制开启</span></div>
+          <div class="gate"><b>截图金额不得进入计算</b><span>强制开启</span></div>
+          <div class="gate"><b>报价仅调用场次与实时座位只读接口</b><span>强制开启</span></div>
+          <div class="gate"><b>不创建、不锁定具体座位</b><span>强制开启</span></div>
+          <div class="gate"><b>模型不能生成交易金额</b><span>强制开启</span></div>
+          <div class="gate"><b>票码只能来自权威履约</b><span>强制开启</span></div>
+        </div>
+      </div>
+      <div class="operation-section" data-operation-view="knowledge">
+        <h3>客服知识库</h3><p>常见问题拆分为可编辑、可启停、可分类的知识条目；只有启用条目会注入 AI 回复。</p>
+        <div class="knowledge-toolbar"><button class="inline-setting-button" id="addKnowledge" type="button">新增知识</button><select id="knowledgeCategoryFilter"><option value="">全部分类</option><option>售后人工</option><option>下单确认</option><option>订单出票</option><option>报价规则</option><option>截图识别</option><option>异常处理</option><option>购票流程</option><option>常见问题</option></select></div>
+        <div class="knowledge-stats"><div class="knowledge-stat"><b id="knowledgeTotal">0</b><span>全部条目</span></div><div class="knowledge-stat"><b id="knowledgeEnabled">0</b><span>已启用</span></div><div class="knowledge-stat"><b id="knowledgeCategories">0</b><span>分类</span></div></div>
+        <div class="knowledge-notice"><strong>安全提示</strong><span>知识库只影响常见问题的识别和表达；价格、库存、订单、付款、出票、退款和人工接管仍由确定性规则掌管。W+代订与纯文字咨询仍须经过实时核验。当前展示的是迁移审核快照的可编辑版本。</span></div>
+        <div class="knowledge-list" id="knowledgeList"></div>
+        <div class="setting-help knowledge-source">每条知识包含买家常见问法、回复口径和处理规则；保存后仅启用条目进入下一次 AI 回复。</div>
+      </div>
+    </section>
+  </div>
+  <div class="settings-footer" id="settingsFooter"><div class="settings-message" id="settingsMessage"></div><button class="save-settings" id="saveSettings" type="button">保存模型设置并立即应用</button><button class="save-settings" id="savePolicy" type="button" hidden>保存会话策略</button><button class="save-settings" id="saveReplyTemplates" type="button" hidden>保存回复话术</button><button class="save-settings" id="saveOperations" type="button" hidden>保存运营报价规则</button></div>
+</aside>
+<script>
+  // Stable customer-service boundary for the future agent integration:
+  // POST /api/chat/image-messages and POST /api/chat/text-messages
+  const $ = id => document.getElementById(id);
+  const allowed = ['image/jpeg','image/png','image/webp'];
+  const state = {
+    file: null,
+    pendingUrl: null,
+    sending: false,
+    conversationId: (crypto.randomUUID ? crypto.randomUUID() : `chat-${Date.now()}`)
+  };
+  const chat = $('chatWindow');
+  let loadedPrompt = '';
+
+  function now() { return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()); }
+  function money(value) { return Number.isFinite(value) ? `¥${value.toFixed(2).replace(/\.00$/,'')}` : '—'; }
+  function scrollBottom() { requestAnimationFrame(()=>chat.scrollTo({top:chat.scrollHeight,behavior:'smooth'})); }
+  function element(tag,className,text) { const node=document.createElement(tag); if(className) node.className=className; if(text!==undefined) node.textContent=text; return node; }
+
+  function appendMessage(role, text, options={}) {
+    const row=element('article',`message ${role} dynamic-message`); row.dataset.role=role;
+    if(role==='assistant') row.append(element('div','message-avatar','AI'));
+    const stack=element('div','message-stack');
+    if(role==='assistant') stack.append(element('div','sender','AI 客服'));
+    const bubble=element('div','bubble');
+    if(options.imageUrl) { const image=element('img','bubble-image'); image.src=options.imageUrl; image.alt='买家发送的电影票截图'; bubble.append(image); }
+    if(text) bubble.append(document.createTextNode(text));
+    if(options.recognition) bubble.append(buildRecognitionCard(options.recognition));
+    if(options.quote) bubble.append(buildQuoteCard(options.quote));
+    stack.append(bubble,element('div','message-time',now())); row.append(stack); chat.append(row); scrollBottom(); return row;
+  }
+
+  function appendTyping(label) {
+    const row=element('article','message assistant dynamic-message'); row.dataset.role='assistant'; row.id='typingMessage';
+    row.append(element('div','message-avatar','AI'));
+    const stack=element('div','message-stack'); stack.append(element('div','sender','AI 客服'));
+    const bubble=element('div','bubble typing'); const dots=element('span','typing-dots'); for(let i=0;i<3;i++) dots.append(document.createElement('i'));
+    bubble.append(dots,element('span','typing-status',label)); stack.append(bubble); row.append(stack); chat.append(row); scrollBottom(); return row;
+  }
+
+  function buildQuoteCard(quote) {
+    const card=element('section','recognition-card');
+    const ruleApplied=Boolean(quote.pricing_rule_version);
+    const exactTitle=ruleApplied?(quote.same_type_probe_used?'后台同类型核验报价':'后台实时报价'):(quote.same_type_probe_used?'W+ 会员同类型核验报价':'W+ 会员锁座报价');
+    const areaTitle=ruleApplied?'中间 W+ 区域后台报价':'中间 W+ 区域会员锁座报价';
+    const head=element('div','recognition-head'); head.append(element('strong','',quote.quote_scope==='exact_seats'?exactTitle:areaTitle),element('span','',quote.pricing_source||'万达官方实时区域价格')); card.append(head);
+    const grid=element('div','fact-grid');
+    const cents=value=>Number.isInteger(value)?`¥${(value/100).toFixed(2)}`:'—';
+    const facts=[['W+会员活动价',cents(quote.member_unit_price_cents)],['官方计价基准',cents(quote.base_unit_cents)],['计价基准合计',cents(quote.base_total_cents)],['最终报价单价',cents(quote.unit_quote_cents)],['报价合计',cents(quote.total_quote_cents)],['价格来源',quote.price_source],['区域',quote.seat_zone_type],['规则版本',quote.pricing_rule_version],['匹配影院',quote.matched_cinema_name,'wide']];
+    facts.filter(([,value])=>value&&value!=='—').forEach(([label,value,width])=>{const item=element('div',`fact ${width||''}`);item.append(element('small','',label),element('b','',value));grid.append(item)}); card.append(grid);
+    if(quote.detail)card.append(element('div','recognition-note',quote.detail)); return card;
+  }
+
+  function buildRecognitionCard(data) {
+    const card=element('section','recognition-card');
+    const head=element('div','recognition-head'); head.append(element('strong','', '截图识别详情'),element('span','',`置信度 ${Math.round((data.confidence||0)*100)}%`)); card.append(head);
+    const grid=element('div','fact-grid');
+    const facts=[
+      ['影片',data.movie_name],['影院',data.cinema_name],['日期',data.date||data.date_text],
+      ['场次',[data.showtime_start,data.showtime_end].filter(Boolean).join(' – ')],['影厅',data.hall_name],
+      ['语言 / 制式',[data.language,data.format].filter(Boolean).join(' · ')],
+      ['座位',data.seat_display||'W+座位','wide'],
+      ['截图总额',money(data.displayed_total)]
+    ];
+    facts.filter(([,value])=>value).forEach(([label,value,width])=>{const item=element('div',`fact ${width||''}`);item.append(element('small','',label),element('b','',value));grid.append(item)});
+    card.append(grid);
+    const notes=[...(data.warnings||[]),...(data.missing_fields?.length?[`未识别：${data.missing_fields.join('、')}`]:[])];
+    if(notes.length) card.append(element('div','recognition-note',notes.join('；')));
+    return card;
+  }
+
+  function selectFile(file) {
+    if(!file) return;
+    if(!allowed.includes(file.type)) return appendMessage('assistant','请上传 JPG、PNG 或 WebP 格式的图片。');
+    if(file.size>10*1024*1024) return appendMessage('assistant','图片不能超过 10 MB，请压缩后再发送。');
+    if(state.pendingUrl) URL.revokeObjectURL(state.pendingUrl);
+    state.file=file; state.pendingUrl=URL.createObjectURL(file); $('pendingImage').src=state.pendingUrl; $('pendingName').textContent=file.name;
+    $('pendingSize').textContent=`${(file.size/1024/1024).toFixed(2)} MB · 等待发送`; $('pending').classList.add('show'); updateSend();
+  }
+  function clearFile() { if(state.pendingUrl) URL.revokeObjectURL(state.pendingUrl); state.file=null;state.pendingUrl=null;$('fileInput').value='';$('pending').classList.remove('show');updateSend(); }
+  function updateSend() { $('send').disabled=state.sending||(!state.file&&!$('composer').value.trim()); }
+
+  async function sendMessage() {
+    const text=$('composer').value.trim(); const file=state.file;
+    if(state.sending||(!text&&!file)) return;
+    const buyerImage=file?URL.createObjectURL(file):null; appendMessage('buyer',text,{imageUrl:buyerImage});
+    $('composer').value=''; $('composer').style.height='42px'; clearFile(); state.sending=true; updateSend();
+    const progressLabel=file?'正在识别图片':'正在生成回复'; const typing=appendTyping(`${progressLabel} · 0 秒`); const progressStarted=Date.now();
+    const progressTimer=setInterval(()=>{const status=typing.querySelector('.typing-status');if(status)status.textContent=`${progressLabel} · ${Math.floor((Date.now()-progressStarted)/1000)} 秒`;},1000);
+    try {
+      let response;
+      if(file) {
+        const form=new FormData(); form.append('conversation_id',state.conversationId); form.append('message_text',text); form.append('image',file);
+        response=await fetch('/api/chat/image-messages',{method:'POST',body:form});
+      } else {
+        response=await fetch('/api/chat/text-messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:state.conversationId,text})});
+      }
+      const body=await response.json(); if(!response.ok) throw new Error(body?.error?.message||body?.detail?.[0]?.msg||'回复生成失败，请稍后重试。');
+      typing.remove(); appendMessage('assistant',body.message.text,{recognition:body.message.recognition,quote:body.message.quote});
+    } catch(error) { typing.remove(); appendMessage('assistant',`暂时没有处理成功：${error.message}`); }
+    finally { clearInterval(progressTimer);state.sending=false;updateSend();$('composer').focus();refreshDiagnostics(); }
+  }
+
+  $('attach').addEventListener('click',()=>$('fileInput').click());
+  $('fileInput').addEventListener('change',event=>selectFile(event.target.files[0]));
+  $('removeFile').addEventListener('click',clearFile);
+  $('send').addEventListener('click',sendMessage);
+  $('composer').addEventListener('input',event=>{event.target.style.height='42px';event.target.style.height=`${Math.min(event.target.scrollHeight,116)}px`;updateSend()});
+  $('composer').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}});
+  $('composer').addEventListener('paste',event=>{const image=[...event.clipboardData.files].find(file=>file.type.startsWith('image/'));if(image){event.preventDefault();selectFile(image)}});
+  let dragDepth=0;
+  chat.addEventListener('dragenter',event=>{event.preventDefault();dragDepth++;chat.classList.add('dragging')});
+  chat.addEventListener('dragover',event=>event.preventDefault());
+  chat.addEventListener('dragleave',event=>{event.preventDefault();dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)chat.classList.remove('dragging')});
+  chat.addEventListener('drop',event=>{event.preventDefault();dragDepth=0;chat.classList.remove('dragging');selectFile(event.dataTransfer.files[0])});
+  $('clearChat').addEventListener('click',()=>{chat.querySelectorAll('.dynamic-message').forEach(node=>node.remove());clearFile();$('composer').value='';state.conversationId=(crypto.randomUUID?crypto.randomUUID():`chat-${Date.now()}`);updateSend()});
+
+  let diagnosticsLoading=false;
+  const diagnosticLabels=Object.freeze({
+    vision_provider_response:'千问图片识别响应',vision_fast_path_completed:'图片识别快速路径完成',
+    vision_fast_path_rejected:'图片识别需要格式修复',vision_interpreter_provider_response:'GPT识别格式修复响应',
+    vision_fallback_completed:'图片识别兜底完成',vision_conversation_context_merged:'多图会话信息已合并',
+    chat_conversation_context_used:'AI客服已使用会话上下文',chat_provider_response:'AI客服模型响应',chat_redundant_followup_replaced:'已拦截AI重复追问并使用权威报价回复',
+    wanda_showtimes_response:'查询万达官方场次',wanda_realtime_seats_response:'查询万达实时座位',
+    wanda_temporary_order_response:'创建临时锁座订单',wanda_temporary_order_status_response:'确认临时锁座状态',
+    wanda_member_offers_response:'查询W+会员活动价',wanda_temporary_cancel_response:'取消临时订单',
+    wanda_cancelled_order_status_response:'确认订单取消状态',wanda_release_recheck_response:'读取释放后的实时座位',wanda_release_verification:'判定座位释放结果',
+    wanda_same_type_probe_used:'使用相同座位类型核价',wanda_same_type_probe_retry:'更换同类型座位重试',
+    wanda_order_status_short_retry:'订单状态响应过慢，正在短超时重试',
+    pricing_rules_saved:'运营报价规则已保存',pricing_rules_applied:'后台报价规则已应用',
+    wanda_direct_quote_completed:'万达会员报价流程完成',quote_unavailable:'万达实时报价未取得',
+    request_completed:'本次请求处理完成'
+  });
+  function diagnosticClass(entry) { const event=entry.event;if(event==='wanda_release_verification'&&entry.details?.seat_released===false)return 'diagnostic-error';if(event.includes('invalid')||event.includes('failed'))return event.includes('schema')?'diagnostic-schema':'diagnostic-error'; return ''; }
+  function diagnosticStatus(entry) {
+    if(entry.event==='wanda_release_verification')return entry.details?.seat_released?'目标座位已恢复可售':'目标座位仍不可选';
+    const data=entry.details?.response?.data;
+    const status=data&&typeof data==='object'?String(data.orderStatus??''):'';
+    if(status==='10')return '订单处理中'; if(status==='40')return '锁座成功'; if(status==='60')return '订单已取消';
+    if(entry.details?.response?.code===0)return '官方返回成功'; return '';
+  }
+  function renderDiagnostics(entries) {
+    const root=$('diagnosticsEntries'); root.replaceChildren();
+    if(!entries.length){root.append(element('div','diagnostic-empty','暂无日志。发送一张图片后会显示完整模型响应。'));return;}
+    [...entries].reverse().forEach(entry=>{
+      const detail=element('details','diagnostic-entry'); if(['vision_schema_invalid','vision_fast_path_rejected','vision_provider_response','vision_interpreter_provider_response','chat_provider_response'].includes(entry.event))detail.open=true;
+      const summary=element('summary'); const eventName=diagnosticLabels[entry.event]||entry.event; const eventLabel=element('span',`diagnostic-event ${diagnosticClass(entry)}`,eventName); eventLabel.title=entry.event; summary.append(eventLabel);
+      const duration=entry.details?.duration_ms!==undefined?`${entry.details.duration_ms} ms`:''; const status=diagnosticStatus(entry); const stamp=new Date(entry.timestamp).toLocaleTimeString('zh-CN',{hour12:false});
+      summary.append(element('span','diagnostic-meta',[duration,status,stamp,entry.request_id].filter(Boolean).join(' · ')));
+      const pre=element('pre','diagnostic-json'); pre.textContent=JSON.stringify(entry, null, 2); detail.append(summary,pre); root.append(detail);
+    });
+  }
+  async function refreshDiagnostics() {
+    if(diagnosticsLoading)return; diagnosticsLoading=true;
+    try { const response=await fetch('/api/diagnostics/recent?limit=50'); const body=await response.json(); if(response.ok)renderDiagnostics(body.entries||[]); }
+    finally { diagnosticsLoading=false; }
+  }
+  async function clearDiagnostics() { await fetch('/api/diagnostics/recent',{method:'DELETE'}); await refreshDiagnostics(); }
+
+  const knowledgeCategories=['售后人工','下单确认','订单出票','报价规则','截图识别','异常处理','购票流程','常见问题'];
+  let knowledgeEntries=[];
+  function knowledgeField(parent,label,value,type='textarea') { const wrap=element('label',null,label); const input=element(type==='input'?'input':'textarea'); input.value=value||''; input.maxLength=type==='input'?120:4000; wrap.append(input); parent.append(wrap); return input; }
+  function renderKnowledge() {
+    const root=$('knowledgeList'); root.replaceChildren();
+    const filter=$('knowledgeCategoryFilter').value; const entries=knowledgeEntries.filter(item=>!filter||item.category===filter);
+    $('knowledgeTotal').textContent=String(knowledgeEntries.length); $('knowledgeEnabled').textContent=String(knowledgeEntries.filter(item=>item.enabled).length); $('knowledgeCategories').textContent=String(new Set(knowledgeEntries.map(item=>item.category)).size);
+    if(!entries.length){root.append(element('div','setting-help','暂无匹配知识条目。'));return;}
+    entries.forEach(item=>{
+      const detail=element('details','knowledge-entry'); const summary=document.createElement('summary'); const title=element('span'); title.append(element('b',null,item.title),element('small',null,`${item.category} · ${item.enabled?'启用':'停用'}`)); const badge=element('i',`knowledge-badge ${item.enabled?'retained':'blocked'}`,item.enabled?'启用':'停用'); summary.append(title,badge); detail.append(summary);
+      const form=element('div','knowledge-edit'); const titleInput=knowledgeField(form,'标题',item.title,'input'); const categoryLabel=element('label',null,'分类'); const category=document.createElement('select'); knowledgeCategories.forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;option.selected=value===item.category;category.append(option)}); categoryLabel.append(category); form.append(categoryLabel);
+      const questions=knowledgeField(form,'买家常见问法',item.common_questions); const guidance=knowledgeField(form,'回复口径',item.reply_guidance); const rules=knowledgeField(form,'处理规则',item.handling_rules); const enabledLabel=element('label'); const enabled=document.createElement('input'); enabled.type='checkbox'; enabled.checked=Boolean(item.enabled); enabledLabel.append(enabled,document.createTextNode(' 启用此知识条目')); form.append(enabledLabel);
+      const actions=element('div','knowledge-actions'); const save=element('button',null,'保存'); const remove=element('button',null,'删除'); actions.append(save,remove); form.append(actions); detail.append(form); root.append(detail);
+      save.addEventListener('click',async()=>{save.disabled=true;try{const response=await fetch(`/api/settings/knowledge/${encodeURIComponent(item.id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:titleInput.value,category:category.value,common_questions:questions.value,reply_guidance:guidance.value,handling_rules:rules.value,enabled:enabled.checked})});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'知识保存失败');knowledgeEntries=knowledgeEntries.map(value=>value.id===item.id?data:value);renderKnowledge();settingsMessage('知识条目已保存。')}catch(error){settingsMessage(error.message,true)}finally{save.disabled=false}});
+      remove.addEventListener('click',async()=>{if(!window.confirm(`确定删除“${item.title}”吗？`))return;remove.disabled=true;try{const response=await fetch(`/api/settings/knowledge/${encodeURIComponent(item.id)}`,{method:'DELETE'});if(!response.ok)throw new Error('知识删除失败');knowledgeEntries=knowledgeEntries.filter(value=>value.id!==item.id);renderKnowledge();settingsMessage('知识条目已删除。')}catch(error){settingsMessage(error.message,true)}finally{remove.disabled=false}});
+    });
+  }
+  async function loadKnowledge() { try{const response=await fetch('/api/settings/knowledge');const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取知识库失败');knowledgeEntries=Array.isArray(data.entries)?data.entries:[];renderKnowledge()}catch(error){settingsMessage(error.message,true)} }
+  async function addKnowledge() { const response=await fetch('/api/settings/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'新知识条目',category:'常见问题',common_questions:'请填写买家常见问法。',reply_guidance:'请填写统一回复口径。',handling_rules:'请填写处理规则。',enabled:false})});const data=await response.json();if(!response.ok){settingsMessage(data?.detail||'新增知识失败',true);return}knowledgeEntries.push(data);$('knowledgeCategoryFilter').value='';renderKnowledge();document.querySelector('#knowledgeList details:last-child')?.setAttribute('open','');settingsMessage('已新增停用条目，请编辑后启用。')}
+  const workspaceMeta=Object.freeze({
+    chat:['客服工作台','识别买家截图、查询官方报价并延续安全会话。'],
+    pricing:['运营报价','配置确定性整数分报价规则，保存后下一次核价立即使用。'],
+    model:['模型与接口','独立管理识图与AI回复服务，保存后下一次请求立即使用。'],
+    reply:['回复话术','管理订单状态文案和观影提醒文案。'],
+    policy:['会话策略','管理客服人设、业务背景、知识补充、回复风格和人工客服时间。'],
+    knowledge:['知识库','编辑、分类和启停客服常见问题知识条目。'],
+    safety:['安全门禁','查看不可被运营配置覆盖的价格、座位和交易状态边界。'],
+    logs:['运行日志','查看模型、万达官方接口、报价规则和安全校验诊断。']
+  });
+  let activeWorkspace='chat';
+  function showWorkspace(name,focus=false) {
+    if(!workspaceMeta[name])name='chat'; activeWorkspace=name;
+    const settingsWorkspace=['pricing','model','reply','policy','knowledge','safety'].includes(name);
+    $('mainPage').hidden=settingsWorkspace;
+    $('workspaceChat').hidden=name!=='chat'; $('diagnosticsPanel').hidden=name!=='logs';
+    $('settingsDrawer').classList.toggle('show',settingsWorkspace); $('settingsDrawer').setAttribute('aria-hidden',String(!settingsWorkspace));
+    document.querySelectorAll('[data-workspace]').forEach(button=>{const selected=button.dataset.workspace===name;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1});
+    if(settingsWorkspace){
+      const model=name==='model'; const policy=name==='policy'; const reply=name==='reply';
+      $('modelSettingsPanel').hidden=!model; $('policySettingsPanel').hidden=!policy; $('replySettingsPanel').hidden=!reply; $('operationsSettingsPanel').hidden=['model','policy','reply'].includes(name);
+      document.querySelectorAll('[data-operation-view]').forEach(section=>section.hidden=['model','policy','reply'].includes(name)||section.dataset.operationView!==name);
+      $('saveSettings').hidden=!model; $('savePolicy').hidden=!policy; $('saveReplyTemplates').hidden=!reply; $('saveOperations').hidden=name!=='pricing'; $('settingsFooter').hidden=!['model','policy','reply','pricing'].includes(name);
+      $('workspaceSettingsTitle').textContent=workspaceMeta[name][0]; $('workspaceSettingsDescription').textContent=workspaceMeta[name][1]; settingsMessage('');
+    }
+    if(name==='logs')refreshDiagnostics();
+    history.replaceState(null,'',`#${name}`);
+    if(focus){const target=document.querySelector(`[data-workspace="${name}"]`);requestAnimationFrame(()=>target?.focus())}
+  }
+  function switchSettingsTab(tab) { showWorkspace(tab==='operations'?'pricing':'model',true); }
+  const yuanToCents=id=>Math.round(Number($(id).value)*100);
+  function updatePricingPreview() {
+    const original=yuanToCents('previewOriginal'),member=yuanToCents('previewMember'),step=Number($('roundingIncrement').value);
+    if(!Number.isInteger(original)||original<=0||!Number.isInteger(member)||member<=0){$('pricingPreviewResult').textContent='请输入有效的实时原价和会员价';return;}
+    if(member>original){$('pricingPreviewResult').textContent='会员价下限高于实时原价上限，停止自动报价';return;}
+    let quoted=member;
+    if($('pricingEnabled').checked){
+      const isWplus=$('previewSeatType').value==='wplus';
+      quoted=isWplus
+        ?(member<=yuanToCents('wplusThreshold')?Math.max(original-yuanToCents('wplusDiscount'),member):member)
+        :member+yuanToCents('regularMarkup');
+      const lower=Math.ceil(member/step)*step,upper=Math.floor(original/step)*step;
+      if(lower>upper){$('pricingPreviewResult').textContent='轮整后会员价下限高于原价上限，停止自动报价';return;}
+      quoted=Math.min(Math.max(Math.floor((quoted+Math.floor(step/2))/step)*step,lower),upper);
+    }
+    $('pricingPreviewResult').textContent=`最终报价 ¥${(quoted/100).toFixed(2)}${$('pricingEnabled').checked?'':'（规则未启用）'}`;
+  }
+  async function loadOperations() {
+    try {
+      const response=await fetch('/api/settings/operations'); const data=await response.json(); if(!response.ok)throw new Error(data?.detail||'读取运营设置失败');
+      $('pricingEnabled').checked=data.enabled; $('wplusFridayEnabled').checked=data.wplus_friday_member_day_enabled!==false; $('regularMarkup').value=(data.regular_adjustment_cents/100).toFixed(2); $('wplusDiscount').value=(Math.abs(data.wplus_adjustment_cents)/100).toFixed(2); $('wplusThreshold').value=(data.wplus_member_price_threshold_cents/100).toFixed(2); $('roundingIncrement').value=String(data.rounding_increment_cents);
+      $('pricingRuleMeta').textContent=`版本 ${data.rule_version} · 修订 ${data.revision}${data.updated_at?` · ${new Date(data.updated_at).toLocaleString('zh-CN')}`:''}`; updatePricingPreview();
+    } catch(error) { settingsMessage(error.message,true); }
+  }
+  async function saveOperations() {
+    const button=$('saveOperations'); button.disabled=true; settingsMessage('正在校验并保存运营报价规则…');
+    try {
+      const payload={enabled:$('pricingEnabled').checked,wplus_friday_member_day_enabled:$('wplusFridayEnabled').checked,regular_adjustment_cents:yuanToCents('regularMarkup'),wplus_adjustment_cents:-yuanToCents('wplusDiscount'),wplus_member_price_threshold_cents:yuanToCents('wplusThreshold'),rounding_increment_cents:Number($('roundingIncrement').value)};
+      const response=await fetch('/api/settings/operations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const data=await response.json();
+      if(!response.ok)throw new Error(data?.detail?.[0]?.msg||data?.detail||'运营规则保存失败');
+      $('pricingRuleMeta').textContent=`版本 ${data.rule_version} · 修订 ${data.revision} · ${new Date(data.updated_at).toLocaleString('zh-CN')}`; settingsMessage(`运营报价规则已保存，下一次核价立即使用（${data.rule_version}）。`); updatePricingPreview();
+    } catch(error) { settingsMessage(error.message,true); }
+    finally { button.disabled=false;refreshDiagnostics(); }
+  }
+
+  function showSettings(show) { showWorkspace(show?'model':'chat',true); }
+  function updatePromptLength() { $('promptLength').textContent=`${$('visionPrompt').value.length} / 20000`; }
+  function settingsMessage(message,isError=false) { $('settingsMessage').textContent=message; $('settingsMessage').classList.toggle('error-text',isError); }
+  function catalogMessage(message,isError=false,target='modelFetchMessage') { $(target).textContent=message; $(target).classList.toggle('error-text',isError); }
+  function updateThinkingHint() {
+    const visionModel=$('modelSelect').value.trim().toLowerCase().split('/').pop(); const chatModel=$('chatModelSelect').value.trim().toLowerCase().split('/').pop(); const enabled=$('thinkingToggle').checked;
+    $('qwenThinkingGroup').style.display=visionModel.startsWith('qwen')?'block':'none'; $('gptReasoningGroup').style.display=chatModel.startsWith('gpt-5')?'block':'none';
+    $('thinkingHint').textContent=enabled?'已开启模型思考，响应时间可能增加。':'思考模式已关闭，优先降低延迟。';
+  }
+  async function loadSettings() {
+    settingsMessage('正在读取设置…');
+    try {
+      const [response,policyResponse]=await Promise.all([fetch('/api/settings/vision'),fetch('/api/settings/conversation-policy')]); const data=await response.json(); const policy=await policyResponse.json(); if(!response.ok) throw new Error(data?.detail||'读取设置失败'); if(!policyResponse.ok) throw new Error(policy?.detail||'读取AI回复开关失败');
+      $('baseUrl').value=data.base_url; $('modelSelect').value=data.model; $('chatBaseUrl').value=data.chat_base_url||data.base_url; $('chatModelSelect').value=data.chat_model||data.model; $('thinkingToggle').checked=data.enable_thinking; $('reasoningEffort').value=data.reasoning_effort||'none'; $('visionPrompt').value=data.vision_prompt; $('chatPrompt').value=data.chat_prompt; $('aiReplyEnabled').checked=policy.ai_reply_enabled!==false; $('policyAiReplyEnabled').checked=policy.ai_reply_enabled!==false; $('agentPersona').value=policy.agent_persona||''; $('businessBackground').value=policy.business_background||''; $('customerServiceKnowledge').value=policy.customer_service_knowledge||''; $('replyStyle').value=policy.reply_style||''; $('humanServiceHours').value=policy.human_service_hours||'';
+      loadedPrompt=data.vision_prompt; $('currentModel').textContent=`${data.model} → ${data.chat_model||data.model}`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20';
+      $('apiKey').value=''; $('clearApiKey').checked=false; $('chatKeyState').textContent=data.has_chat_api_key?`已保存 ${data.masked_chat_api_key}`:'未配置'; $('chatKeyState').style.color=data.has_chat_api_key?'#29945a':'#b16b20'; $('chatApiKey').value=''; $('clearChatApiKey').checked=false; updatePromptLength(); updateThinkingHint(); settingsMessage('');
+    } catch(error) { settingsMessage(error.message,true); }
+  }
+  async function loadReplyTemplates() { try{const response=await fetch('/api/settings/reply-templates');const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取回复话术失败');$('movieReminderTemplate').value=data.movie_reminder_template||'';$('orderShippedTemplate').value=data.order_shipped_template||''}catch(error){settingsMessage(error.message,true)} }
+  async function savePolicy() { const button=$('savePolicy');button.disabled=true;settingsMessage('正在保存会话策略…');try{const payload={ai_reply_enabled:$('policyAiReplyEnabled').checked,agent_persona:$('agentPersona').value.trim(),business_background:$('businessBackground').value.trim(),customer_service_knowledge:$('customerServiceKnowledge').value.trim(),reply_style:$('replyStyle').value.trim(),human_service_hours:$('humanServiceHours').value.trim()};const response=await fetch('/api/settings/conversation-policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'会话策略保存失败');$('aiReplyEnabled').checked=data.ai_reply_enabled!==false;settingsMessage('会话策略已保存，下一次 AI 回复立即使用。')}catch(error){settingsMessage(error.message,true)}finally{button.disabled=false;}}
+  async function saveReplyTemplates() { const button=$('saveReplyTemplates');button.disabled=true;settingsMessage('正在保存回复话术…');try{const response=await fetch('/api/settings/reply-templates',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({movie_reminder_template:$('movieReminderTemplate').value.trim(),order_shipped_template:$('orderShippedTemplate').value.trim()})});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'回复话术保存失败');settingsMessage('回复话术已保存，观影提醒和订单通知立即使用。')}catch(error){settingsMessage(error.message,true)}finally{button.disabled=false;}}
+  async function fetchModels() {
+    const button=$('fetchModels'); button.disabled=true; catalogMessage('正在从服务商获取模型…');
+    try {
+      const payload={base_url:$('baseUrl').value.trim(),api_key:$('apiKey').value.trim()||null};
+      const response=await fetch('/api/settings/vision/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const data=await response.json();
+      if(!response.ok)throw new Error(data?.error?.message||data?.detail?.[0]?.msg||data?.detail||'获取模型失败');
+      const options=$('visionModelOptions'); options.replaceChildren(); data.models.forEach(model=>{const option=document.createElement('option');option.value=model;options.append(option)});
+      catalogMessage(`已获取 ${data.count} 个模型，请点击模型输入框选择。`); updateThinkingHint(); refreshDiagnostics();
+    } catch(error) { catalogMessage(error.message,true); }
+    finally { button.disabled=false; }
+  }
+  async function fetchChatModels() {
+    const button=$('fetchChatModels'); button.disabled=true; catalogMessage('正在从 AI 回复服务商获取模型…',false,'chatModelFetchMessage');
+    try {
+      const payload={provider:'chat',base_url:$('chatBaseUrl').value.trim(),api_key:$('chatApiKey').value.trim()||null};
+      const response=await fetch('/api/settings/vision/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const data=await response.json();
+      if(!response.ok)throw new Error(data?.error?.message||data?.detail?.[0]?.msg||data?.detail||'获取模型失败');
+      const options=$('chatModelOptions'); options.replaceChildren(); data.models.forEach(model=>{const option=document.createElement('option');option.value=model;options.append(option)});
+      catalogMessage(`已获取 ${data.count} 个 AI 回复模型。`,false,'chatModelFetchMessage'); updateThinkingHint(); refreshDiagnostics();
+    } catch(error) { catalogMessage(error.message,true,'chatModelFetchMessage'); }
+    finally { button.disabled=false; }
+  }
+  async function saveSettings() {
+    const button=$('saveSettings'); button.disabled=true; settingsMessage('正在加密并保存…');
+    try {
+      const payload={base_url:$('baseUrl').value.trim(),model:$('modelSelect').value.trim(),chat_base_url:$('chatBaseUrl').value.trim(),chat_model:$('chatModelSelect').value.trim(),enable_thinking:$('thinkingToggle').checked,reasoning_effort:$('reasoningEffort').value,vision_prompt:$('visionPrompt').value.trim(),chat_prompt:$('chatPrompt').value.trim(),api_key:$('apiKey').value.trim()||null,clear_api_key:$('clearApiKey').checked,chat_api_key:$('chatApiKey').value.trim()||null,clear_chat_api_key:$('clearChatApiKey').checked};
+      const response=await fetch('/api/settings/vision',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const data=await response.json();
+      if(!response.ok) throw new Error(data?.detail?.[0]?.msg||data?.detail||'保存失败');
+      const policyResponse=await fetch('/api/settings/conversation-policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ai_reply_enabled:$('aiReplyEnabled').checked})}); const policy=await policyResponse.json();
+      if(!policyResponse.ok) throw new Error(policy?.detail?.[0]?.msg||policy?.detail||'AI回复开关保存失败');
+      loadedPrompt=data.vision_prompt; $('currentModel').textContent=`${data.model} → ${data.chat_model}`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20'; $('chatKeyState').textContent=data.has_chat_api_key?`已保存 ${data.masked_chat_api_key}`:'未配置'; $('chatKeyState').style.color=data.has_chat_api_key?'#29945a':'#b16b20'; $('apiKey').value=''; $('chatApiKey').value=''; $('clearApiKey').checked=false; $('clearChatApiKey').checked=false; updateThinkingHint(); settingsMessage('设置已保存，下一张图片立即使用新配置。');
+    } catch(error) { settingsMessage(error.message,true); }
+    finally { button.disabled=false;refreshDiagnostics(); }
+  }
+  const workspaceButtons=[...document.querySelectorAll('[data-workspace]')];
+  workspaceButtons.forEach((button,index)=>{
+    button.addEventListener('click',()=>showWorkspace(button.dataset.workspace));
+    button.addEventListener('keydown',event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%workspaceButtons.length;else if(event.key==='ArrowLeft')next=(index-1+workspaceButtons.length)%workspaceButtons.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=workspaceButtons.length-1;else return;event.preventDefault();showWorkspace(workspaceButtons[next].dataset.workspace,true)});
+  });
+  $('openSettings').addEventListener('click',()=>showSettings(true)); $('closeSettings').addEventListener('click',()=>showSettings(false)); $('settingsBackdrop').addEventListener('click',()=>showSettings(false)); $('addKnowledge').addEventListener('click',addKnowledge); $('knowledgeCategoryFilter').addEventListener('change',renderKnowledge);
+  $('modelSettingsTab').addEventListener('click',()=>switchSettingsTab('model')); $('operationsSettingsTab').addEventListener('click',()=>switchSettingsTab('operations'));
+  $('useAirelvo').addEventListener('click',()=>{$('baseUrl').value='https://airelvo.cc/v1';catalogMessage('识图接口已切换到 Airelvo。');}); $('fetchModels').addEventListener('click',fetchModels);
+  $('useChatAirelvo').addEventListener('click',()=>{$('chatBaseUrl').value='https://airelvo.cc/v1';catalogMessage('AI 回复接口已切换到 Airelvo。',false,'chatModelFetchMessage');}); $('fetchChatModels').addEventListener('click',fetchChatModels);
+  $('modelSelect').addEventListener('input',updateThinkingHint); $('chatModelSelect').addEventListener('input',updateThinkingHint); $('thinkingToggle').addEventListener('change',updateThinkingHint); $('reasoningEffort').addEventListener('change',updateThinkingHint);
+  $('refreshDiagnostics').addEventListener('click',refreshDiagnostics); $('clearDiagnostics').addEventListener('click',clearDiagnostics);
+  $('saveSettings').addEventListener('click',saveSettings); $('savePolicy').addEventListener('click',savePolicy); $('saveReplyTemplates').addEventListener('click',saveReplyTemplates); $('saveOperations').addEventListener('click',saveOperations); $('visionPrompt').addEventListener('input',updatePromptLength); $('resetPrompt').addEventListener('click',()=>{$('visionPrompt').value=loadedPrompt;updatePromptLength()});
+  ['pricingEnabled','wplusFridayEnabled','regularMarkup','wplusDiscount','wplusThreshold','roundingIncrement','previewSeatType','previewOriginal','previewMember'].forEach(id=>$(id).addEventListener('input',updatePricingPreview));
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')showSettings(false)});
+  showWorkspace(location.hash.replace('#','')||'chat'); updateSend(); loadSettings(); loadOperations(); loadReplyTemplates(); loadKnowledge(); refreshDiagnostics(); setInterval(()=>{if(!document.hidden&&activeWorkspace==='logs')refreshDiagnostics();},4000);
+</script>
+</body>
+</html>

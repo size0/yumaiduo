@@ -1,0 +1,18 @@
+[project]
+name = "wanda-movie-image-recognition"
+version = "1.0.0"
+description = "Structured movie ticket screenshot recognition with DashScope vision models"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
