@@ -264,121 +264,65 @@ python -m pytest -q
 - 启动脚本只监听 `127.0.0.1`；如需暴露到公网，应在反向代理层增加 HTTPS、身份认证和持久化限流。
 - 你曾在聊天中发送过一个明文 Key，建议在阿里云控制台立即轮换后再使用本项目。
 
- 当前生产插件不是直接覆盖上传，而是“发布目录 + current 软链接”方式部署。
+## 服务器部署目录
 
- 当前插件目录
+服务器：`ubuntu@124.220.29.179`
 
- 服务器：
+服务器采用“版本发布目录 + `current` 软链接 + systemd”方式运行，不直接运行 Git 工作区，也不直接覆盖正在运行的目录。
 
- ```text
-   ubuntu@124.220.29.179
- ```
+| 系统 | `current` 软链接 | 当前发布目录 | systemd 服务 | 监听地址 |
+|---|---|---|---|---|
+| 独立出票系统 | `/opt/ticket-system/current` | `ticket-batch-coupon-bind-20260829-170504` | `ticket-backend.service` | `127.0.0.1:8000` |
+| 鱼麦多插件 V4 业务后端 | `/opt/wanda-v4/current` | `v4-2.4.93-knowledge-policy-reminder-20260829-195857` | `wanda-v4.service` | `127.0.0.1:8012` |
+| 鱼麦多插件运行时 | `/opt/wanda-seat-autoquote/current` | `plugin-2.2.50-conversation-knowledge-20260829-201718` | `wanda-seat-autoquote.service` | `127.0.0.1:4003` |
 
- 当前生效插件：
+### 启动入口与环境文件
 
- ```text
-   /opt/wanda-seat-autoquote/current
- ```
+```text
+出票系统：/opt/ticket-system/current/backend/.venv/bin/uvicorn
+工作目录：/opt/ticket-system/current/backend
+环境文件：/etc/ticket-system/backend.env
 
- 实际指向：
+V4 后端：/opt/wanda-v4/current/.venv/bin/python -m uvicorn
+工作目录：/opt/wanda-v4/current
+环境文件：/etc/ticket-system/wanda-v4.env
 
- ```text
-   /opt/wanda-seat-autoquote/releases/plugin-2.2.49-date-seat-fix-20260828-1045
- ```
+插件运行时：/usr/bin/node /opt/wanda-seat-autoquote/current/index.mjs
+环境文件：/etc/ticket-system/wanda-seat-autoquote.env
+```
 
- 历史版本也保留在：
+### 服务器数据目录
 
- ```text
-   /opt/wanda-seat-autoquote/releases/
- ```
+```text
+出票系统账号和缓存：/var/lib/ticket-system/backend-data/
+V4 报价记录和报价规则：/var/lib/ticket-system/wanda-v4/
+插件运行数据：/var/lib/ticket-system/wanda-ai-plugin-data/
+```
 
- 当前插件版本：
+环境文件位于 `/etc/ticket-system/`，不放入代码发布目录；其中的密钥、账号池和生产配置禁止提交或输出。
 
- ```text
-   2.2.49
- ```
+### 服务器检查命令
 
- 插件服务
+```bash
+sudo systemctl status ticket-backend.service wanda-v4.service wanda-seat-autoquote.service
+readlink -f /opt/ticket-system/current
+readlink -f /opt/wanda-v4/current
+readlink -f /opt/wanda-seat-autoquote/current
+sudo systemctl cat ticket-backend.service
+sudo systemctl cat wanda-v4.service
+sudo systemctl cat wanda-seat-autoquote.service
+```
 
- 服务名：
+### 发布和回滚
 
- ```text
-   wanda-seat-autoquote
- ```
+```text
+从 yumaiduo.git 已同步提交打包
+→ 上传发布包到服务器 /tmp
+→ 解压到对应 /opt/*/releases/<版本目录>
+→ 安装生产依赖
+→ 切换对应 current 软链接
+→ 重启对应 systemd 服务
+→ 检查健康接口、端口和服务状态
+```
 
- 启动入口：
-
- ```text
-   /opt/wanda-seat-autoquote/current/index.mjs
- ```
-
- 查看配置：
-
- ```bash
-   sudo systemctl cat wanda-seat-autoquote
- ```
-
- 插件监听端口：
-
- ```text
-   127.0.0.1:4003
- ```
-
- 插件数据和环境配置
-
- 运行数据：
-
- ```text
-   /var/lib/ticket-system/wanda-ai-plugin-data
- ```
-
- 环境配置：
-
- ```text
-   /etc/ticket-system/wanda-seat-autoquote.env
- ```
-
- 环境文件不放在代码发布目录中，里面的密钥不能提交到仓库或输出。
-
- 上传部署流程
-
- 本地插件源码目录：
-
- ```text
-   E:\票务系统\plugins\wanda-seat-autoquote
- ```
-
- 通常流程是：
-
- ```text
-   本地打包插件
-   → scp 上传到服务器 /tmp
-   → 解压到 /opt/wanda-seat-autoquote/releases/<版本目录>
-   → npm ci --omit=dev
-   → 切换 current 软链接
-   → 重启 wanda-seat-autoquote
-   → 检查端口和服务状态
- ```
-
- 不会直接修改：
-
- ```text
-   /opt/wanda-seat-autoquote/current
- ```
-
- 这样可以保留旧版本，出现问题时切回旧的 current 软链接。
-
- 另外，基础发布包里还存在：
-
- ```text
-   /opt/ticket-system/current/plugins/wanda-seat-autoquote
- ```
-
- 但当前 systemd 配置通过 override 实际使用的是：
-
- ```text
-   /opt/wanda-seat-autoquote/current
- ```
-
- 因此以 /opt/wanda-seat-autoquote/current 为准。
-
+历史版本保留在各自的 `releases/` 目录中，出现问题时切回旧的 `current` 软链接回滚。

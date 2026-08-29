@@ -16,13 +16,15 @@
 
 从本目录运行 `start.ps1`。脚本会把 `backend/` 加入 Python 模块路径，并继续使用根目录的 `data/` 和 `logs/`。
 
-## 生产对应关系
+## 服务器对应关系
 
-- V4 后端：`/opt/wanda-v4/current`，端口 `8012`。
-- 插件运行时：`/opt/wanda-seat-autoquote/current`，端口 `4003`。
-- 独立出票系统：`/opt/ticket-system/current/backend`，端口 `8000`。
+| 本地组件 | 服务器运行目录 | 当前发布目录 | 服务 | 端口 |
+|---|---|---|---|---|
+| 独立出票系统后端 | `/opt/ticket-system/current/backend` | `ticket-batch-coupon-bind-20260829-170504` | `ticket-backend.service` | `127.0.0.1:8000` |
+| 鱼麦多 V4 后端 | `/opt/wanda-v4/current` | `v4-2.4.93-knowledge-policy-reminder-20260829-195857` | `wanda-v4.service` | `127.0.0.1:8012` |
+| 鱼麦多插件运行时 | `/opt/wanda-seat-autoquote/current` | `plugin-2.2.50-conversation-knowledge-20260829-201718` | `wanda-seat-autoquote.service` | `127.0.0.1:4003` |
 
-V4 后端和插件运行时共同组成鱼麦多插件；出票系统是另一个系统。
+V4 后端和插件运行时共同组成鱼麦多插件；出票系统是另一个系统。`current` 是软链接，旧版本保留在各自的 `releases/` 目录用于回滚。
 
 ## 修改和同步规则
 
