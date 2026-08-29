@@ -219,40 +219,30 @@
       </div>
       <div class="pricing-console" data-operation-view="pricing">
         <header class="pricing-console-head">
-          <div><h2><span class="section-icon">⌘</span>报价规则</h2><p>配置会员座与普通座的自动报价计算方式</p></div>
-          <button class="template-save pricing-save" id="saveOperations" type="button">▣&nbsp; 保存规则</button>
+          <div><h2><span class="section-icon">⌘</span>报价规则</h2><p>模型只负责理解和表达。优先使用万达实时座位接口返回的W+会员活动价；未显示会员价时才使用临时探针，并仅在取消订单、确认座位恢复后报价。</p></div>
+          <button class="template-save pricing-save" id="saveOperations" type="button">保存运营报价规则</button>
         </header>
         <div class="pricing-rule-meta" id="pricingRuleMeta">正在读取后台规则…</div>
-        <div class="pricing-stats">
-          <article class="pricing-stat"><span class="stat-icon stat-icon-blue">¤</span><div><small>当前报价模式</small><strong id="pricingModeLabel">自动报价</strong><em>切换后台规则前端需先处理</em></div></article>
-          <article class="pricing-stat"><span class="stat-icon stat-icon-green">▥</span><div><small>今日自动报价</small><strong>0</strong><em>待核价 0 次 | 异常 0 次</em></div></article>
-          <article class="pricing-stat"><span class="stat-icon stat-icon-orange">♢</span><div><small>安全拦截</small><strong>0</strong><em>低置信度 0 次 | 异常 0 次</em></div></article>
-        </div>
         <div class="pricing-rule-grid">
           <section class="pricing-rule-card pricing-rule-wplus">
-            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>W+会员座报价</h3><p>针对 W+ 会员座的确定性报价规则，最终报价受会员成本保护。</p></div></header>
+            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>W+会员座报价</h3><p>W+原价减免、W+会员价阈值</p></div></header>
             <div class="pricing-fields">
-              <div class="money-field"><label for="wplusDiscount">固定调整（元/张）</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
-              <div class="money-field"><label for="wplusThreshold">会员价阈值（元）</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
+              <div class="money-field"><label for="wplusDiscount">W+原价减免</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
+              <div class="money-field"><label for="wplusThreshold">W+会员价阈值</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
             </div>
-            <div class="pricing-segment"><b>价格基准</b><div><span class="selected">原价保护</span><span>会员价保底</span></div></div>
-            <div class="pricing-option-row"><div><strong>启用后台报价规则</strong><small>关闭后仅显示官方实时区域参考价。</small></div><label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label></div>
-            <div class="pricing-option-row"><div><strong>报价不得低于会员价</strong><small>自动保护官方会员成本，避免报价低于成本。</small></div><span class="static-switch on"><i></i></span></div>
+            <div class="pricing-option-row"><div><strong>启用后台报价规则</strong><small>关闭时最终报价等于官方实时区域参考价。</small></div><label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label></div>
           </section>
           <section class="pricing-rule-card pricing-rule-regular">
-            <header class="pricing-card-head"><span class="pricing-card-icon person">♙</span><div><h3>普通座报价</h3><p>普通 / 优选座使用独立规则；优先使用官方返回的普通会员活动价。</p></div></header>
+            <header class="pricing-card-head"><span class="pricing-card-icon person">♙</span><div><h3>普通座报价</h3><p>普通座调整、最终报价取整</p></div></header>
             <div class="pricing-fields">
-              <div class="money-field"><label for="regularMarkup">固定调整（元/张）</label><div class="money-input"><input id="regularMarkup" type="number" min="0" max="1000" step="0.1" value="1.0"><span>元</span></div></div>
+              <div class="money-field"><label for="regularMarkup">普通座调整</label><div class="money-input"><input id="regularMarkup" type="number" min="0" max="1000" step="0.1" value="1.0"><span>元</span></div></div>
               <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
             </div>
-            <div class="pricing-segment"><b>价格基准</b><div><span>原价</span><span class="selected">会员价</span></div></div>
-            <div class="pricing-option-row"><div><strong>允许负数调整</strong><small>开启后可配置为负数，用于低价引流。</small></div><span class="static-switch off"><i></i></span></div>
-            <div class="pricing-option-row"><div><strong>报价不得低于会员价</strong><small>自动使用会员价作为底价保护，避免亏亏。</small></div><span class="static-switch on"><i></i></span></div>
+
           </section>
         </div>
         <div class="pricing-bottom-grid">
-          <section class="formula-card pricing-preview-card"><header><span class="preview-icon">☷</span><div><h3>报价公式预览</h3><p>预览仅计算规则，不锁座、不创建订单</p></div></header><div class="formula-copy">普通座：实时会员价 + 普通座调整。<br>W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；高于阈值：直接取会员价。<br>逐座轮整后求和，不低于会员成本且不高于实时原价。</div><div class="pricing-preview"><strong>本地试算</strong><div class="money-grid"><div class="money-field"><label for="previewOriginal">官方原价</label><div class="money-input"><input id="previewOriginal" type="number" step="0.1" value="100"><span>元</span></div></div><div class="money-field"><label for="previewMember">官方会员价</label><div class="money-input"><input id="previewMember" type="number" step="0.1" value="59"><span>元</span></div></div></div><div class="preview-result" id="pricingPreviewResult">最终报价 60.00元</div></div></section>
-          <section class="pricing-safety-card"><h3>安全与风控设置</h3><div class="safety-option"><div><strong>自动识别报价</strong><small>关闭后，新截图不识别、不报价、不自动改价。</small></div><label class="switch"><input id="pricingSafetyEnabled" type="checkbox" checked><span class="slider"></span></label></div><div class="safety-option"><div><strong>自动修改闲鱼订单金额</strong><small>仅在未付款、订单绑定和金额校验全部通过时执行。</small></div><span class="static-switch off"><i></i></span></div><div class="safety-option"><div><strong>普通 / 优选座自动报价</strong><small>开启后普通座也可按接口实时价格报价，低置信度转人工。</small></div><span class="static-switch on"><i></i></span></div><div class="safety-option"><div><strong>允许按周五会员日价格</strong><small>只有官方返回活动价时才使用，不自行推测会员资格。</small></div><span class="static-switch off"><i></i></span></div><div class="safety-option"><div><strong>低置信度转人工</strong><small>识别结果、影院或场次无法唯一确认时强制停止。</small></div><span class="static-switch on"><i></i></span></div></section>
+          <section class="formula-card pricing-preview-card"><header><span class="preview-icon">☷</span><div><h3>确定性运营报价</h3></div></header><div class="formula-copy">普通座：实时会员价 + 普通座调整。<br>W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；高于阈值：直接取会员价。<br>逐座轮整后求和，不低于会员成本且不高于实时原价。</div></section>
         </div>
       </div>
       <div class="operation-section" data-operation-view="safety">
