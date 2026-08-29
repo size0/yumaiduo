@@ -109,12 +109,14 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type') ?? '', /^text\/css/u);
     const styles = await asset.text();
-    assert.match(styles, /\.settings-drawer \{[^}]*height:min\(820px,calc\(100dvh - 206px\)\)[^}]*max-height:calc\(100dvh - 206px\)/u);
+    assert.match(styles, /\.settings-drawer\.order-modal \{[^}]*position:fixed[^}]*transform:translate\(-50%,-50%\)/u);
+    assert.match(styles, /\.settings-backdrop\.show \{[^}]*position:fixed[^}]*z-index:38/u);
     assert.match(styles, /\.settings-body \{[^}]*overflow-y:auto/u);
     assert.match(styles, /\.pricing-rule-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)/u);
     assert.doesNotMatch(styles, /\.liangpiao-pricing-card \{ grid-column:1\/-1; \}/u);
     assert.match(styles, /\.wanda-rule-row/u);
-    assert.match(styles, /\.order-detail-dialog \{[^}]*width:100vw/u);
+    assert.match(styles, /\.order-detail-dialog \{[^}]*width:min\(960px/u);
+    assert.doesNotMatch(styles, /\.order-detail-dialog \{[^}]*width:100vw/u);
     assert.match(styles, /\.order-detail-summary-card/u);
     assert.match(styles, /\.order-ticket-viewer/u);
 
@@ -141,6 +143,8 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /image\/jpeg,image\/png,image\/webp,image\/gif/u);
     assert.match(appSource, /image_asset_id/u);
     assert.match(appSource, /linkedFactMap/u);
+    assert.match(appSource, /const orderModal=name==='orders'/u);
+    assert.match(appSource, /settingsBackdrop.*classList\.toggle\('show',orderModal\)/u);
     assert.match(appSource, /wandaOrderRow/u);
     assert.match(appSource, /良票订单/u);
   });
