@@ -220,7 +220,7 @@
     <div class="setting-group">
       <label for="apiKey">识图接口 API Key <span class="key-state" id="keyState">未配置</span></label>
       <div class="key-line"><input id="apiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></div>
-      <div class="setting-help">密钥使用当前 Windows 用户的 DPAPI 加密后存放，不会明文写入配置文件。</div>
+      <div class="setting-help">Windows 使用当前用户 DPAPI 加密；Ubuntu 使用 WANDA_SETTINGS_ENCRYPTION_KEY 保护的 AES-GCM 加密，不会明文写入配置文件。</div>
       <label style="justify-content:flex-start;margin-top:9px;font-weight:500"><input id="clearApiKey" type="checkbox" style="width:auto;height:auto"> 清除已经保存的密钥</label>
     </div>
     <div class="setting-group">
@@ -241,7 +241,7 @@
     <div class="setting-group">
       <label for="chatApiKey">AI 回复接口 API Key <span class="key-state" id="chatKeyState">未配置</span></label>
       <div class="key-line"><input id="chatApiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></div>
-      <div class="setting-help">与识图 Key 分开使用 DPAPI 加密保存。</div>
+      <div class="setting-help">与识图 Key 分开加密保存；Windows 使用 DPAPI，Ubuntu 使用 WANDA_SETTINGS_ENCRYPTION_KEY 保护的 AES-GCM。</div>
       <label style="justify-content:flex-start;margin-top:9px;font-weight:500"><input id="clearChatApiKey" type="checkbox" style="width:auto;height:auto"> 清除已经保存的 AI 回复密钥</label>
     </div>
     <div class="setting-group">

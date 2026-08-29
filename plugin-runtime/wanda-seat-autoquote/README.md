@@ -20,7 +20,7 @@
 - W+ 或普通座报价公式。
 - 旧插件源码、旧数据库、旧 bridge 接口或旧固定话术。
 
-这些能力统一属于 `E:\ticket-system-local` 后端。完整边界见 [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md)。
+这些能力统一属于 `E:\鱼麦多\v4\backend` 后端。完整边界见 [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md)。
 
 ## 后端契约
 

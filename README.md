@@ -11,7 +11,6 @@ E:\鱼麦多\v4\
 ├─ plugin-runtime\wanda-seat-autoquote\  鱼麦多插件运行时与插件页面
 ├─ data\                                 本地数据，不提交
 ├─ logs\                                 本地日志，不提交
-├─ deploy\                               部署脚本
 └─ start.ps1                             本地启动脚本
 ```
 
@@ -47,7 +46,7 @@ E:\鱼麦多\v4\
 - 本地图片命令行识别
 - 影院、影片、日期场次、影厅、语言制式、可见已选座、画面金额与价格区域提取
 - 混合图片处理：千问快速直出；格式异常、低置信度或关键字段为空时才调用 AI 判断模型兜底
-- 会话级多图合并：同一 conversation_id 最近 3 张结果在 30 分钟内可安全补全
+- 会话级多图合并：同一 conversation_id 最近 3 张结果在可配置的会话记忆期限内安全补全（默认 24 小时）
 - W+会员锁座报价：固定登录账号临时锁座读取会员专享优惠，取消并确认座位恢复后才返回金额
 - 图片签名/大小校验、稳定错误码
 - 默认每个客户端每分钟 20 次识图限制及基础浏览器安全响应头
@@ -70,8 +69,8 @@ pip install -r .\backend\requirements.txt
 
 设置页持久化：
 
-- API Key：通过当前 Windows 用户的 DPAPI 加密保存
-- 识图接口与 AI 判断/回复接口：各自独立保存 Base URL、DPAPI 加密 Key 和模型
+- API Key：Windows 使用当前用户 DPAPI 加密保存；Linux 使用 `WANDA_SETTINGS_ENCRYPTION_KEY` 管理的 AES-GCM 加密保存
+- 识图接口与 AI 判断/回复接口：各自独立保存 Base URL、加密 Key 和模型；Windows 使用 DPAPI，Linux 使用 AES-GCM
 - Qwen 思考模式：默认关闭，可随时切换
 - GPT 推理强度：默认最轻，持久化 `none/minimal/low/medium/high`
 - 识图与兜底提示词：千问快速路径和 AI 兜底路径共用严格业务契约
@@ -84,11 +83,11 @@ pip install -r .\backend\requirements.txt
 - 万达官方直连：复用票务系统已登录的固定账号，无额外报价 Key 或租户 ID
 - 模型列表：使用当前输入或已保存的 Key 调用兼容 `/v1/models` 接口动态获取
 
-两套接口都可在设置页单独填入兼容服务地址和 Key，并分别获取 `/v1/models`。Airelvo 预设为 `https://airelvo.cc/v1`。视觉模型必须支持图片输入；AI 判断/回复模型只需支持文本和 JSON 输出。两套 Key 分别通过 DPAPI 加密，互不覆盖。
+两套接口都可在设置页单独填入兼容服务地址和 Key，并分别获取 `/v1/models`。Airelvo 可通过设置页按钮切换为 `https://airelvo.cc/v1`。视觉模型必须支持图片输入；AI 判断/回复模型需要同时支持文本回复和结构化 JSON 输出。两套 Key 分别加密保存，互不覆盖；Windows 使用 DPAPI，Linux 使用 AES-GCM。
 
 图片首先由视觉模型直接生成最终结构。Schema 合法、置信度至少 0.55 且存在影院/影片/场次/影厅之一时立即返回；否则才把快速结果、买家附言和近期同会话结果发送给 AI 判断模型修正。正常图片只调用一次模型，异常图片才串行调用两次。
 
-同一 `conversation_id` 的最近 3 个识别结果会在进程内保留 30 分钟，适合用“排片图 + 选座图”补全同一订单。只有影片、场次、明确月日等信息不冲突且至少存在一个匹配信号时才补全缺失字段；不同影片或不同明确日期不会合并。AI 客服同时保留最近 10 条文字消息和最近 3 份结构化图片/报价上下文，因此可以回答“多少钱”“是哪家影院”等承接问题。只保存结构化结果和有限文字，不保存原图、Base64、万达凭据或模型 Key，重启后自动清空。相对日期会与当前日期和星期校验，旧截图、已过期场次不会进入官方锁座报价。
+同一 `conversation_id` 的最近 3 个识别结果会在进程内保留，默认 24 小时，可在“会话策略”中配置为 1–24 小时；适合用“排片图 + 选座图”补全同一订单。只有影片、场次、明确月日等信息不冲突且至少存在一个匹配信号时才补全缺失字段；不同影片或不同明确日期不会合并。AI 客服默认保留最近 50 条文字消息，可配置为 5–50 条，同时保留最近 3 份结构化图片/报价上下文，因此可以回答“多少钱”“是哪家影院”等承接问题。只保存结构化结果和有限文字，不保存原图、Base64、万达凭据或模型 Key，重启后自动清空。相对日期会与当前日期和星期校验，旧截图、已过期场次不会进入官方锁座报价。
 
 图片识别后，后端从票务系统账号池读取固定在线 W+ 账号。系统先调用万达官方场次与实时座位接口，从目标 W+ 区域的 `wPlusActivity.price` 读取会员活动价；存在有效会员活动价时直接作为计价基准，全程只读。仅当实时座位未显示会员活动价时，系统才在同一 W+ 区域选择实时可售座位创建临时探针订单，通过会员活动接口读取唯一可用的 `W+会员专享优惠`，随后立即取消订单；只有订单状态确认取消且座位重新恢复可售时才返回报价，否则失败关闭。最终金额按整数分应用版本化确定性加价与取整规则。千问、GPT 和截图金额均不能成为权威报价来源，正式支付金额仍以最终订单为准。
 
@@ -129,9 +128,10 @@ python -m uvicorn app.main:app --app-dir "E:\鱼麦多\v4\backend" --host 127.0.
 
 ## 命令行识别
 
-命令行会读取环境变量；网页识图优先读取持久化设置：
+命令行会读取环境变量；网页识图优先读取持久化设置。命令行需要在 `backend` 目录执行：
 
 ```powershell
+cd "E:\鱼麦多\v4\backend"
 python -m app.cli "C:\path\to\ticket.jpg"
 ```
 
@@ -275,16 +275,16 @@ python -m pytest -q
 
 ## 安全说明
 
-- 网页保存的真实密钥使用 Windows DPAPI 加密，只能由保存它的同一 Windows 用户解密；也可临时通过 `DASHSCOPE_API_KEY` 注入。
+- 网页保存的真实密钥在 Windows 使用 DPAPI 加密，只能由保存它的同一 Windows 用户解密；Ubuntu 使用 `WANDA_SETTINGS_ENCRYPTION_KEY` 保护的 AES-GCM；也可临时通过 `DASHSCOPE_API_KEY` 注入。
 - `data/`、`.env` 均已被 Git 忽略，不提交配置与密钥。
 - 不记录图片、Base64 内容、Authorization 请求头或上游错误正文。
 - 支持 JPG、PNG、WebP，默认最大 10 MB。
 - 启动脚本只监听 `127.0.0.1`；如需暴露到公网，应在反向代理层增加 HTTPS、身份认证和持久化限流。
-- 你曾在聊天中发送过一个明文 Key，建议在阿里云控制台立即轮换后再使用本项目。
+- 生产环境应定期轮换模型 Key，并在轮换后清理旧的进程环境变量和持久化配置。
 
 ## 服务器部署目录
 
-服务器：`ubuntu@124.220.29.179`
+服务器：Ubuntu 生产主机（具体地址见私有运维配置）
 
 服务器采用“版本发布目录 + `current` 软链接 + systemd”方式运行，不直接运行 Git 工作区，也不直接覆盖正在运行的目录。
 
@@ -304,6 +304,8 @@ python -m pytest -q
 V4 后端：/opt/wanda-v4/current/.venv/bin/python -m uvicorn
 工作目录：/opt/wanda-v4/current
 环境文件：/etc/ticket-system/wanda-v4.env
+
+Ubuntu 生产环境必须在该环境文件中配置 `WANDA_SETTINGS_ENCRYPTION_KEY`：使用 Base64 编码的 32 字节随机值，用于 AES-GCM 加密 API Key、报价记录和规则运行数据。该密钥不得提交到仓库，丢失后无法解密已有敏感数据。
 
 插件运行时：/usr/bin/node /opt/wanda-seat-autoquote/current/index.mjs
 环境文件：/etc/ticket-system/wanda-seat-autoquote.env
