@@ -287,8 +287,66 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     $('orderList').replaceChildren(element('div','diagnostic-empty','正在回读订单、报价和订单来源…'));orderSourceWarning='';
     try{await fishMoreReady;const[orderResponse,factResponse,liangpiaoResponse]=await Promise.all([fishMoreSdk.authedFetch('ui/api/orders?limit=100'),v4Fetch('/api/plugin/quote-records?limit=500'),v4Fetch('/api/plugin/liangpiao-orders?page=1&page_size=100')]);const data=await orderResponse.json();const facts=await factResponse.json();const liangpiaoData=await liangpiaoResponse.json();if(!orderResponse.ok)throw new Error(data?.error||'读取万达订单失败');if(!factResponse.ok)throw new Error(facts?.detail||'读取订单观影信息失败');if(!liangpiaoResponse.ok)orderSourceWarning='良票订单暂不可用';const factsByOrder=linkedFactMap(facts.records||[]);loadedOrderRows=(data.orders||[]).map(order=>wandaOrderRow(order,factsByOrder.get(String(order.orderId)))).concat(liangpiaoResponse.ok?(liangpiaoData.orders||[]).map(liangpiaoOrderRow):[]);loadedOrderRows.sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));observedOrderCount=Number(data.observedCount)||0;renderOrders();}catch(error){$('orderSummary').textContent='读取失败';$('orderList').replaceChildren(element('div','diagnostic-empty',error.message));}
   }
-  function detailPair(parent,label,value){const row=element('div','order-detail-field');row.append(element('span','',label),element('b','',Array.isArray(value)?seatText(value):String(value??'—')));parent.append(row);}
-  function renderOrderDetail(title,row,detail){const root=$('orderDetailContent');root.replaceChildren();$('orderDetailTitle').textContent=title;const grid=element('div','order-detail-grid');const fields=[['来源',row.source==='liangpiao'?'良票':'万达手动出票'],['咸鱼买家',row.buyerNick],['影片',detail.movieName||row.movie],['城市',detail.cityName||row.city],['影院',detail.cinemaName||row.cinema],['影厅',detail.hallName||row.fact?.hall||'—'],['场次',detail.startTime?`${detail.startTime}${detail.endTime?` - ${detail.endTime}`:''}`:row.showtime],['座位',detail.seats||row.seats],['出票方式',detail.ticketMode||detail.priceMode||row.ticketMode],['票面价',centsAmount(detail.marketAmount??row.marketAmountFen)],['报价',centsAmount(detail.quoteAmount??row.quoteAmountFen)],['成交价',centsAmount(detail.settleAmount??detail.estimatedSettleAmount??row.dealAmountFen)],['状态',detail.status||row.statusText],['下单时间',formatRecordTime(detail.createdAt||row.createdAt)],['平台订单号',detail.orderNo||row.orderId],['我的单号',detail.outOrderNo||row.outOrderNo||'—'],['影片海报',detail.moviePoster],['影片时长（分钟）',detail.movieDuration],['导演',detail.movieDirector],['主演',detail.movieActors],['影片类型',detail.movieGenres],['影院地址',detail.cinemaAddress],['影院电话',detail.cinemaPhone],['经度',detail.longitude],['纬度',detail.latitude],['座位数',detail.seatCount],['价格方式',detail.priceMode],['限价',centsAmount(detail.maxPrice)],['竞价中',detail.bidding===true?'是':detail.bidding===false?'否':'—'],['冻结金额',centsAmount(detail.freezeAmount)],['预计结算价',centsAmount(detail.estimatedSettleAmount)],['是否可退票',detail.refundable===true?'是':detail.refundable===false?'否':'—'],['透传字段',detail.attach],['出票时间',formatRecordTime(detail.ticketedAt)],['结算时间',formatRecordTime(detail.settledAt)],['取票页',detail.pickupUrl||'—'],['票根链接',detail.ticketLink||'—'],['失败原因',detail.failReason||'—']];fields.forEach(([label,value])=>detailPair(grid,label,value));root.append(grid);if(Array.isArray(detail.tickets)&&detail.tickets.length){root.append(element('h4','order-detail-subtitle','取票凭证（以最新 version 为准）'));detail.tickets.forEach((ticket,index)=>{const ticketGrid=element('div','order-ticket-card');detailPair(ticketGrid,`凭证 ${index+1} 座位`,ticket.seatNo);detailPair(ticketGrid,'取票码',ticket.ticketCode);detailPair(ticketGrid,'取票密码',ticket.ticketPassword);detailPair(ticketGrid,'票根图/二维码图',ticket.ticketImage);detailPair(ticketGrid,'入场方式',ticket.entryType===1?'扫码入场':ticket.entryType===0?'取票入场':ticket.entryType);detailPair(ticketGrid,'取票方式',ticket.getTicketType===0?'通用取票机':ticket.getTicketType===1?'专用取票机':ticket.getTicketType===2?'柜台':ticket.getTicketType);detailPair(ticketGrid,'版本号',ticket.version);root.append(ticketGrid);});} $('orderDetailDialog').showModal();}
+  function safeMediaUrl(value) {
+    const url=String(value||'').trim();
+    return /^(https?:\/\/|data:image\/)/u.test(url)?url:'';
+  }
+  function detailPair(parent,label,value,{wide=false,copy=false}={}) {
+    const text=Array.isArray(value)?seatText(value):String(value??'—');
+    const row=element('div',`order-detail-field${wide?' wide':''}${copy&&text!=='—'?' copyable':''}`);
+    row.append(element('span','',label));
+    const valueNode=element('b','',text); row.append(valueNode);
+    if(copy&&text!=='—') { const button=element('button','order-copy','□'); button.type='button'; button.title='复制'; button.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(text);button.textContent='✓';setTimeout(()=>{button.textContent='□'},1200)}catch{}}); valueNode.append(button); }
+    parent.append(row);
+  }
+  function detailValue(detail,row,...keys) {
+    for(const key of keys) { if(detail?.[key]!==undefined&&detail?.[key]!==null&&detail?.[key]!=='')return detail[key]; if(row?.[key]!==undefined&&row?.[key]!==null&&row?.[key]!=='')return row[key]; }
+    return '—';
+  }
+  function renderOrderDetail(title,row,detail) {
+    const root=$('orderDetailContent'); root.replaceChildren(); $('orderDetailTitle').textContent='订单详情';
+    const movieName=detailValue(detail,row,'movieName','movie_name','movie');
+    const cinemaName=detailValue(detail,row,'cinemaName','cinema_name','cinema');
+    const showtime=detail.startTime?`${detail.startTime}${detail.endTime?` - ${detail.endTime}`:''}`:detailValue(detail,row,'showtime');
+    const seats=detailValue(detail,row,'seats','seat_display','seat_zone_type');
+    const poster=safeMediaUrl(detailValue(detail,row,'moviePoster','movie_poster','poster'));
+    const movieCard=element('section','order-detail-summary-card');
+    const posterBox=element('div','order-detail-poster');
+    if(poster) { const image=document.createElement('img'); image.src=poster; image.alt=String(movieName); posterBox.append(image); } else posterBox.append(element('div','order-detail-poster-empty','电影海报'));
+    const movieBody=element('div','order-detail-summary-body'); movieBody.append(element('div','order-detail-summary-title',movieName));
+    const movieGrid=element('div','order-detail-summary-grid');
+    detailPair(movieGrid,'电影名称',movieName,{copy:true}); detailPair(movieGrid,'座位信息',seats,{copy:true});
+    detailPair(movieGrid,'开场时间',showtime); detailPair(movieGrid,'原价',centsAmount(detailValue(detail,row,'marketAmount','marketAmountFen','base_total_cents')));
+    detailPair(movieGrid,'影院名称',cinemaName,{copy:true}); detailPair(movieGrid,'票数',detailValue(detail,row,'ticketCount','quantity'));
+    detailPair(movieGrid,'影院地址',detailValue(detail,row,'cinemaAddress','cinema_address'),{wide:true,copy:true});
+    movieBody.append(movieGrid); movieCard.append(posterBox,movieBody); root.append(movieCard);
+
+    const orderCard=element('section','order-detail-summary-card order-card-wide');
+    const orderGrid=element('div','order-detail-summary-grid');
+    detailPair(orderGrid,'平台订单号',detailValue(detail,row,'orderNo','order_no','providerOrderNo','provider_order_no','orderId'),{copy:true});
+    detailPair(orderGrid,'下单时间',formatRecordTime(detailValue(detail,row,'createdAt','createTime')));
+    detailPair(orderGrid,'出票价',centsAmount(detailValue(detail,row,'quoteAmount','quote_amount_fen','quoteAmountFen')));
+    detailPair(orderGrid,'出票原座位',seats,{copy:true});
+    detailPair(orderGrid,'订单状态',detailValue(detail,row,'statusText','status','orderStatusText'));
+    detailPair(orderGrid,'成交价',centsAmount(detailValue(detail,row,'settleAmount','estimatedSettleAmount','dealAmountFen','payment')));
+    detailPair(orderGrid,'取票链接',detailValue(detail,row,'pickupUrl','pickup_url'),{wide:true,copy:true});
+    detailPair(orderGrid,'结算状态',detailValue(detail,row,'settlementStatus','settleStatus','statusText'));
+    orderCard.append(orderGrid); root.append(orderCard);
+
+    const ticketTitle=element('div','order-detail-section-title','取票信息'); root.append(ticketTitle);
+    const ticket=Array.isArray(detail.tickets)&&detail.tickets.length?detail.tickets[0]:detail;
+    const ticketViewer=element('section','order-ticket-viewer');
+    const ticketHead=element('div','order-ticket-head'); ticketHead.append(element('h3','',`取票凭证${detail.tickets?.length?`（共 ${detail.tickets.length} 张）`:''}`));
+    const tabs=element('div','order-ticket-tabs'); tabs.append(element('button','order-ticket-tab active','原取票码'),element('button','order-ticket-tab','模板取票码')); ticketHead.append(tabs); ticketViewer.append(ticketHead);
+    const ticketBody=element('div','order-ticket-body'); const imageWrap=element('div','order-ticket-image-wrap');
+    const ticketImage=safeMediaUrl(detailValue(ticket,row,'ticketImage','ticket_image','qrCode','qr_code','ticketLink'));
+    if(ticketImage) { const image=document.createElement('img'); image.className='order-ticket-image'; image.src=ticketImage; image.alt='取票凭证'; imageWrap.append(image); } else imageWrap.append(element('div','order-ticket-empty','暂无取票图片'));
+    const ticketFacts=element('div','order-ticket-facts');
+    detailPair(ticketFacts,'取票码',detailValue(ticket,row,'ticketCode','ticket_code'),{copy:true}); detailPair(ticketFacts,'验证码',detailValue(ticket,row,'ticketPassword','ticket_password'),{copy:true});
+    detailPair(ticketFacts,'入场方式',ticket.entryType===1?'扫码入场':ticket.entryType===0?'取票入场':detailValue(ticket,row,'entryType'));
+    detailPair(ticketFacts,'版本号',detailValue(ticket,row,'version'));
+    ticketBody.append(imageWrap,ticketFacts); ticketViewer.append(ticketBody); root.append(ticketViewer);
+  }
   async function openOrderDetail(row){$('orderDetailTitle').textContent='正在读取订单详情…';$('orderDetailContent').replaceChildren(element('div','diagnostic-empty','正在读取权威订单详情…'));$('orderDetailDialog').showModal();try{if(row.source==='wanda'){await fishMoreReady;const response=await fishMoreSdk.authedFetch(`ui/api/orders/${encodeURIComponent(row.orderId)}`);const data=await response.json();if(!response.ok)throw new Error(data?.error||'读取万达订单详情失败');renderOrderDetail(`订单详情 · ${row.orderId}`,row,data.order||row.raw);}else{const response=await v4Fetch(`/api/plugin/liangpiao-orders/${encodeURIComponent(row.providerOrderNo)}`);const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取良票订单详情失败');renderOrderDetail(`订单详情 · ${row.providerOrderNo}`,row,data.order||{});}}catch(error){$('orderDetailContent').replaceChildren(element('div','diagnostic-empty',error.message));}}
 
   function reminderStatusLabel(status){return({pending:'待执行',claimed:'执行中',completed:'已完成',missed:'已错过',failed:'失败'})[status]||status||'未知';}

@@ -114,6 +114,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(styles, /\.pricing-rule-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)/u);
     assert.doesNotMatch(styles, /\.liangpiao-pricing-card \{ grid-column:1\/-1; \}/u);
     assert.match(styles, /\.wanda-rule-row/u);
+    assert.match(styles, /\.order-detail-dialog \{[^}]*width:100vw/u);
+    assert.match(styles, /\.order-detail-summary-card/u);
+    assert.match(styles, /\.order-ticket-viewer/u);
 
     const appAsset = await fetch(`${baseUrl}/ui/app.js`, { headers: signedHeaders() });
     const appSource = await appAsset.text();
@@ -122,6 +125,10 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /initWandaRules/u);
     assert.match(pageHtml, /id="orderSearch"/u);
     assert.match(pageHtml, /id="orderDetailDialog"/u);
+    assert.match(pageHtml, /class="order-detail-dialog"/u);
+    assert.match(appSource, /order-detail-summary-card/u);
+    assert.match(appSource, /order-ticket-viewer/u);
+    assert.match(appSource, /取票信息/u);
     assert.match(appSource, /良票订单暂不可用/u);
     for (const label of ['影片','城市','影院','场次','座位','出票方式','票面价','报价','成交价','状态','下单时间','咸鱼买家','操作']) assert.match(appSource, new RegExp(label, 'u'));
     assert.match(pageHtml, /id="reminderEnabled"/u);
