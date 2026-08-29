@@ -83,6 +83,11 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(pageHtml, /id="knowledgeList"/u);
     assert.match(pageHtml, /W\+代订与纯文字咨询/u);
     assert.match(pageHtml, /客服知识库/u);
+    assert.match(pageHtml, /万达报价规则/u);
+    assert.match(pageHtml, /W\+原价减免/u);
+    assert.match(pageHtml, /W\+会员价阈值/u);
+    assert.match(pageHtml, /id="pricingEnabled"/u);
+    assert.match(pageHtml, /id="roundingIncrement"/u);
     assert.match(pageHtml, /良票报价（动态折扣）/u);
     assert.match(pageHtml, /折扣率 = 预估价格 ÷ 原价 × 100%/u);
     assert.match(pageHtml, /买家报价 = 预估价格 ×（1 \+ 调整比例）/u);
@@ -108,6 +113,7 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     const appAsset = await fetch(`${baseUrl}/ui/app.js`, { headers: signedHeaders() });
     const appSource = await appAsset.text();
     assert.match(appSource, /api\/settings\/knowledge/u);
+    assert.match(appSource, /loadOperations/u);
     assert.match(pageHtml, /id="orderSearch"/u);
     assert.match(pageHtml, /id="reminderEnabled"/u);
     assert.match(pageHtml, /散场后提醒收货/u);

@@ -234,6 +234,19 @@
             </div>
             <button class="liangpiao-add" id="addLiangpiaoRule" type="button">＋ 添加区间</button>
           </section>
+          <section class="pricing-rule-card pricing-rule-wplus">
+            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>万达报价规则</h3><p>W+会员座使用万达官方实时数据和确定性规则报价。</p></div></header>
+            <p class="wanda-pricing-description">模型只负责理解和表达。优先使用万达实时座位接口返回的W+会员活动价；未显示会员价时才使用临时探针，并仅在取消订单、确认座位恢复后报价。</p>
+            <div class="pricing-fields">
+              <div class="money-field"><label for="wplusDiscount">W+原价减免</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
+              <div class="money-field"><label for="wplusThreshold">W+会员价阈值</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
+              <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
+            </div>
+            <div class="pricing-option-row"><div><strong>启用后台报价规则</strong><small>关闭时最终报价等于官方实时区域参考价。</small></div><label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label></div>
+            <div class="pricing-preview wanda-pricing-formula">W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；高于阈值：直接取会员价。逐座轮整后求和，不低于会员成本且不高于实时原价。</div>
+            <div class="pricing-rule-meta" id="pricingRuleMeta">正在读取后台规则…</div>
+            <button class="template-save pricing-save" id="saveOperations" type="button">保存运营报价规则</button>
+          </section>
         </div>
       </div>
       <div class="operation-section" data-operation-view="safety">
