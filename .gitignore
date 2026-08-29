@@ -9,7 +9,7 @@ venv/
 NUL
 logs/
 data/
-dist/
+/dist/
 *.log
 *.db
 *.sqlite
