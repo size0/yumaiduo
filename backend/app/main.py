@@ -444,12 +444,38 @@ def create_app(
         if not runtime_settings.liangpiao_callback_enabled or configured_callback_handler is None:
             raise HTTPException(status_code=503, detail="liangpiao_callback_disabled")
         raw = await request.body()
+        callback_record = persistent_rules_store.record_liangpiao_callback(
+            raw, signature=x_liangpiao_sign or "", timestamp=x_liangpiao_timestamp or "", nonce=x_liangpiao_nonce or "",
+        )
         try:
-            return await configured_callback_handler.handle(
+            result = await configured_callback_handler.handle(
                 raw, signature=x_liangpiao_sign or "", timestamp=x_liangpiao_timestamp or "", nonce=x_liangpiao_nonce or "",
             )
         except CallbackError as error:
+            persistent_rules_store.update_liangpiao_callback(
+                int(callback_record["callback_id"]), verification_status="rejected", processing_status="failed",
+                result_code=error.code, reason=error.message,
+            )
             raise HTTPException(status_code=409, detail=error.code) from error
+        linked = persistent_rules_store.find_liangpiao_order(
+            out_order_no=str(result.get("out_order_no") or "") or None,
+            provider_order_no=str(result.get("provider_order_no") or "") or None,
+        )
+        persistent_rules_store.update_liangpiao_callback(
+            int(callback_record["callback_id"]), tenant_id=linked.get("tenant_id") if linked else None,
+            verification_status="verified", processing_status=str(result.get("status") or "processed"),
+            result_code=str(result.get("code") or ""),
+        )
+        return result
+
+    @app.get("/api/plugin/liangpiao-callbacks")
+    async def list_plugin_liangpiao_callbacks(
+        x_wanda_tenant_id: str | None = Header(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, object]:
+        tenant_id = require_panel_tenant(x_wanda_tenant_id)
+        records = persistent_rules_store.list_liangpiao_callbacks(tenant_id, limit=limit)
+        return {"records": records, "count": len(records)}
 
     def require_plugin_bridge(value: str | None) -> None:
         expected = os.getenv("WANDA_AI_V2_BRIDGE_KEY", "").strip()

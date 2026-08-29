@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import sqlite3
@@ -14,7 +15,7 @@ from .settings_store import SecretProtector, default_secret_protector
 
 _RECONCILIATION_DELAYS_SECONDS = (5, 30, 120)
 _FINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 def backup_sqlite_database(path: Path, backup_path: Path | None = None) -> Path:
@@ -238,6 +239,26 @@ class RulesFirstStore:
                     snapshot_protected TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS liangpiao_callback_records (
+                    callback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id TEXT,
+                    out_order_no TEXT,
+                    provider_order_no TEXT,
+                    event_id TEXT,
+                    provider_status TEXT,
+                    verification_status TEXT NOT NULL DEFAULT 'received',
+                    processing_status TEXT NOT NULL DEFAULT 'received',
+                    result_code TEXT,
+                    reason TEXT,
+                    payload_hash TEXT NOT NULL,
+                    payload_protected TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS liangpiao_callback_tenant_idx
+                    ON liangpiao_callback_records(tenant_id, received_at DESC);
+                CREATE INDEX IF NOT EXISTS liangpiao_callback_order_idx
+                    ON liangpiao_callback_records(provider_order_no, out_order_no, received_at DESC);
                 """
             )
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(transactions)")}
@@ -303,10 +324,16 @@ class RulesFirstStore:
                             connection.execute(
                                 f"ALTER TABLE transactions ADD COLUMN {name} {declaration}"
                             )
-                    connection.execute(
-                        "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
-                        (_SCHEMA_VERSION, _now().isoformat()),
-                    )
+                    if 2 not in versions:
+                        connection.execute(
+                            "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                            (2, _now().isoformat()),
+                        )
+                    if _SCHEMA_VERSION not in versions:
+                        connection.execute(
+                            "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                            (_SCHEMA_VERSION, _now().isoformat()),
+                        )
                     connection.execute("COMMIT")
                 except Exception:
                     connection.execute("ROLLBACK")
@@ -382,6 +409,80 @@ class RulesFirstStore:
             ).fetchone()
         return self._liangpiao_order_view(row)
 
+    def record_liangpiao_callback(
+        self, raw_body: bytes, *, signature: str = "", timestamp: str = "", nonce: str = "",
+    ) -> dict[str, Any]:
+        raw = bytes(raw_body)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            body = {}
+        body = dict(body) if isinstance(body, Mapping) else {}
+        out_order_no = _pick(body, "outOrderNo", "out_order_no")
+        provider_order_no = _pick(body, "providerOrderNo", "provider_order_no", "orderNo", "orderId", "order_id")
+        event_id = _pick(body, "eventId", "event_id")
+        provider_status = _pick(body, "status", "orderStatus", "order_status", "event")
+        tenant_id = None
+        if out_order_no or provider_order_no:
+            linked = self.find_liangpiao_order(
+                out_order_no=out_order_no, provider_order_no=provider_order_no,
+            )
+            tenant_id = _text(linked.get("tenant_id")) if linked else None
+        payload = {
+            "raw_body_b64": base64.b64encode(raw).decode("ascii"),
+            "signature": str(signature or ""), "timestamp": str(timestamp or ""), "nonce": str(nonce or ""),
+        }
+        now = _now().isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO liangpiao_callback_records(
+                   tenant_id,out_order_no,provider_order_no,event_id,provider_status,
+                   payload_hash,payload_protected,received_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    tenant_id, out_order_no, provider_order_no, event_id, provider_status,
+                    hashlib.sha256(raw).hexdigest(), self._protect(payload), now, now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM liangpiao_callback_records WHERE callback_id=?", (cursor.lastrowid,)
+            ).fetchone()
+        return self._liangpiao_callback_view(row)
+
+    def update_liangpiao_callback(self, callback_id: int, **updates: object) -> dict[str, Any]:
+        allowed = {
+            "tenant_id", "provider_status", "verification_status", "processing_status", "result_code", "reason",
+        }
+        values = {key: updates[key] for key in allowed if key in updates}
+        values["updated_at"] = _now().isoformat()
+        if not values:
+            raise ValueError("liangpiao_callback_update_empty")
+        assignments = ",".join(f"{key}=?" for key in values)
+        params = [values[key] for key in values]
+        params.append(int(callback_id))
+        with self._connect() as connection:
+            connection.execute(
+                f"UPDATE liangpiao_callback_records SET {assignments} WHERE callback_id=?", tuple(params),
+            )
+            row = connection.execute(
+                "SELECT * FROM liangpiao_callback_records WHERE callback_id=?", (int(callback_id),)
+            ).fetchone()
+        if row is None:
+            raise ValueError("liangpiao_callback_not_found")
+        return self._liangpiao_callback_view(row)
+
+    def list_liangpiao_callbacks(self, tenant_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        tenant = str(tenant_id or "").strip()
+        if not tenant:
+            return []
+        bounded_limit = max(1, min(int(limit), 500))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM liangpiao_callback_records WHERE tenant_id=? ORDER BY received_at DESC LIMIT ?",
+                (tenant, bounded_limit),
+            ).fetchall()
+        return [self._liangpiao_callback_view(row) for row in rows]
+
     def list_liangpiao_orders(self, tenant_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
         tenant = str(tenant_id or "").strip()
         if not tenant:
@@ -425,6 +526,18 @@ class RulesFirstStore:
                      "tenant_id": str(row["tenant_id"]), "conversation_id": str(row["conversation_id"]),
                      "generation": int(row["quote_generation"]), "expires_at": str(row["quote_expires_at"])})
         return data
+
+    def _liangpiao_callback_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        return {
+            "callback_id": int(row["callback_id"]), "tenant_id": row.get("tenant_id"),
+            "out_order_no": row.get("out_order_no"), "provider_order_no": row.get("provider_order_no"),
+            "event_id": row.get("event_id"), "provider_status": row.get("provider_status"),
+            "verification_status": row.get("verification_status"), "processing_status": row.get("processing_status"),
+            "result_code": row.get("result_code"), "reason": row.get("reason"),
+            "payload_hash": row.get("payload_hash"), "received_at": row.get("received_at"),
+            "updated_at": row.get("updated_at"),
+        }
 
     def _liangpiao_order_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
         row = dict(row)

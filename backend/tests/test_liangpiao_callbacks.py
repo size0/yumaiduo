@@ -8,6 +8,29 @@ import pytest
 from app.liangpiao_callbacks import CallbackError, CallbackVerifier, LiangpiaoCallbackHandler
 from app.rule_contracts import ReplyPlan
 from app.rule_templates import validate_reply_plan
+from app.rules_first_store import RulesFirstStore
+
+
+def test_callback_records_are_persisted_redacted_and_tenant_scoped(tmp_path) -> None:
+    store = RulesFirstStore(tmp_path / "rules.sqlite3")
+    raw = json.dumps({
+        "outOrderNo": "out-1", "providerOrderNo": "provider-1", "eventId": "event-1",
+        "status": "ticket_sent", "ticketCode": "SECRET-TICKET",
+    }).encode()
+    record = store.record_liangpiao_callback(
+        raw, signature="signature", timestamp="123", nonce="nonce-1",
+    )
+    assert record["out_order_no"] == "out-1"
+    assert record["provider_order_no"] == "provider-1"
+    assert record["event_id"] == "event-1"
+    assert "ticketCode" not in record
+    updated = store.update_liangpiao_callback(
+        int(record["callback_id"]), tenant_id="tenant-1", verification_status="verified",
+        processing_status="applied", result_code="LIANGPIAO_CALLBACK_APPLIED",
+    )
+    assert updated["processing_status"] == "applied"
+    assert store.list_liangpiao_callbacks("tenant-1")[0]["callback_id"] == record["callback_id"]
+    assert store.list_liangpiao_callbacks("tenant-2") == []
 
 
 class FakeState:
