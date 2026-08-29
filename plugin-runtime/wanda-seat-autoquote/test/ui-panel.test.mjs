@@ -83,10 +83,12 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(pageHtml, /id="knowledgeList"/u);
     assert.match(pageHtml, /W\+代订与纯文字咨询/u);
     assert.match(pageHtml, /客服知识库/u);
-    assert.match(pageHtml, /W\+原价减免/u);
-    assert.match(pageHtml, /W\+会员价阈值/u);
-    assert.match(pageHtml, /普通座调整/u);
-    assert.match(pageHtml, /确定性运营报价/u);
+    assert.match(pageHtml, /良票报价（动态折扣）/u);
+    assert.match(pageHtml, /折扣率 = 预估价格 ÷ 原价 × 100%/u);
+    assert.match(pageHtml, /买家报价 = 预估价格 ×（1 \+ 调整比例）/u);
+    assert.match(pageHtml, /添加区间/u);
+    assert.doesNotMatch(pageHtml, /普通座报价/u);
+    assert.doesNotMatch(pageHtml, /确定性运营报价/u);
     assert.doesNotMatch(pageHtml, /本地试算/u);
     assert.doesNotMatch(pageHtml, /安全与风控设置/u);
     assert.match(pageHtml, /id="agentPersona"/u);

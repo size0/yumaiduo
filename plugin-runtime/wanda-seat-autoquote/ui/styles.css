@@ -185,3 +185,18 @@ body { min-height:100vh; padding-bottom:42px; }
 @media (max-width:760px) {
   body { padding-bottom:38px; }.plugin-page-header { width:calc(100% - 28px); margin:15px 14px 0; }.plugin-page-header h1 { font-size:20px; }.plugin-page-status { display:none; }.site-navigation { width:calc(100% - 28px); margin:15px 14px 0; }.page { padding:14px 14px 20px; }.chat-app { height:calc(100vh - 116px); min-height:560px; }.settings-drawer { width:calc(100% - 28px); min-height:calc(100vh - 154px); margin:14px 14px 52px; }.settings-body { padding-bottom:46px; }.diagnostics-panel { min-height:calc(100vh - 154px); }.pricing-console-head { padding:18px 16px 8px; }.pricing-console-head h2 { font-size:20px; }.pricing-rule-meta { padding-inline:16px; }.pricing-stats,.pricing-rule-grid,.pricing-bottom-grid { grid-template-columns:1fr; padding-inline:16px; }.pricing-stats { gap:9px; }.pricing-rule-grid,.pricing-bottom-grid { gap:12px; }.pricing-fields { grid-template-columns:1fr; }.pricing-segment { grid-template-columns:1fr; }.pricing-safety-card { min-height:0; }.chat-app { height:calc(100vh - 154px); min-height:min(560px,calc(100vh - 154px)); }.plugin-status-bar { gap:8px; padding:0 10px; font-size:9px; }.plugin-status-bar b,.plugin-status-bar .status-spacer { display:none; }.plugin-status-bar span:nth-last-child(n+3) { display:none; }
 }
+
+/* Liangpiao dynamic discount editor. */
+.liangpiao-pricing-card { grid-column:1/-1; }
+.liangpiao-formula { margin:17px 0 0; color:#7182a6; font-size:12px; line-height:1.7; }
+.liangpiao-rule-list { margin-top:15px; border-top:1px solid #e7edf5; }
+.liangpiao-rule-row { display:grid; grid-template-columns:112px auto 112px auto 112px auto 76px; align-items:center; gap:9px; min-height:68px; border-bottom:1px solid #e7edf5; color:#58709e; font-size:13px; }
+.liangpiao-rule-row input { width:100%; box-sizing:border-box; height:47px; padding:0 12px; border:1px solid #d4deec; border-radius:11px; outline:0; color:#253a63; font:inherit; background:#fff; }
+.liangpiao-rule-row input:focus { border-color:#6e86bb; box-shadow:0 0 0 3px rgba(80,111,171,.1); }
+.liangpiao-remove,.liangpiao-add { height:47px; padding:0 15px; border:1px solid #d1dceb; border-radius:11px; color:#315382; font-size:14px; font-weight:700; background:#fff; }
+.liangpiao-remove:hover,.liangpiao-add:hover { border-color:#6d88ba; background:#f6f9ff; }
+.liangpiao-add { margin-top:17px; }
+@media (max-width:760px) {
+  .liangpiao-rule-row { grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:7px; padding:10px 0; }
+  .liangpiao-rule-row .liangpiao-markup { grid-column:1; }.liangpiao-rule-row .liangpiao-remove { grid-column:3; }
+}

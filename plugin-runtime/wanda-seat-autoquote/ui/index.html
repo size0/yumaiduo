@@ -219,30 +219,22 @@
       </div>
       <div class="pricing-console" data-operation-view="pricing">
         <header class="pricing-console-head">
-          <div><h2><span class="section-icon">⌘</span>报价规则</h2><p>模型只负责理解和表达。优先使用万达实时座位接口返回的W+会员活动价；未显示会员价时才使用临时探针，并仅在取消订单、确认座位恢复后报价。</p></div>
-          <button class="template-save pricing-save" id="saveOperations" type="button">保存运营报价规则</button>
+          <div><h2><span class="section-icon">⌘</span>报价策略</h2><p>良票报价和万达报价分开配置，修改后仅影响新报价。</p></div>
         </header>
-        <div class="pricing-rule-meta" id="pricingRuleMeta">正在读取后台规则…</div>
         <div class="pricing-rule-grid">
-          <section class="pricing-rule-card pricing-rule-wplus">
-            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>W+会员座报价</h3><p>W+原价减免、W+会员价阈值</p></div></header>
-            <div class="pricing-fields">
-              <div class="money-field"><label for="wplusDiscount">W+原价减免</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
-              <div class="money-field"><label for="wplusThreshold">W+会员价阈值</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
+          <section class="pricing-rule-card liangpiao-pricing-card">
+            <header class="pricing-card-head"><span class="pricing-card-icon">良票</span><div><h3>良票报价（动态折扣）</h3><p>按预估价格与原价的折扣率匹配加价区间。</p></div></header>
+            <p class="liangpiao-formula">折扣率 = 预估价格 ÷ 原价 × 100%。匹配区间后，买家报价 = 预估价格 ×（1 + 调整比例）。</p>
+            <div class="liangpiao-rule-list" id="liangpiaoRuleList">
+              <div class="liangpiao-rule-row" data-rule-row><input class="liangpiao-min" type="number" min="0" max="100" step="0.1" value="0" aria-label="折扣率下限"><span>% 至</span><input class="liangpiao-max" type="number" min="0" max="100" step="0.1" value="50" aria-label="折扣率上限"><span>%，加价</span><input class="liangpiao-markup" type="number" min="-100" max="1000" step="0.1" value="10" aria-label="调整比例"><span>%</span><button class="liangpiao-remove" type="button">删除</button></div>
+              <div class="liangpiao-rule-row" data-rule-row><input class="liangpiao-min" type="number" min="0" max="100" step="0.1" value="50" aria-label="折扣率下限"><span>% 至</span><input class="liangpiao-max" type="number" min="0" max="100" step="0.1" value="60" aria-label="折扣率上限"><span>%，加价</span><input class="liangpiao-markup" type="number" min="-100" max="1000" step="0.1" value="8" aria-label="调整比例"><span>%</span><button class="liangpiao-remove" type="button">删除</button></div>
+              <div class="liangpiao-rule-row" data-rule-row><input class="liangpiao-min" type="number" min="0" max="100" step="0.1" value="60" aria-label="折扣率下限"><span>% 至</span><input class="liangpiao-max" type="number" min="0" max="100" step="0.1" value="70" aria-label="折扣率上限"><span>%，加价</span><input class="liangpiao-markup" type="number" min="-100" max="1000" step="0.1" value="5" aria-label="调整比例"><span>%</span><button class="liangpiao-remove" type="button">删除</button></div>
+              <div class="liangpiao-rule-row" data-rule-row><input class="liangpiao-min" type="number" min="0" max="100" step="0.1" value="70" aria-label="折扣率下限"><span>% 至</span><input class="liangpiao-max" type="number" min="0" max="100" step="0.1" value="80" aria-label="折扣率上限"><span>%，加价</span><input class="liangpiao-markup" type="number" min="-100" max="1000" step="0.1" value="3" aria-label="调整比例"><span>%</span><button class="liangpiao-remove" type="button">删除</button></div>
+              <div class="liangpiao-rule-row" data-rule-row><input class="liangpiao-min" type="number" min="0" max="100" step="0.1" value="80" aria-label="折扣率下限"><span>% 至</span><input class="liangpiao-max" type="number" min="0" max="100" step="0.1" value="90" aria-label="折扣率上限"><span>%，加价</span><input class="liangpiao-markup" type="number" min="-100" max="1000" step="0.1" value="2" aria-label="调整比例"><span>%</span><button class="liangpiao-remove" type="button">删除</button></div>
+              <div class="liangpiao-rule-row" data-rule-row><input class="liangpiao-min" type="number" min="0" max="100" step="0.1" value="90" aria-label="折扣率下限"><span>% 至</span><input class="liangpiao-max" type="number" min="0" max="100" step="0.1" value="100" aria-label="折扣率上限"><span>%，加价</span><input class="liangpiao-markup" type="number" min="-100" max="1000" step="0.1" value="1" aria-label="调整比例"><span>%</span><button class="liangpiao-remove" type="button">删除</button></div>
             </div>
-            <div class="pricing-option-row"><div><strong>启用后台报价规则</strong><small>关闭时最终报价等于官方实时区域参考价。</small></div><label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label></div>
+            <button class="liangpiao-add" id="addLiangpiaoRule" type="button">＋ 添加区间</button>
           </section>
-          <section class="pricing-rule-card pricing-rule-regular">
-            <header class="pricing-card-head"><span class="pricing-card-icon person">♙</span><div><h3>普通座报价</h3><p>普通座调整、最终报价取整</p></div></header>
-            <div class="pricing-fields">
-              <div class="money-field"><label for="regularMarkup">普通座调整</label><div class="money-input"><input id="regularMarkup" type="number" min="0" max="1000" step="0.1" value="1.0"><span>元</span></div></div>
-              <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
-            </div>
-
-          </section>
-        </div>
-        <div class="pricing-bottom-grid">
-          <section class="formula-card pricing-preview-card"><header><span class="preview-icon">☷</span><div><h3>确定性运营报价</h3></div></header><div class="formula-copy">普通座：实时会员价 + 普通座调整。<br>W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；高于阈值：直接取会员价。<br>逐座轮整后求和，不低于会员成本且不高于实时原价。</div></section>
         </div>
       </div>
       <div class="operation-section" data-operation-view="safety">

@@ -340,23 +340,23 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     catch(error){templateMessage(error.message,true);}finally{button.disabled=false;}
   }
 
-  const yuanToCents=id=>Math.round(Number($(id).value)*100);
-  async function loadOperations() {
-    try {
-      const response=await v4Fetch('/api/settings/operations'); const data=await response.json(); if(!response.ok)throw new Error(data?.detail||'读取运营设置失败');
-      $('pricingEnabled').checked=data.enabled; $('regularMarkup').value=(data.regular_adjustment_cents/100).toFixed(2); $('wplusDiscount').value=(Math.abs(data.wplus_adjustment_cents)/100).toFixed(2); $('wplusThreshold').value=(data.wplus_member_price_threshold_cents/100).toFixed(2); $('roundingIncrement').value=String(data.rounding_increment_cents);
-      $('pricingRuleMeta').textContent=`版本 ${data.rule_version} · 修订 ${data.revision}${data.updated_at?` · ${new Date(data.updated_at).toLocaleString('zh-CN')}`:''}`;
-    } catch(error) { settingsMessage(error.message,true); }
+  function createLiangpiaoRuleRow({min=0,max=0,markup=0}={}) {
+    const row=element('div','liangpiao-rule-row'); row.dataset.ruleRow='true';
+    const lower=document.createElement('input'); lower.className='liangpiao-min'; lower.type='number'; lower.min='0'; lower.max='100'; lower.step='0.1'; lower.value=String(min); lower.setAttribute('aria-label','折扣率下限');
+    const upper=document.createElement('input'); upper.className='liangpiao-max'; upper.type='number'; upper.min='0'; upper.max='100'; upper.step='0.1'; upper.value=String(max); upper.setAttribute('aria-label','折扣率上限');
+    const adjustment=document.createElement('input'); adjustment.className='liangpiao-markup'; adjustment.type='number'; adjustment.min='-100'; adjustment.max='1000'; adjustment.step='0.1'; adjustment.value=String(markup); adjustment.setAttribute('aria-label','调整比例');
+    const remove=element('button','liangpiao-remove','删除'); remove.type='button'; remove.addEventListener('click',()=>row.remove());
+    row.append(lower,element('span','', '% 至'),upper,element('span','', '%，加价'),adjustment,element('span','', '%'),remove);
+    return row;
   }
-  async function saveOperations() {
-    const button=$('saveOperations'); button.disabled=true; settingsMessage('正在校验并保存运营报价规则…');
-    try {
-      const payload={enabled:$('pricingEnabled').checked,regular_adjustment_cents:yuanToCents('regularMarkup'),wplus_adjustment_cents:-yuanToCents('wplusDiscount'),wplus_member_price_threshold_cents:yuanToCents('wplusThreshold'),rounding_increment_cents:Number($('roundingIncrement').value)};
-      const response=await v4Fetch('/api/settings/operations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const data=await response.json();
-      if(!response.ok)throw new Error(data?.detail?.[0]?.msg||data?.detail||'运营规则保存失败');
-      $('pricingRuleMeta').textContent=`版本 ${data.rule_version} · 修订 ${data.revision} · ${new Date(data.updated_at).toLocaleString('zh-CN')}`; settingsMessage(`运营报价规则已保存，下一次核价立即使用（${data.rule_version}）。`);
-    } catch(error) { settingsMessage(error.message,true); }
-    finally { button.disabled=false;refreshDiagnostics(); }
+  function initLiangpiaoRules() {
+    const list=$('liangpiaoRuleList'); const add=$('addLiangpiaoRule'); if(!list||!add)return;
+    list.querySelectorAll('.liangpiao-remove').forEach(button=>button.addEventListener('click',()=>button.closest('[data-rule-row]')?.remove()));
+    add.addEventListener('click',()=>{
+      const previous=list.lastElementChild; const previousMax=Number(previous?.querySelector('.liangpiao-max')?.value);
+      const min=Number.isFinite(previousMax)?Math.min(100,previousMax):0; const max=Math.min(100,min+10);
+      list.append(createLiangpiaoRuleRow({min,max,markup:0}));
+    });
   }
 
   async function loadConversationPolicy() {
@@ -438,6 +438,6 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   document.querySelectorAll('[data-order-filter]').forEach(button=>button.addEventListener('click',()=>{activeOrderFilter=button.dataset.orderFilter;document.querySelectorAll('[data-order-filter]').forEach(item=>item.classList.toggle('active',item===button));renderOrders()}));
   document.querySelectorAll('[data-template-filter]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-template-filter]').forEach(item=>item.classList.toggle('active',item===button));document.querySelectorAll('[data-template-section]').forEach(section=>section.hidden=section.dataset.templateSection!==button.dataset.templateFilter)})); $('addKeywordRule').addEventListener('click',addKeywordRule); $('addKnowledge').addEventListener('click',addKnowledge); $('knowledgeCategoryFilter').addEventListener('change',renderKnowledge);
   document.querySelectorAll('[data-template-variable]').forEach(button=>button.addEventListener('click',async()=>{try{await copyTemplateVariable(button.dataset.templateVariable);templateMessage(`已复制 ${button.dataset.templateVariable}`);}catch{templateMessage('复制失败，请选中变量后复制。',true);}}));
-  $('saveSettings').addEventListener('click',saveSettings); $('saveOperations').addEventListener('click',saveOperations); $('saveTemplates').addEventListener('click',saveTemplates); $('saveConversationPolicy').addEventListener('click',saveConversationPolicy); $('visionPrompt').addEventListener('input',updatePromptLength); $('resetPrompt').addEventListener('click',()=>{$('visionPrompt').value=loadedPrompt;updatePromptLength()});
+  $('saveSettings').addEventListener('click',saveSettings); $('saveTemplates').addEventListener('click',saveTemplates); $('saveConversationPolicy').addEventListener('click',saveConversationPolicy); $('visionPrompt').addEventListener('input',updatePromptLength); $('resetPrompt').addEventListener('click',()=>{$('visionPrompt').value=loadedPrompt;updatePromptLength()});
   document.addEventListener('keydown',event=>{if(event.key==='Escape')showSettings(false)});
-  showWorkspace(location.hash.replace('#','')||'chat'); updateSend(); loadSettings(); loadOperations(); loadConversationPolicy(); loadKnowledge(); refreshDiagnostics(); setInterval(()=>{if(!document.hidden&&activeWorkspace==='logs')refreshDiagnostics();},4000);
+  showWorkspace(location.hash.replace('#','')||'chat'); updateSend(); initLiangpiaoRules(); loadSettings(); loadConversationPolicy(); loadKnowledge(); refreshDiagnostics(); setInterval(()=>{if(!document.hidden&&activeWorkspace==='logs')refreshDiagnostics();},4000);
