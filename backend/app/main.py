@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from time import monotonic, perf_counter
+from collections.abc import Mapping
 from typing import Annotated, Callable, Protocol
 from uuid import uuid4
 
@@ -17,7 +18,7 @@ from .chat import build_guidance_reply, build_recognition_reply
 from .chat_service import CustomerServiceChatService
 from .conversation_policy_store import ConversationPolicyStore
 from .diagnostics import DiagnosticsStore
-from .errors import ImageValidationError, RecognitionError
+from .errors import ImageValidationError, ProviderError, RecognitionError
 from .keyword_image_store import MAX_KEYWORD_IMAGE_BYTES, KeywordImageStore
 from .knowledge_store import KnowledgeStore
 from .liangpiao_callbacks import CallbackError, CallbackVerifier, LiangpiaoCallbackHandler
@@ -60,6 +61,37 @@ from .wanda_direct_quote import WandaDirectQuoteService
 APP_NAME = "wanda-movie-image-recognition"
 UPLOAD_READ_LIMIT = 20 * 1024 * 1024
 INDEX_PATH = Path(__file__).resolve().parents[2] / "frontend" / "v4" / "index.html"
+
+
+def _liangpiao_order_no(value: Mapping[str, object]) -> str:
+    for key in ("orderNo", "order_no", "providerOrderNo", "provider_order_no"):
+        order_no = str(value.get(key) or "").strip()
+        if order_no:
+            return order_no
+    return ""
+
+
+def _liangpiao_items(value: Mapping[str, object]) -> list[dict[str, object]]:
+    items = value.get("list") or value.get("items") or value.get("orders")
+    return [dict(item) for item in items if isinstance(item, Mapping)] if isinstance(items, list) else []
+
+
+def _liangpiao_local_public(local: Mapping[str, object], quote: Mapping[str, object] | None = None) -> dict[str, object]:
+    payload = local.get("payload") if isinstance(local.get("payload"), Mapping) else {}
+    return {
+        "source": "liangpiao",
+        "out_order_no": local.get("out_order_no"),
+        "provider_order_no": local.get("provider_order_no"),
+        "buyer_id": local.get("buyer_id"),
+        "buyer_nick": local.get("buyer_nick") or local.get("buyer_id"),
+        "conversation_id": local.get("conversation_id"),
+        "shop_id": local.get("shop_id"),
+        "quote_id": local.get("quote_id"),
+        "quote_amount_fen": quote.get("buyer_amount_fen") if quote else None,
+        "payload": {
+            key: payload.get(key) for key in ("showId", "seats", "ticketMode", "priceMode") if payload.get(key) is not None
+        },
+    }
 
 
 class RecognitionService(Protocol):
@@ -494,6 +526,71 @@ def create_app(
         tenant_id = require_panel_tenant(x_wanda_tenant_id)
         records = persistent_quote_records.list(tenant_id, limit=limit)
         return {"records": records, "count": len(records)}
+
+    @app.get("/api/plugin/liangpiao-orders")
+    async def list_plugin_liangpiao_orders(
+        x_wanda_tenant_id: str | None = Header(default=None),
+        status: str | None = Query(default=None, max_length=40),
+        start_time: str | None = Query(default=None, max_length=40),
+        end_time: str | None = Query(default=None, max_length=40),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=100, ge=1, le=100),
+    ) -> dict[str, object]:
+        tenant_id = require_panel_tenant(x_wanda_tenant_id)
+        local_orders = persistent_rules_store.list_liangpiao_orders(tenant_id, limit=500)
+        if configured_liangpiao_client is None:
+            return {"orders": [], "count": 0, "total": 0, "page": page, "pageSize": page_size, "available": False}
+        payload = {"page": page, "pageSize": page_size}
+        if status:
+            payload["status"] = status
+        if start_time:
+            payload["startTime"] = start_time
+        if end_time:
+            payload["endTime"] = end_time
+        try:
+            response = await configured_liangpiao_client.order_list(payload)
+        except (ProviderError, ValueError) as error:
+            raise HTTPException(status_code=503, detail="liangpiao_order_list_unavailable") from error
+        known = {
+            str(item.get("provider_order_no") or "").strip(): item
+            for item in local_orders if str(item.get("provider_order_no") or "").strip()
+        }
+        orders: list[dict[str, object]] = []
+        for item in _liangpiao_items(response):
+            provider_order_no = _liangpiao_order_no(item)
+            local = known.get(provider_order_no)
+            if not local:
+                continue
+            quote = persistent_rules_store.get_selected_seat_quote(str(local.get("quote_id") or ""))
+            orders.append({**item, **_liangpiao_local_public(local, quote)})
+        return {
+            "orders": orders, "count": len(orders),
+            "total": int(response.get("total") or len(orders)), "page": page,
+            "pageSize": page_size, "available": True,
+        }
+
+    @app.get("/api/plugin/liangpiao-orders/{order_no}")
+    async def get_plugin_liangpiao_order(
+        order_no: str,
+        x_wanda_tenant_id: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        tenant_id = require_panel_tenant(x_wanda_tenant_id)
+        normalized_order_no = str(order_no or "").strip()
+        local = persistent_rules_store.find_liangpiao_order(
+            provider_order_no=normalized_order_no, tenant_id=tenant_id,
+        )
+        if local is None:
+            raise HTTPException(status_code=404, detail="liangpiao_order_not_found")
+        if configured_liangpiao_client is None:
+            raise HTTPException(status_code=503, detail="liangpiao_order_detail_unavailable")
+        try:
+            detail = await configured_liangpiao_client.order_detail(orderNo=normalized_order_no)
+        except (ProviderError, ValueError) as error:
+            raise HTTPException(status_code=503, detail="liangpiao_order_detail_unavailable") from error
+        quote = persistent_rules_store.get_selected_seat_quote(str(local.get("quote_id") or ""))
+        technical = {"raw_response", "trace_id", "request_id", "http_status"}
+        safe_detail = {key: value for key, value in detail.items() if key not in technical}
+        return {"order": {**safe_detail, **_liangpiao_local_public(local, quote)}}
 
     @app.get("/api/plugin/shops")
     async def list_plugin_shops(

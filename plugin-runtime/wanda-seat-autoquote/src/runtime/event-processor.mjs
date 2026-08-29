@@ -420,6 +420,33 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     return { orders, count: orders.length, observedCount: references.length };
   }
 
+  async function getTenantOrder(tenantId, orderId) {
+    const normalizedTenant = text(tenantId);
+    const normalizedOrderId = text(orderId);
+    if (!normalizedTenant || !normalizedOrderId) throw Object.assign(new Error('order_not_found'), { status: 404 });
+    const references = await store.listOrderReferences(normalizedTenant, 500);
+    if (!references.some((reference) => reference.orderId === normalizedOrderId)) {
+      throw Object.assign(new Error('order_not_found'), { status: 404 });
+    }
+    const order = await platform.createClient(normalizedTenant).orders.get(normalizedOrderId);
+    if (!order) throw Object.assign(new Error('order_not_found'), { status: 404 });
+    return {
+      orderId: text(order.orderId) ?? normalizedOrderId,
+      accountUnb: text(order.accountUnb),
+      orderStatus: Number.isInteger(order.orderStatus) ? order.orderStatus : null,
+      orderStatusText: text(order.orderStatusText),
+      itemId: text(order.itemId),
+      productTitle: text(order.productTitle),
+      sku: text(order.sku),
+      quantity: Number.isInteger(order.quantity) ? order.quantity : null,
+      payment: text(order.payment),
+      postFee: text(order.postFee),
+      buyerNick: text(order.buyerNick),
+      payTime: text(order.payTime),
+      createTime: text(order.createTime),
+    };
+  }
+
   async function readRecentMessages(client, session) {
     if (!session) return { available: false, messages: [] };
     try {
@@ -914,5 +941,5 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     return { actionId, ...result, nextActions: [] };
   }
 
-  return Object.freeze({ start, stop, health, enqueue, syncTenantShops, listTenantOrders, pollCommands, pollReminders });
+  return Object.freeze({ start, stop, health, enqueue, syncTenantShops, listTenantOrders, getTenantOrder, pollCommands, pollReminders });
 }

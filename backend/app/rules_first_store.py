@@ -382,12 +382,39 @@ class RulesFirstStore:
             ).fetchone()
         return self._liangpiao_order_view(row)
 
+    def list_liangpiao_orders(self, tenant_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
+        tenant = str(tenant_id or "").strip()
+        if not tenant:
+            return []
+        bounded_limit = max(1, min(int(limit), 500))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM liangpiao_orders WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
+                (tenant, bounded_limit),
+            ).fetchall()
+        return [self._liangpiao_order_view(row) for row in rows]
+
     def find_liangpiao_order(self, *, out_order_no: str | None = None,
-                             provider_order_no: str | None = None) -> dict[str, Any] | None:
+                             provider_order_no: str | None = None,
+                             tenant_id: str | None = None) -> dict[str, Any] | None:
+        clauses = []
+        params: list[str] = []
+        if out_order_no:
+            clauses.append("out_order_no=?")
+            params.append(str(out_order_no))
+        if provider_order_no:
+            clauses.append("provider_order_no=?")
+            params.append(str(provider_order_no))
+        if not clauses or (not out_order_no and not provider_order_no):
+            return None
+        order_clause = " OR ".join(clauses)
+        if tenant_id:
+            order_clause = f"({order_clause}) AND tenant_id=?"
+            params.append(str(tenant_id))
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM liangpiao_orders WHERE out_order_no=? OR provider_order_no=? LIMIT 1",
-                (out_order_no, provider_order_no),
+                f"SELECT * FROM liangpiao_orders WHERE {order_clause} LIMIT 1",
+                tuple(params),
             ).fetchone()
         return self._liangpiao_order_view(row) if row else None
 

@@ -135,7 +135,7 @@ function overview(manifest, snapshot) {
 }
 
 export function createV2HttpServer({
-  config, platform, enqueue, syncShops, listOrders, health, logger = console,
+  config, platform, enqueue, syncShops, listOrders, getOrder, health, logger = console,
   fetchImpl = globalThis.fetch,
   jobStore = new V4UiJobStore(path.join(config.dataDir, 'ui-jobs'), config.encryptionKey),
 }) {
@@ -238,6 +238,13 @@ export function createV2HttpServer({
           if (typeof syncShops !== 'function') return json(res, 503, { ok: false, error: 'shop_sync_unavailable' });
           const result = await syncShops(header(req, 'x-yumaiduo-tenant-id'));
           return json(res, 200, { ok: true, ...result });
+        }
+        if (req.method === 'GET' && normalizedUiPath.startsWith('/ui/api/orders/')) {
+          if (typeof getOrder !== 'function') return json(res, 503, { ok: false, error: 'order_detail_unavailable' });
+          const orderId = decodeURIComponent(normalizedUiPath.slice('/ui/api/orders/'.length));
+          if (!orderId || orderId.includes('/')) return json(res, 400, { ok: false, error: 'order_id_invalid' });
+          const order = await getOrder(header(req, 'x-yumaiduo-tenant-id'), orderId);
+          return json(res, 200, { ok: true, order });
         }
         if (req.method === 'GET' && normalizedUiPath === '/ui/api/orders') {
           if (typeof listOrders !== 'function') return json(res, 503, { ok: false, error: 'order_list_unavailable' });

@@ -60,10 +60,11 @@ async def test_all_allowlisted_endpoints_are_callable_without_arbitrary_paths() 
     await client.show_detail(showId="show-1")
     await client.seat_list(showId="show-1")
     await client.order_preflight(showId="show-1")
+    await client.order_list(page=1, pageSize=20)
     await client.order_create({"showId": "show-1"}, idempotency_key="idem")
     await client.order_detail(outOrderNo="order-1")
     await client.order_cancel(outOrderNo="order-1")
-    assert seen == ["seat-shot", "confirm", "list", "detail", "list", "preflight", "create", "detail", "cancel"]
+    assert seen == ["seat-shot", "confirm", "list", "detail", "list", "preflight", "list", "create", "detail", "cancel"]
     with pytest.raises(ValueError, match="endpoint_not_allowed"):
         await client.request("https://evil.example/write", {})
     await client.aclose()

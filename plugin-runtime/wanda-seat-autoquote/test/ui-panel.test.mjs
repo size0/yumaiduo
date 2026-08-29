@@ -20,6 +20,7 @@ async function withServer(run, {
   fetchImpl = globalThis.fetch,
   syncShops = async () => ({ ok: true, count: 0 }),
   listOrders = async () => ({ orders: [], count: 0, observedCount: 0 }),
+  getOrder = async () => ({ orderId: 'order-1' }),
 } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ui-panel-'));
   const server = createV2HttpServer({
@@ -49,7 +50,7 @@ async function withServer(run, {
     },
     enqueue: async () => ({ created: true }),
     syncShops,
-    listOrders,
+    listOrders, getOrder,
     health: async () => ({
       ok: true,
       registered: true,
@@ -84,8 +85,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(pageHtml, /W\+代订与纯文字咨询/u);
     assert.match(pageHtml, /客服知识库/u);
     assert.match(pageHtml, /万达报价规则/u);
-    assert.match(pageHtml, /W\+原价减免/u);
-    assert.match(pageHtml, /W\+会员价阈值/u);
+    assert.match(pageHtml, /(?:官方价格基准 \+ 固定加\/减价|按折扣率匹配区间)/u);
+    assert.match(pageHtml, /id="(?:wplusDiscount|wandaRuleList)"/u);
+    assert.match(pageHtml, /class="pricing-rule-card liangpiao-pricing-card"[\s\S]*class="pricing-rule-card pricing-rule-wplus"/u);
     assert.match(pageHtml, /id="pricingEnabled"/u);
     assert.match(pageHtml, /id="roundingIncrement"/u);
     assert.match(pageHtml, /良票报价（动态折扣）/u);
@@ -109,12 +111,19 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     const styles = await asset.text();
     assert.match(styles, /\.settings-drawer \{[^}]*height:min\(820px,calc\(100dvh - 206px\)\)[^}]*max-height:calc\(100dvh - 206px\)/u);
     assert.match(styles, /\.settings-body \{[^}]*overflow-y:auto/u);
+    assert.match(styles, /\.pricing-rule-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)/u);
+    assert.doesNotMatch(styles, /\.liangpiao-pricing-card \{ grid-column:1\/-1; \}/u);
+    assert.match(styles, /\.wanda-rule-row/u);
 
     const appAsset = await fetch(`${baseUrl}/ui/app.js`, { headers: signedHeaders() });
     const appSource = await appAsset.text();
     assert.match(appSource, /api\/settings\/knowledge/u);
     assert.match(appSource, /loadOperations/u);
+    assert.match(appSource, /initWandaRules/u);
     assert.match(pageHtml, /id="orderSearch"/u);
+    assert.match(pageHtml, /id="orderDetailDialog"/u);
+    assert.match(appSource, /良票订单暂不可用/u);
+    for (const label of ['影片','城市','影院','场次','座位','出票方式','票面价','报价','成交价','状态','下单时间','咸鱼买家','操作']) assert.match(appSource, new RegExp(label, 'u'));
     assert.match(pageHtml, /id="reminderEnabled"/u);
     assert.match(pageHtml, /散场后提醒收货/u);
     assert.match(appSource, /saveReminderSettings/u);
@@ -124,9 +133,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /reply-keyword-images/u);
     assert.match(appSource, /image\/jpeg,image\/png,image\/webp,image\/gif/u);
     assert.match(appSource, /image_asset_id/u);
-    assert.match(appSource, /record\.order_id/u);
-    assert.match(appSource, /影院信息待关联/u);
-    assert.match(appSource, /开场时间/u);
+    assert.match(appSource, /linkedFactMap/u);
+    assert.match(appSource, /wandaOrderRow/u);
+    assert.match(appSource, /良票订单/u);
   });
 });
 
@@ -157,6 +166,16 @@ test('signed panel order management is tenant scoped by the gateway', async () =
     },
   });
   assert.deepEqual(calls, [{ tenantId: 'tenant-test', limit: 25 }]);
+});
+
+test('signed panel order detail is tenant scoped by the gateway', async () => {
+  const calls = [];
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/ui/api/orders/order-1`, { headers: signedHeaders() });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, order: { orderId: 'order-1' } });
+  }, { getOrder: async (tenantId, orderId) => { calls.push({ tenantId, orderId }); return { orderId }; } });
+  assert.deepEqual(calls, [{ tenantId: 'tenant-test', orderId: 'order-1' }]);
 });
 
 test('V4 panel API is signed at the gateway and proxied only to the loopback backend', async () => {

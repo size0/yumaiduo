@@ -29,6 +29,7 @@ class LiangpiaoClient:
         "show_detail": "show/detail",
         "seat_list": "seat/list",
         "order_preflight": "order/preflight",
+        "order_list": "order/list",
         "order_create": "order/create",
         "order_detail": "order/detail",
         "order_cancel": "order/cancel",
@@ -193,6 +194,12 @@ class LiangpiaoClient:
         idempotency_key: str | None = None, **kwargs: Any,
     ) -> dict[str, Any]:
         return await self.request("order_preflight", self._payload(payload, kwargs), trace_id=trace_id, idempotency_key=idempotency_key)
+
+    async def order_list(
+        self, payload: Mapping[str, Any] | None = None, *, trace_id: str | None = None,
+        idempotency_key: str | None = None, **kwargs: Any,
+    ) -> dict[str, Any]:
+        return await self.request("order_list", self._payload(payload, kwargs), trace_id=trace_id, idempotency_key=idempotency_key)
 
     async def order_create(
         self, payload: Mapping[str, Any] | None = None, *, trace_id: str | None = None,

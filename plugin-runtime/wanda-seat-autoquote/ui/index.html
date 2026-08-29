@@ -171,7 +171,7 @@
         <div class="record-list" id="quoteRecordList"><div class="diagnostic-empty">正在读取报价记录…</div></div>
       </div>
       <div class="records-console order-console" data-operation-view="orders">
-        <header class="records-head"><div><h3>订单管理</h3><p>实时回读鱼麦多订单，并关联已核验的影院、影片、场次、影厅和座位。</p></div><button class="text-button" id="refreshOrders" type="button">刷新订单</button></header>
+        <header class="records-head"><div><h3>订单管理</h3><p>统一展示良票订单和鱼麦多万达手动出票订单；价格与状态只读取对应平台的权威结果。</p></div><button class="text-button" id="refreshOrders" type="button">刷新订单</button></header>
         <div class="order-toolbar">
           <label class="order-search"><span aria-hidden="true">⌕</span><input id="orderSearch" type="search" autocomplete="off" placeholder="搜索影院、影片、订单号或买家"></label>
           <div class="order-filters" role="group" aria-label="订单状态筛选"><button class="active" type="button" data-order-filter="all">全部</button><button type="button" data-order-filter="unpaid">待付款</button><button type="button" data-order-filter="paid">已付款</button><button type="button" data-order-filter="shipped">已发货</button><button type="button" data-order-filter="closed">已关闭</button></div>
@@ -235,15 +235,23 @@
             <button class="liangpiao-add" id="addLiangpiaoRule" type="button">＋ 添加区间</button>
           </section>
           <section class="pricing-rule-card pricing-rule-wplus">
-            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>万达报价规则</h3><p>W+会员座使用万达官方实时数据和确定性规则报价。</p></div></header>
-            <p class="wanda-pricing-description">模型只负责理解和表达。优先使用万达实时座位接口返回的W+会员活动价；未显示会员价时才使用临时探针，并仅在取消订单、确认座位恢复后报价。</p>
-            <div class="pricing-fields">
-              <div class="money-field"><label for="wplusDiscount">W+原价减免</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
-              <div class="money-field"><label for="wplusThreshold">W+会员价阈值</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
+            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>万达报价规则</h3><p>按折扣率匹配区间，但每个区间只使用固定加价/减价。</p></div></header>
+            <p class="wanda-pricing-description">折扣率 = W+优惠价 ÷ 原价。以官方 W+ 优惠价为基准，按折扣率匹配规则区间，叠加固定 X 元后四舍五入。</p>
+            <div class="wanda-rule-list" id="wandaRuleList">
+              <div class="wanda-rule-row" data-wanda-rule-row><span>折扣率</span><input class="wanda-min" type="number" min="0" max="100" step="0.1" value="0" aria-label="万达折扣率下限"><span>% 至</span><input class="wanda-max" type="number" min="0" max="100" step="0.1" value="50" aria-label="万达折扣率上限"><span>%，固定加价/减价</span><input class="wanda-adjustment" type="number" min="-1000" max="1000" step="0.1" value="2.9" aria-label="固定加价/减价"><span>元</span><button class="wanda-remove" type="button">删除</button></div>
+              <div class="wanda-rule-row" data-wanda-rule-row><span>折扣率</span><input class="wanda-min" type="number" min="0" max="100" step="0.1" value="50" aria-label="万达折扣率下限"><span>% 至</span><input class="wanda-max" type="number" min="0" max="100" step="0.1" value="60" aria-label="万达折扣率上限"><span>%，固定加价/减价</span><input class="wanda-adjustment" type="number" min="-1000" max="1000" step="0.1" value="2.9" aria-label="固定加价/减价"><span>元</span><button class="wanda-remove" type="button">删除</button></div>
+              <div class="wanda-rule-row" data-wanda-rule-row><span>折扣率</span><input class="wanda-min" type="number" min="0" max="100" step="0.1" value="60" aria-label="万达折扣率下限"><span>% 至</span><input class="wanda-max" type="number" min="0" max="100" step="0.1" value="70" aria-label="万达折扣率上限"><span>%，固定加价/减价</span><input class="wanda-adjustment" type="number" min="-1000" max="1000" step="0.1" value="2.9" aria-label="固定加价/减价"><span>元</span><button class="wanda-remove" type="button">删除</button></div>
+              <div class="wanda-rule-row" data-wanda-rule-row><span>折扣率</span><input class="wanda-min" type="number" min="0" max="100" step="0.1" value="70" aria-label="万达折扣率下限"><span>% 至</span><input class="wanda-max" type="number" min="0" max="100" step="0.1" value="80" aria-label="万达折扣率上限"><span>%，固定加价/减价</span><input class="wanda-adjustment" type="number" min="-1000" max="1000" step="0.1" value="2.9" aria-label="固定加价/减价"><span>元</span><button class="wanda-remove" type="button">删除</button></div>
+              <div class="wanda-rule-row" data-wanda-rule-row><span>折扣率</span><input class="wanda-min" type="number" min="0" max="100" step="0.1" value="80" aria-label="万达折扣率下限"><span>% 至</span><input class="wanda-max" type="number" min="0" max="100" step="0.1" value="90" aria-label="万达折扣率上限"><span>%，固定加价/减价</span><input class="wanda-adjustment" type="number" min="-1000" max="1000" step="0.1" value="2.9" aria-label="固定加价/减价"><span>元</span><button class="wanda-remove" type="button">删除</button></div>
+              <div class="wanda-rule-row" data-wanda-rule-row><span>折扣率</span><input class="wanda-min" type="number" min="0" max="100" step="0.1" value="90" aria-label="万达折扣率下限"><span>% 至</span><input class="wanda-max" type="number" min="0" max="100" step="0.1" value="100" aria-label="万达折扣率上限"><span>%，固定加价/减价</span><input class="wanda-adjustment" type="number" min="-1000" max="1000" step="0.1" value="2.9" aria-label="固定加价/减价"><span>元</span><button class="wanda-remove" type="button">删除</button></div>
+            </div>
+            <button class="wanda-add" id="addWandaRule" type="button">＋ 添加区间</button>
+            <div class="pricing-fields wanda-compat-fields">
+              <input id="wplusDiscount" type="hidden" value="2.9"><input id="wplusThreshold" type="hidden" value="60">
               <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
             </div>
             <div class="pricing-option-row"><div><strong>启用后台报价规则</strong><small>关闭时最终报价等于官方实时区域参考价。</small></div><label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label></div>
-            <div class="pricing-preview wanda-pricing-formula">W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；高于阈值：直接取会员价。逐座轮整后求和，不低于会员成本且不高于实时原价。</div>
+            <div class="pricing-preview wanda-pricing-formula">示例：W+优惠价 58 ÷ 原价 70 = 82.857%；匹配对应区间后，报价 = 58 + 固定加价 X 元，再按设置四舍五入。填负数表示固定减价。</div>
             <div class="pricing-rule-meta" id="pricingRuleMeta">正在读取后台规则…</div>
             <button class="template-save pricing-save" id="saveOperations" type="button">保存运营报价规则</button>
           </section>
@@ -272,6 +280,10 @@
   </div>
   <div class="settings-footer" id="settingsFooter"><div class="settings-message" id="settingsMessage"></div><button class="save-settings" id="saveSettings" type="button">保存模型设置并立即应用</button></div>
 </aside>
+<dialog class="order-detail-dialog" id="orderDetailDialog" aria-labelledby="orderDetailTitle">
+  <header><div><strong id="orderDetailTitle">订单详情</strong><small>仅展示当前租户已授权订单的最新权威信息</small></div><button class="icon-btn" id="closeOrderDetail" type="button" aria-label="关闭订单详情">×</button></header>
+  <div class="order-detail-content" id="orderDetailContent"></div>
+</dialog>
 <footer class="plugin-status-bar"><span><i></i>系统运行正常</span><b>│</b><span>⌁ API 延迟 <strong>—</strong></span><span class="status-spacer"></span><span>今日　▣ 订单 <strong>0</strong></span><span class="status-success">✓ 成功 <strong>0</strong></span><span class="status-error">× 失败 <strong>0</strong></span></footer>
 <script type="module" src="./ui/app.js"></script>
 </body>

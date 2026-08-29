@@ -53,6 +53,39 @@ class StubRecognitionService:
         )
 
 
+def test_liangpiao_order_list_and_detail_are_tenant_scoped_and_read_only(tmp_path: Path) -> None:
+    store = RulesFirstStore(tmp_path / "rules.sqlite3", protector=PlainProtector())
+    store.save_liangpiao_order({
+        "out_order_no": "out-1", "provider_order_no": "provider-1", "tenant_id": "tenant-1",
+        "quote_id": "quote-1", "quote_hash": "a" * 64, "payload_hash": "b" * 64,
+        "provider_status": "created", "buyer_id": "buyer-1", "payload": {"showId": "show-1"},
+    })
+
+    class LiangpiaoStub:
+        async def order_list(self, *_: object, **__: object) -> dict[str, object]:
+            return {"list": [{"orderNo": "provider-1", "movieName": "测试电影", "quoteAmount": "8800"}], "total": 1}
+
+        async def order_detail(self, **kwargs: object) -> dict[str, object]:
+            assert kwargs == {"orderNo": "provider-1"}
+            return {"orderNo": "provider-1", "status": "ticket_sent", "tickets": [{"seatNo": "5排8座", "version": 2}]}
+
+        async def aclose(self) -> None:
+            return None
+
+    client = TestClient(create_app(
+        service=StubRecognitionService(), rules_first_store=store, liangpiao_client=LiangpiaoStub(),
+    ))
+    headers = {"x-wanda-tenant-id": "tenant-1"}
+    listed = client.get("/api/plugin/liangpiao-orders?page=1&page_size=20", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["orders"][0]["source"] == "liangpiao"
+    assert listed.json()["orders"][0]["buyer_nick"] == "buyer-1"
+    detail = client.get("/api/plugin/liangpiao-orders/provider-1", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["order"]["tickets"][0]["version"] == 2
+    assert client.get("/api/plugin/liangpiao-orders/provider-1", headers={"x-wanda-tenant-id": "tenant-2"}).status_code == 404
+
+
 def test_health_does_not_expose_secrets() -> None:
     client = TestClient(create_app(service=StubRecognitionService()))
     response = client.get("/health")
