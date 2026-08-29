@@ -224,24 +224,26 @@ body { height:100vh; min-height:0; padding-bottom:42px; height:100dvh; }
 .order-detail-content { height:calc(100% - 64px); max-height:none; padding:24px 24px 32px; overflow:auto; }.order-detail-summary-card,.order-ticket-viewer { width:min(940px,100%); margin:0 auto 20px; padding:20px; border:1px solid #e1e4e8; border-radius:4px; background:#fff; box-shadow:0 2px 8px rgba(28,43,61,.06); }.order-detail-summary-card { display:grid; grid-template-columns:82px minmax(0,1fr); gap:16px; }.order-detail-summary-card.order-card-wide { display:block; }.order-detail-poster { width:82px; height:128px; overflow:hidden; border-radius:4px; background:#eef1f5; }.order-detail-poster img { width:100%; height:100%; object-fit:cover; }.order-detail-poster-empty { height:100%; display:grid; place-items:center; color:#a5adba; font-size:12px; }.order-detail-summary-body { min-width:0; }.order-detail-summary-title { margin:2px 0 16px; color:#3c4652; font-size:16px; font-weight:700; }.order-detail-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px 34px; }.order-detail-field { min-width:0; display:grid; grid-template-columns:76px minmax(0,1fr); align-items:start; gap:10px; min-height:22px; }.order-detail-field>span { color:#7b8088; font-size:13px; line-height:1.6; }.order-detail-field>b { min-width:0; overflow-wrap:anywhere; color:#3d4249; font-size:13px; font-weight:500; line-height:1.6; white-space:normal; }.order-detail-field.wide { grid-column:1/-1; }.order-detail-field.copyable>b { display:flex; align-items:flex-start; gap:6px; }.order-copy { flex:0 0 auto; padding:0; border:0; color:#6e747c; font-size:14px; line-height:1.5; background:transparent; }.order-copy:hover { color:#1683ff; }.order-detail-section-title { width:min(940px,100%); margin:26px auto 10px; color:#4a5057; font-size:14px; }.order-ticket-viewer { min-height:360px; }.order-ticket-head { display:flex; align-items:center; gap:14px; margin-bottom:14px; }.order-ticket-head h3 { margin:0; color:#454b53; font-size:14px; font-weight:600; }.order-ticket-tabs { display:flex; gap:8px; }.order-ticket-tab { padding:4px 10px; border:1px solid #cfd5dc; border-radius:4px; color:#5b6673; font-size:12px; background:#fff; }.order-ticket-tab.active { color:#167cf2; border-color:#6daeff; }.order-ticket-body { display:grid; grid-template-columns:minmax(240px,1fr) minmax(300px,1.2fr); gap:28px; align-items:center; min-height:270px; }.order-ticket-image-wrap { min-height:270px; display:grid; place-items:center; border-radius:4px; background:#fff; }.order-ticket-image { max-width:100%; max-height:290px; object-fit:contain; }.order-ticket-empty { color:#a0a5ad; font-size:13px; }.order-ticket-facts { display:grid; gap:14px; }.order-ticket-facts .order-detail-field { grid-template-columns:96px minmax(0,1fr); }.order-detail-subtitle { width:min(940px,100%); margin:18px auto 9px; font-size:13px; }.order-ticket-card { width:min(940px,100%); display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px 28px; margin:0 auto 12px; padding:16px 20px; border:1px solid #d9e5fb; border-radius:4px; background:#fff; }
 @media (max-width:760px) { .order-detail-dialog { top:12px; left:12px; width:calc(100vw - 24px); height:calc(100vh - 24px); max-height:calc(100vh - 24px); transform:none; }.order-detail-content { padding:20px 12px 40px; }.order-detail-summary-card { grid-template-columns:64px minmax(0,1fr); padding:15px; }.order-detail-poster { width:64px; height:100px; }.order-detail-summary-grid { grid-template-columns:1fr; gap:9px; }.order-detail-field.wide { grid-column:auto; }.order-ticket-body { grid-template-columns:1fr; gap:14px; }.order-ticket-image-wrap { min-height:180px; }.order-ticket-card { grid-template-columns:repeat(2,minmax(0,1fr)); padding:12px; }.order-detail-dialog>header { padding:0 12px; } }
 
-/* Keep every workspace page at the same height and use the available viewport. */
+/* Let the host iframe size to the plugin content instead of a viewport-sized blank tail. */
+html, body { height:auto; min-height:0; overflow-x:hidden; overflow-y:auto; }
+body { height:auto; padding-bottom:0; }
 #mainPage { padding-bottom:4px; }
 #mainPage .chat-app,
 #settingsDrawer,
 #diagnosticsPanel {
-  height:min(900px,calc(100dvh - 146px));
-  max-height:calc(100dvh - 146px);
+  height:min(820px,calc(100dvh - 330px));
+  max-height:calc(100dvh - 330px);
   margin-bottom:20px;
 }
-#mainPage .chat-app { min-height:min(620px,calc(100dvh - 146px)); }
+#mainPage .chat-app { min-height:min(620px,calc(100dvh - 330px)); }
 @media (max-width:760px) {
   #mainPage { padding-bottom:4px; }
   #mainPage .chat-app,
   #settingsDrawer,
   #diagnosticsPanel {
-    height:calc(100dvh - 104px);
-    max-height:calc(100dvh - 104px);
+    height:calc(100dvh - 240px);
+    max-height:calc(100dvh - 240px);
     margin-bottom:20px;
   }
-  #mainPage .chat-app { min-height:min(560px,calc(100dvh - 104px)); }
+  #mainPage .chat-app { min-height:min(560px,calc(100dvh - 240px)); }
 }
