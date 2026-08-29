@@ -247,3 +247,23 @@ body { height:auto; padding-bottom:0; }
   }
   #mainPage .chat-app { min-height:min(560px,calc(100dvh - 240px)); }
 }
+
+/* Improve readability for operator-facing knowledge and order screens. */
+.site-nav-button { font-size:13px; }
+.site-brand strong { font-size:12px; }
+.site-brand small { font-size:10px; }
+.knowledge-stat span { font-size:12px; }
+.knowledge-notice span { font-size:12px; line-height:1.7; }
+.knowledge-entry summary b { font-size:14px; }
+.knowledge-entry summary small { font-size:11px; }
+.knowledge-entry p { font-size:12px; }
+.knowledge-badge { font-size:11px; }
+.knowledge-edit label { font-size:12px; }
+.knowledge-edit input,
+.knowledge-edit select,
+.knowledge-edit textarea { font-size:13px; }
+.knowledge-actions button { font-size:12px; }
+.order-filters button { font-size:12px; }
+.order-table { font-size:13px; }
+.order-table th { font-size:12px; }
+.order-detail-button { font-size:12px; }
