@@ -220,8 +220,8 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     }
     if(name==='shops')loadShops();
     if(name==='quote-records')loadQuoteRecords();
-    if(name==='orders'){loadOrders();loadReminderSettings();loadReminderTasks();}
-    if(name==='templates')loadTemplates();
+    if(name==='orders')loadOrders();
+    if(name==='templates'){loadTemplates();loadReminderSettings();loadReminderTasks();}
     if(name==='conversation')loadConversationPolicy();
     if(name==='knowledge')loadKnowledge();
     history.replaceState(null,'',`#${name}`);
@@ -362,14 +362,14 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   async function loadConversationPolicy() {
     try {
       const response=await v4Fetch('/api/settings/conversation-policy');const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取会话策略失败');
-      $('aiReplyEnabled').checked=data.ai_reply_enabled!==false;$('memoryHours').value=data.memory_hours;$('memoryDepth').value=data.memory_depth;$('stageGateEnabled').checked=data.stage_gate_enabled;$('interventionStart').value=data.intervention_start;$('interventionEnd').value=data.intervention_end;$('humanTakeoverDelay').value=data.human_takeover_delay_seconds;$('agentPersona').value=data.agent_persona||'';$('businessBackground').value=data.business_background||'';$('customerServiceKnowledge').value=data.customer_service_knowledge||'';$('replyStyle').value=data.reply_style||'';$('humanServiceHours').value=data.human_service_hours||'';
+      $('aiReplyEnabled').checked=data.ai_reply_enabled!==false;$('memoryHours').value=data.memory_hours;$('memoryDepth').value=data.memory_depth;$('stageGateEnabled').checked=data.stage_gate_enabled;$('interventionStart').value=data.intervention_start;$('interventionEnd').value=data.intervention_end;$('humanTakeoverDelay').value=data.human_takeover_delay_seconds;$('personaBackground').value=data.persona_background||[data.agent_persona,data.business_background].filter(Boolean).join('\n\n');$('customerServiceKnowledge').value=data.customer_service_knowledge||'';$('replyStyle').value=data.reply_style||'';$('humanServiceHours').value=data.human_service_hours||'';
       $('conversationPolicyMeta').textContent=`修订 ${data.revision||0}${data.updated_at?` · ${new Date(data.updated_at).toLocaleString('zh-CN')}`:''}`;
     } catch(error){$('conversationPolicyMeta').textContent=error.message;}
   }
   async function saveConversationPolicy() {
     const button=$('saveConversationPolicy');button.disabled=true;
     try {
-      const payload={ai_reply_enabled:$('aiReplyEnabled').checked,memory_hours:Number($('memoryHours').value),memory_depth:Number($('memoryDepth').value),stage_gate_enabled:$('stageGateEnabled').checked,intervention_start:$('interventionStart').value,intervention_end:$('interventionEnd').value,human_takeover_delay_seconds:Number($('humanTakeoverDelay').value),agent_persona:$('agentPersona').value.trim(),business_background:$('businessBackground').value.trim(),customer_service_knowledge:$('customerServiceKnowledge').value.trim(),reply_style:$('replyStyle').value.trim(),human_service_hours:$('humanServiceHours').value.trim()};
+      const payload={ai_reply_enabled:$('aiReplyEnabled').checked,memory_hours:Number($('memoryHours').value),memory_depth:Number($('memoryDepth').value),stage_gate_enabled:$('stageGateEnabled').checked,intervention_start:$('interventionStart').value,intervention_end:$('interventionEnd').value,human_takeover_delay_seconds:Number($('humanTakeoverDelay').value),persona_background:$('personaBackground').value.trim(),customer_service_knowledge:$('customerServiceKnowledge').value.trim(),reply_style:$('replyStyle').value.trim(),human_service_hours:$('humanServiceHours').value.trim()};
       const response=await v4Fetch('/api/settings/conversation-policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'保存会话策略失败');$('conversationPolicyMeta').textContent=`已保存 · 修订 ${data.revision} · ${new Date(data.updated_at).toLocaleString('zh-CN')}`;
     } catch(error){$('conversationPolicyMeta').textContent=error.message;}finally{button.disabled=false;}
   }

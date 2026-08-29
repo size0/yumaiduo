@@ -91,8 +91,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.doesNotMatch(pageHtml, /确定性运营报价/u);
     assert.doesNotMatch(pageHtml, /本地试算/u);
     assert.doesNotMatch(pageHtml, /安全与风控设置/u);
-    assert.match(pageHtml, /id="agentPersona"/u);
-    assert.match(pageHtml, /id="businessBackground"/u);
+    assert.match(pageHtml, /id="personaBackground"/u);
+    assert.doesNotMatch(pageHtml, /id="agentPersona"/u);
+    assert.doesNotMatch(pageHtml, /id="businessBackground"/u);
     assert.match(pageHtml, /id="customerServiceKnowledge"/u);
     assert.match(pageHtml, /id="replyStyle"/u);
     assert.match(pageHtml, /id="humanServiceHours"/u);
@@ -100,6 +101,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     const asset = await fetch(`${baseUrl}/ui/styles.css`, { headers: signedHeaders() });
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type') ?? '', /^text\/css/u);
+    const styles = await asset.text();
+    assert.match(styles, /\.settings-drawer \{[^}]*display:none;[^}]*flex-direction:column/u);
+    assert.match(styles, /\.settings-body \{[^}]*overflow:visible/u);
 
     const appAsset = await fetch(`${baseUrl}/ui/app.js`, { headers: signedHeaders() });
     const appSource = await appAsset.text();

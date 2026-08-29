@@ -28,6 +28,7 @@ class ConversationPolicy(BaseModel):
         default="提供万达官方影院电影票代订服务；价格、库存、座位和出票状态必须以实时权威结果为准。",
         min_length=1, max_length=2_000,
     )
+    persona_background: str = Field(default="", max_length=2_500)
     customer_service_knowledge: str = Field(default="", max_length=3_000)
     reply_style: str = Field(
         default="像真人客服聊天，先回答问题，再给下一步；自然、简短、礼貌，不虚构状态。",

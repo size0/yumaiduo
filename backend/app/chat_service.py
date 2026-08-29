@@ -457,13 +457,19 @@ class CustomerServiceChatService:
     def _strategy_prompt(self, policy: object | None) -> str:
         if policy is None:
             return ""
-        parts = [
-            "【当前会话策略】",
-            f"客服人设：{str(getattr(policy, 'agent_persona', '')).strip()}",
-            f"业务背景：{str(getattr(policy, 'business_background', '')).strip()}",
+        persona_background = str(getattr(policy, "persona_background", "")).strip()
+        parts = ["【当前会话策略】"]
+        if persona_background:
+            parts.append(f"客服人设及业务背景：{persona_background}")
+        else:
+            parts.extend((
+                f"客服人设：{str(getattr(policy, 'agent_persona', '')).strip()}",
+                f"业务背景：{str(getattr(policy, 'business_background', '')).strip()}",
+            ))
+        parts.extend((
             f"回复风格：{str(getattr(policy, 'reply_style', '')).strip()}",
             f"人工客服时间：{str(getattr(policy, 'human_service_hours', '')).strip()}",
-        ]
+        ))
         knowledge = str(getattr(policy, "customer_service_knowledge", "")).strip()
         if knowledge:
             parts.append(f"客服知识补充：{knowledge}")

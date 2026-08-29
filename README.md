@@ -77,6 +77,9 @@ pip install -r .\backend\requirements.txt
 - 识图与兜底提示词：千问快速路径和 AI 兜底路径共用严格业务契约
 - 文字客服提示词：独立持久化，纯文字消息会调用 AI 回复模型
 - 运营与报价：独立页签管理整数分报价规则、规则试算、版本和强制安全门禁
+- 回复话术：管理识图、报价、订单通知和观影提醒文案；观影提醒只在权威出票事实和幂等提醒任务到期后发送
+- 会话策略：在一个输入框中管理客服人设及业务背景，并配置客服知识补充、回复风格、人工客服时间、记忆范围和人工接管策略
+- 知识库：从 `/api/settings/knowledge` 动态读取可编辑、可分类、可启停的常见问题条目；只有启用条目注入 AI 回复，价格、库存、订单和交易结论仍由确定性组件掌管
 - 接口地址：可编辑
 - 万达官方直连：复用票务系统已登录的固定账号，无额外报价 Key 或租户 ID
 - 模型列表：使用当前输入或已保存的 Key 调用兼容 `/v1/models` 接口动态获取
@@ -146,6 +149,21 @@ Content-Type: application/json
 
 `api_key=null` 时使用已通过设置页加密保存的 Key；请求中的 Key 不会写入日志。
 
+## 会话策略、回复话术与知识库 API
+
+```http
+GET /api/settings/conversation-policy
+PUT /api/settings/conversation-policy
+GET /api/settings/reply-templates
+PUT /api/settings/reply-templates
+GET /api/settings/knowledge
+POST /api/settings/knowledge
+PUT /api/settings/knowledge/{entry_id}
+DELETE /api/settings/knowledge/{entry_id}
+```
+
+会话策略在一个输入框中统一填写客服人设及业务背景，同时支持客服知识补充、回复风格和人工客服时间。知识库首次无数据文件时只提供内置审核种子；保存后写入 `data/knowledge-base.json`，前端不再维护问答正文副本。
+
 ## 运营报价设置 API
 
 ```http
@@ -199,7 +217,7 @@ curl -X POST http://127.0.0.1:8000/api/movie-images/recognize \
 
 完整接口文档：<http://127.0.0.1:8000/docs>。
 
-AI 客服已接入 `/api/chat/text-messages`，并按 `conversation_id` 使用有界、30分钟过期的内存上下文；前端聊天协议无需改变。
+AI 客服已接入 `/api/chat/text-messages`，并按 `conversation_id` 使用有界、可由会话策略配置的内存上下文；前端聊天协议无需改变。AI 回复会额外读取当前会话策略和知识库启用条目，但不会把知识库当作价格、库存或订单事实来源。
 
 ## 鱼麦多自动改价
 
