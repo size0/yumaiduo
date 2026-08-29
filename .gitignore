@@ -16,6 +16,8 @@ data/
 *.sqlite3
 *.py[cod]
 plugin-runtime/**/node_modules/
+plugin-runtime/**/vendor/**/dist/*.d.ts
+plugin-runtime/**/vendor/**/dist/*.map
 backend/data/
 backend/logs/
 plugin-runtime/**/data/
