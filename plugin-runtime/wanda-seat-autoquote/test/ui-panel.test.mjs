@@ -102,8 +102,8 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type') ?? '', /^text\/css/u);
     const styles = await asset.text();
-    assert.match(styles, /\.settings-drawer \{[^}]*display:none;[^}]*flex-direction:column/u);
-    assert.match(styles, /\.settings-body \{[^}]*overflow:visible/u);
+    assert.match(styles, /\.settings-drawer \{[^}]*height:min\(820px,calc\(100dvh - 206px\)\)[^}]*max-height:calc\(100dvh - 206px\)/u);
+    assert.match(styles, /\.settings-body \{[^}]*overflow-y:auto/u);
 
     const appAsset = await fetch(`${baseUrl}/ui/app.js`, { headers: signedHeaders() });
     const appSource = await appAsset.text();
