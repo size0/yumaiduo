@@ -229,6 +229,69 @@ AI 客服已接入 `/api/chat/text-messages`，并按 `conversation_id` 使用�
 
 订单管理统一显示两类来源：良票订单通过 `/api/v1/order/list` 读取，点击“详情”再通过 `/api/v1/order/detail` 读取最新订单和取票凭证；鱼麦多万达手动出票订单通过租户隔离的官方订单读取接口展示。列表包含影片、城市、影院、场次、座位、出票方式、票面价、报价、成交价、状态、下单时间、咸鱼买家、来源和操作，详情弹窗展示当前来源能提供的完整字段。良票数据只返回当前租户已绑定的本地订单，避免跨租户泄露。历史万达订单不会通过回放事件自动补录；只有平台新事件或已观察订单才会进入列表。
 
+### 万达订单对接接口
+
+为出票系统提供了独立的万达订单只读接口。接口只通过万达插件的鱼麦多官方订单客户端读取订单，不读取良票订单，也不会改价、付款、出票或执行其他写操作。
+
+生产地址：
+
+```text
+https://wd.xdw0.cn/__plugin__/api/wanda/orders
+```
+
+当前生产租户 ID 已固定为 `107`，调用方不需要提交租户 ID；服务端会自动绑定该租户，避免跨租户读取。接口密钥只保存在生产服务器，不写入 Git：
+
+```text
+/etc/ticket-system/wanda-order-api.key
+```
+
+列表调用：
+
+```bash
+WANDA_ORDER_API_KEY="$(sudo cat /etc/ticket-system/wanda-order-api.key)"
+curl --fail-with-body --silent --show-error \\
+  -H "Authorization: Bearer ${WANDA_ORDER_API_KEY}" \\
+  "https://wd.xdw0.cn/__plugin__/api/wanda/orders?limit=50"
+```
+
+订单详情调用（`{order_id}` 替换为列表返回的 `orderId`）：
+
+```bash
+WANDA_ORDER_API_KEY="$(sudo cat /etc/ticket-system/wanda-order-api.key)"
+curl --fail-with-body --silent --show-error \\
+  -H "Authorization: Bearer ${WANDA_ORDER_API_KEY}" \\
+  "https://wd.xdw0.cn/__plugin__/api/wanda/orders/{order_id}"
+```
+
+也支持使用请求头 `X-Wanda-Order-Api-Key` 传递密钥。`limit` 必须是 `1–100` 的整数。
+
+列表响应：
+
+```json
+{
+  "source": "wanda",
+  "orders": [{
+    "orderId": "订单号",
+    "accountUnb": "店铺标识",
+    "orderStatus": 1,
+    "orderStatusText": "待付款",
+    "itemId": "商品ID",
+    "productTitle": "商品标题",
+    "sku": "规格",
+    "quantity": 2,
+    "payment": "0",
+    "postFee": "0",
+    "buyerNick": "买家昵称",
+    "payTime": null,
+    "createTime": "2026-08-30T..."
+  }],
+  "count": 1,
+  "observedCount": 1
+}
+```
+
+订单详情返回 `{ "source": "wanda", "order": { ... } }`。接口返回的是鱼麦多实时读取的权威订单信息；尚未被插件观察到的历史订单不会被猜测或伪造。未授权返回 `401`，接口未配置返回 `503`，参数错误返回 `400`。出票系统应保存 `orderId`，并在出票前重新请求订单详情确认状态。
+
 Node执行器在改价前再次读取订单和会话，拒绝身份不一致、已付款、已关闭、退款中或人工/买家新消息介入的订单；调用鱼麦多改价后必须重新读取订单并确认金额一致，才会发送“改价完成”通知。超时结果不会盲目重试，而是依靠持久化幂等收据重新读取对账。区域探针、截图金额、AI生成金额和不完整报价均不能触发改价。
 
 报价按座位类型逐座计算：周五会员日开关开启时，优先使用万达实时返回的W+周五活动价（活动价缺失则回退官方普通会员价）；关闭时不使用该活动价。普通座随后叠加普通座调整（默认+¥1.00）；物理W+座随后应用会员价阈值规则，会员价不高于¥60时=`max(实时原价-¥2.90,会员价)`，高于¥60时直接使用会员价。单价按¥0.10轮整且不得低于会员成本或高于实时原价；混合座区分别计算后求和，channelFee只记录不计价。
