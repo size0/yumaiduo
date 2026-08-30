@@ -1,5 +1,12 @@
 import { join } from 'node:path';
 import { createPriceChangeExecutor } from '../actions/change-order-price.mjs';
+import {
+  FulfillmentRequestError,
+  fulfillmentFingerprint,
+  fulfillmentIdentity,
+  normalizeFulfillmentRequest,
+  sameFulfillmentFingerprint,
+} from '../actions/fulfillment.mjs';
 import { normalizeAuthoritativeOrder, orderChangeability } from '../actions/contracts.mjs';
 import { V2EventStore } from './event-store.mjs';
 
@@ -63,6 +70,13 @@ function firstText(...values) { for (const value of values) { const normalized =
 function paidOrder(order) {
   const status = text(order?.order_status)?.toLowerCase() ?? '';
   return Boolean(order?.paid_at) || ['2', 'paid', 'payment_success', '已付款', '支付成功'].includes(status);
+}
+function shippedOrder(order) {
+  const status = text(order?.order_status)?.toLowerCase() ?? '';
+  return ['3', '4', '5', 'shipped', 'ticket_sent', 'completed', 'finished', '已发货', '已完成'].includes(status);
+}
+function fulfillmentError(code, status = 409) {
+  return Object.assign(new Error(code), { code, status });
 }
 function closedOrder(order) {
   const status = text(order?.order_status)?.toLowerCase() ?? '';
@@ -394,11 +408,12 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     for (let offset = 0; offset < references.length; offset += 5) {
       const batch = references.slice(offset, offset + 5);
       const settled = await Promise.allSettled(batch.map((reference) => client.orders.get(reference.orderId)));
-      settled.forEach((result, index) => {
-        if (result.status !== 'fulfilled' || !result.value) return;
+      for (const [index, result] of settled.entries()) {
+        if (result.status !== 'fulfilled' || !result.value) continue;
         const order = result.value;
+        const resolvedOrderId = text(order.orderId) ?? batch[index].orderId;
         orders.push({
-          orderId: text(order.orderId) ?? batch[index].orderId,
+          orderId: resolvedOrderId,
           accountUnb: text(order.accountUnb) ?? batch[index].accountUnb,
           orderStatus: Number.isInteger(order.orderStatus) ? order.orderStatus : null,
           orderStatusText: text(order.orderStatusText),
@@ -413,8 +428,9 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
           createTime: text(order.createTime),
           observedAt: batch[index].observedAt,
           lastEvent: batch[index].event,
+          fulfillment: await store.getWandaFulfillment(normalizedTenant, resolvedOrderId),
         });
-      });
+      }
     }
     orders.sort((left, right) => String(right.createTime ?? right.observedAt).localeCompare(String(left.createTime ?? left.observedAt)));
     return { orders, count: orders.length, observedCount: references.length };
@@ -444,8 +460,112 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       buyerNick: text(order.buyerNick),
       payTime: text(order.payTime),
       createTime: text(order.createTime),
+      fulfillment: await store.getWandaFulfillment(normalizedTenant, normalizedOrderId),
     };
   }
+
+  async function fulfillTenantOrder(tenantId, orderId, input, idempotencyKey) {
+    if (config.fulfillmentEnabled !== true) throw fulfillmentError('wanda_fulfillment_disabled', 503);
+    const normalizedTenant = text(tenantId);
+    const normalizedOrderId = text(orderId);
+    if (!normalizedTenant || !normalizedOrderId) throw fulfillmentError('order_not_found', 404);
+    const request = normalizeFulfillmentRequest(input);
+    const normalizedIdempotencyKey = text(idempotencyKey);
+    if (!normalizedIdempotencyKey || normalizedIdempotencyKey.length < 8 || normalizedIdempotencyKey.length > 200) {
+      throw new FulfillmentRequestError('idempotency_key_invalid', 400);
+    }
+    const existing = await store.getWandaFulfillment(normalizedTenant, normalizedOrderId);
+    const client = platform.createClient(normalizedTenant);
+    const rawOrder = await client.orders.get(normalizedOrderId);
+    if (!rawOrder) throw fulfillmentError('order_not_found', 404);
+    const officialSession = sessionFromPayload(await client.im.getSessionByOrder(normalizedOrderId));
+    const normalizedOrder = normalizeAuthoritativeOrder(rawOrder, { sdk_tenant_id: normalizedTenant });
+    const authoritativeOrder = {
+      ...normalizedOrder,
+      shop_id: normalizedOrder.shop_id ?? firstText(officialSession?.accountUnb, officialSession?.account_unb),
+      buyer_id: normalizedOrder.buyer_id ?? firstText(officialSession?.peerUnb, officialSession?.peer_unb),
+      chat_id: normalizedOrder.chat_id ?? firstText(officialSession?.chatId, officialSession?.chat_id),
+    };
+    if (!officialSession || !authoritativeOrderMatchesSession(authoritativeOrder, officialSession)) {
+      throw fulfillmentError('order_session_identity_unverified');
+    }
+    for (const [field, supplied, actual] of [
+      ['shop_id', request.shop_id, authoritativeOrder.shop_id],
+      ['buyer_id', request.buyer_id, authoritativeOrder.buyer_id],
+      ['chat_id', request.chat_id, authoritativeOrder.chat_id],
+    ]) {
+      if (supplied && supplied !== actual) throw fulfillmentError(`${field}_mismatch`);
+    }
+    const fingerprint = fulfillmentFingerprint({ tenantId: normalizedTenant, orderId: normalizedOrderId, order: authoritativeOrder, request });
+    if (existing && !sameFulfillmentFingerprint(existing, fingerprint)) throw fulfillmentError('wanda_fulfillment_conflict');
+    async function deliverFulfillmentMessage() {
+      const recent = await readRecentMessages(client, officialSession);
+      if (!recent.available) throw fulfillmentError('conversation_snapshot_unavailable', 503);
+      const alreadySent = recent.messages.some((message) => (
+        platformMessageDirection(message) === 'seller' && platformMessageText(message) === request.message_text
+      ));
+      if (!alreadySent) await sendMessageWithReconciliation(client, officialSession, request.message_text, {
+        eventId: `wanda-fulfillment-${normalizedTenant}-${normalizedOrderId}`,
+        actionId: `${normalizedOrderId}:fulfillment-message`,
+      });
+    }
+    if (existing?.status === 'submitted') {
+      if (existing.message_status === 'sent') return { status: 'already_submitted', order: rawOrder, fulfillment: existing };
+      if (!shippedOrder(authoritativeOrder)) throw fulfillmentError('ticket_ship_status_not_verified');
+      try { await deliverFulfillmentMessage(); }
+      catch (error) {
+        throw error?.code ? error : fulfillmentError('ticket_shipped_message_result_unknown', 503);
+      }
+      const repaired = { ...existing, status: 'submitted', message_status: 'sent', updated_at: new Date().toISOString() };
+      await store.saveWandaFulfillment(repaired);
+      return { status: 'already_submitted', order: rawOrder, fulfillment: repaired };
+    }
+    if (existing?.status === 'processing') throw fulfillmentError('wanda_fulfillment_in_progress', 409);
+    if (existing?.status === 'unknown') throw fulfillmentError('wanda_fulfillment_unknown_manual_reconciliation');
+    if (shippedOrder(authoritativeOrder)) throw fulfillmentError('order_already_shipped_unreconciled');
+    if (closedOrder(authoritativeOrder)) throw fulfillmentError('order_closed_or_refunding');
+    if (!paidOrder(authoritativeOrder)) throw fulfillmentError('order_not_paid');
+    if (typeof client.orders.ship !== 'function') throw fulfillmentError('order_ship_unavailable', 503);
+
+    const baseRecord = {
+      ...fulfillmentIdentity({ tenantId: normalizedTenant, orderId: normalizedOrderId, order: authoritativeOrder }),
+      ...request,
+      request_fingerprint: fingerprint,
+      idempotency_key: normalizedIdempotencyKey,
+      status: 'processing',
+      message_status: 'pending',
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      await store.saveWandaFulfillment(baseRecord);
+    } catch (error) {
+      if (error?.message === 'wanda_fulfillment_conflict') throw fulfillmentError('wanda_fulfillment_conflict');
+      throw error;
+    }
+    try {
+      await client.orders.ship(normalizedOrderId, {
+        ticketCode: request.ticket_codes.join('、'),
+        ...(request.ticket_url ? { ticketUrl: request.ticket_url } : {}),
+      });
+    } catch (error) {
+      await store.saveWandaFulfillment({ ...baseRecord, status: 'unknown', failure_code: 'platform_ship_result_unknown', updated_at: new Date().toISOString() });
+      throw fulfillmentError('platform_ship_result_unknown', 503);
+    }
+    const afterShip = normalizeAuthoritativeOrder(await client.orders.get(normalizedOrderId), { sdk_tenant_id: normalizedTenant });
+    if (!shippedOrder(afterShip)) {
+      await store.saveWandaFulfillment({ ...baseRecord, status: 'unknown', failure_code: 'platform_ship_not_verified', updated_at: new Date().toISOString() });
+      throw fulfillmentError('platform_ship_not_verified', 502);
+    }
+    try { await deliverFulfillmentMessage(); }
+    catch (error) {
+      await store.saveWandaFulfillment({ ...baseRecord, status: 'submitted', message_status: 'unknown', updated_at: new Date().toISOString() });
+      throw error?.code ? error : fulfillmentError('ticket_shipped_message_result_unknown', 503);
+    }
+    const completed = { ...baseRecord, status: 'submitted', message_status: 'sent', updated_at: new Date().toISOString() };
+    await store.saveWandaFulfillment(completed);
+    return { status: 'submitted', order: await client.orders.get(normalizedOrderId), fulfillment: completed };
+  }
+
 
   async function readRecentMessages(client, session) {
     if (!session) return { available: false, messages: [] };
@@ -941,5 +1061,5 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     return { actionId, ...result, nextActions: [] };
   }
 
-  return Object.freeze({ start, stop, health, enqueue, syncTenantShops, listTenantOrders, getTenantOrder, pollCommands, pollReminders });
+  return Object.freeze({ start, stop, health, enqueue, syncTenantShops, listTenantOrders, getTenantOrder, fulfillTenantOrder, pollCommands, pollReminders });
 }

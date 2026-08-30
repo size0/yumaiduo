@@ -21,6 +21,8 @@ async function withServer(run, {
   syncShops = async () => ({ ok: true, count: 0 }),
   listOrders = async () => ({ orders: [], count: 0, observedCount: 0 }),
   getOrder = async () => ({ orderId: 'order-1' }),
+  fulfillOrder = async () => ({ status: 'submitted' }),
+  fulfillmentEnabled = false,
   orderApiKey = '',
   orderApiTenantId = '',
 } = {}) {
@@ -35,6 +37,7 @@ async function withServer(run, {
       v4BackendUrl: 'http://127.0.0.1:8012',
       orderApiKey,
       orderApiTenantId,
+      fulfillmentEnabled,
       manifest: {
         id: 'wanda-seat-autoquote',
         name: '万达电影票 AI 客服 V4',
@@ -54,7 +57,7 @@ async function withServer(run, {
     },
     enqueue: async () => ({ created: true }),
     syncShops,
-    listOrders, getOrder,
+    listOrders, getOrder, fulfillOrder,
     health: async () => ({
       ok: true,
       registered: true,
@@ -160,6 +163,8 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /recordFact\('会员价'/u);
     assert.match(appSource, /original_unit_price_cents/u);
     assert.match(appSource, /member_unit_price_cents/u);
+    assert.match(appSource, /order\.fulfillment/u);
+    assert.match(appSource, /activeWorkspace==='orders'/u);
     assert.doesNotMatch(appSource, /orderModal/u);
     assert.match(appSource, /wandaOrderRow/u);
     assert.match(appSource, /良票订单/u);
@@ -232,6 +237,34 @@ test('Wanda order integration API is authenticated, tenant-pinned and read-only'
     },
   });
   assert.deepEqual(calls, [['list', 'tenant-wanda', 25], ['detail', 'tenant-wanda', 'order-1']]);
+});
+
+test('Wanda fulfillment API requires idempotency and delegates authoritative ticket delivery', async () => {
+  const calls = [];
+  await withServer(async (baseUrl) => {
+    const missingKey = await fetch(`${baseUrl}/__plugin__/api/wanda/orders/order-1/fulfillment`, {
+      method: 'POST', headers: { authorization: 'Bearer wanda-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ ticket_codes: ['WANDA-001'] }),
+    });
+    assert.equal(missingKey.status, 400);
+    const response = await fetch(`${baseUrl}/__plugin__/api/wanda/orders/order-1/fulfillment`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer wanda-secret', 'content-type': 'application/json', 'idempotency-key': 'fulfillment-1' },
+      body: JSON.stringify({ ticket_codes: ['WANDA-001'], movie_name: '奥德赛' }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { source: 'wanda', status: 'submitted' });
+  }, {
+    orderApiKey: 'wanda-secret', orderApiTenantId: 'tenant-wanda', fulfillmentEnabled: true,
+    fulfillOrder: async (tenantId, orderId, request, idempotencyKey) => {
+      calls.push({ tenantId, orderId, request, idempotencyKey });
+      return { status: 'submitted' };
+    },
+  });
+  assert.deepEqual(calls, [{
+    tenantId: 'tenant-wanda', orderId: 'order-1',
+    request: { ticket_codes: ['WANDA-001'], movie_name: '奥德赛' }, idempotencyKey: 'fulfillment-1',
+  }]);
 });
 
 test('V4 panel API is signed at the gateway and proxied only to the loopback backend', async () => {

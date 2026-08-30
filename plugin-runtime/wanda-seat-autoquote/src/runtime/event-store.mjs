@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-function blank() { return { version: 2, events: {}, priceChangeReceipts: {}, actionReports: {}, keywordImageUploads: {} }; }
+function blank() { return { version: 2, events: {}, priceChangeReceipts: {}, actionReports: {}, keywordImageUploads: {}, wandaFulfillments: {} }; }
 function key(envelope) { return `${String(envelope.tenantId)}:${String(envelope.id)}`; }
 function chatKey(envelope) { const p = envelope.payload ?? {}; return [p.accountUnb ?? p.account_unb, p.chatId ?? p.chat_id, p.peerUnb ?? p.peer_unb].map((value) => String(value ?? '').trim()).join(':'); }
 function seal(value, keyBytes) { const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', keyBytes, iv); const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]); return { iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), data: encrypted.toString('base64') }; }
@@ -18,6 +18,12 @@ function actionReportKey(eventStoreId, actionId) {
   const action = String(actionId ?? '').trim();
   if (!event || !action) throw new TypeError('action report event and action ids are required');
   return `${event}\u0000${action}`;
+}
+function fulfillmentKey(tenantId, orderId) {
+  const tenant = String(tenantId ?? '').trim();
+  const order = String(orderId ?? '').trim();
+  if (!tenant || !order) throw new TypeError('fulfillment tenant and order ids are required');
+  return `${tenant}:${order}`;
 }
 
 export class V2EventStore {
@@ -54,6 +60,27 @@ export class V2EventStore {
     const value = open(protectedValue, this.#key);
     if (!value?.expiresAt || Date.parse(value.expiresAt) <= Date.now()) return null;
     return structuredClone(value);
+  }
+  async getWandaFulfillment(tenantId, orderId) {
+    const state = await this.#read();
+    const protectedValue = state.wandaFulfillments[fulfillmentKey(tenantId, orderId)];
+    return protectedValue ? open(protectedValue, this.#key) : null;
+  }
+  async saveWandaFulfillment(value) {
+    const key = fulfillmentKey(value?.tenant_id, value?.order_id);
+    const fingerprint = String(value?.request_fingerprint ?? '').trim();
+    if (!fingerprint) throw new TypeError('fulfillment request fingerprint is required');
+    return this.#mutate((state) => {
+      const existing = state.wandaFulfillments[key];
+      if (existing) {
+        const current = open(existing, this.#key);
+        if (current.request_fingerprint !== fingerprint) throw new Error('wanda_fulfillment_conflict');
+        state.wandaFulfillments[key] = seal(structuredClone(value), this.#key);
+        return { created: false, record: structuredClone(value) };
+      }
+      state.wandaFulfillments[key] = seal(structuredClone(value), this.#key);
+      return { created: true, record: structuredClone(value) };
+    });
   }
   async saveKeywordImageUpload(value) {
     const id = keywordImageUploadKey(value);
@@ -303,6 +330,8 @@ export class V2EventStore {
     if (!state.actionReports || typeof state.actionReports !== 'object' || Array.isArray(state.actionReports)) throw new Error('invalid v2 action reports');
     state.keywordImageUploads ??= {};
     if (!state.keywordImageUploads || typeof state.keywordImageUploads !== 'object' || Array.isArray(state.keywordImageUploads)) throw new Error('invalid v2 keyword image uploads');
+    state.wandaFulfillments ??= {};
+    if (!state.wandaFulfillments || typeof state.wandaFulfillments !== 'object' || Array.isArray(state.wandaFulfillments)) throw new Error('invalid v2 Wanda fulfillments');
     return state;
   }
   async #write(state) {

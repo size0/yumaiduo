@@ -67,6 +67,36 @@ Authorization: Bearer <WANDA_ORDER_API_KEY>
 
 接口为内部服务接口，应仅通过 HTTPS 或本机回环访问；未配置密钥返回 `503`，密钥错误返回 `401`，`limit` 范围为 `1–100`。订单详情和列表均来自鱼麦多实时读取，订单事件未被插件观察到时不会被伪造或猜测。
 
+出票系统完成万达出票后，使用下面的接口提交出票信息并触发一次官方发货及咸鱼消息发送：
+
+```text
+POST /__plugin__/api/wanda/orders/{order_id}/fulfillment
+Authorization: Bearer <WANDA_ORDER_API_KEY>
+Idempotency-Key: <本次出票请求唯一号>
+Content-Type: application/json
+```
+
+请求体必须包含出票系统确认过的权威信息，不能使用咸鱼图片识别的缺失或错误字段：
+
+```json
+{
+  "city": "昆明",
+  "movie_name": "奥德赛",
+  "cinema_name": "昆明西山万达广场店",
+  "showtime_start": "20:10",
+  "showtime_end": "22:50",
+  "hall_name": "IMAX厅",
+  "seats": ["5排6座"],
+  "ticket_codes": ["WANDA-001"],
+  "ticket_url": null,
+  "message_text": "电影：奥德赛\\n取票码：WANDA-001"
+}
+```
+
+服务端只按 `tenant_id + order_id` 建立唯一出票记录，并同时校验鱼麦多官方订单的店铺、买家和会话身份。相同订单再次提交相同出票信息只返回 `already_submitted`，出票信息不同返回 `409` 冲突；平台发货结果未知、订单未付款/已发货/已关闭或身份无法核验时停止，不会重复发货或重复发消息。发货后必须重新读取官方订单确认已发货，确认成功后才发送 `message_text`。
+
+插件订单管理每 15 秒自动刷新；出票系统提交的电影、影院、场次、影厅和座位信息优先于图片识别结果，订单号仍是唯一关联键。
+
 生产不存在 `off/shadow/auto` 决策模式或legacy回退。事件响应不携带动作；插件无权生成业务动作。AI辅助和外部写熔断分别由后端独立控制。
 
 ## 目录

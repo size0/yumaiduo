@@ -70,6 +70,7 @@ export function loadV2Config({ env, manifest }) {
     v4BackendUrl: loopbackUrl(env, 'WANDA_V4_BACKEND_URL', 'http://127.0.0.1:8012'),
     orderApiKey: optional(env, 'WANDA_ORDER_API_KEY'),
     orderApiTenantId: optional(env, 'WANDA_ORDER_API_TENANT_ID'),
+    fulfillmentEnabled: ['1', 'true', 'yes', 'on'].includes(String(env.WANDA_ORDER_FULFILLMENT_ENABLED ?? '').trim().toLowerCase()),
     backend: Object.freeze({
       baseUrl: url(env, 'WANDA_AI_V2_BACKEND_URL'),
       sharedSecret: required(env, 'WANDA_AI_V2_BRIDGE_KEY'),

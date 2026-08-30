@@ -159,7 +159,7 @@ function overview(manifest, snapshot) {
 }
 
 export function createV2HttpServer({
-  config, platform, enqueue, syncShops, listOrders, getOrder, health, logger = console,
+  config, platform, enqueue, syncShops, listOrders, getOrder, fulfillOrder, health, logger = console,
   fetchImpl = globalThis.fetch,
   jobStore = new V4UiJobStore(path.join(config.dataDir, 'ui-jobs'), config.encryptionKey),
 }) {
@@ -226,20 +226,35 @@ export function createV2HttpServer({
       const wandaOrderPath = pathname.startsWith('/__plugin__/')
         ? pathname.slice('/__plugin__'.length) : pathname;
       const wandaOrderCollection = wandaOrderPath === '/api/wanda/orders';
-      const wandaOrderDetail = wandaOrderPath.startsWith('/api/wanda/orders/');
-      if (wandaOrderCollection || wandaOrderDetail) {
-        if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+      const wandaOrderDetail = wandaOrderPath.startsWith('/api/wanda/orders/') && !wandaOrderPath.endsWith('/fulfillment');
+      const wandaFulfillment = wandaOrderPath.startsWith('/api/wanda/orders/') && wandaOrderPath.endsWith('/fulfillment');
+      if (wandaOrderCollection || wandaOrderDetail || wandaFulfillment) {
         const authorization = wandaOrderApiAuthorized(req, config);
         if (authorization.status) return json(res, authorization.status, { ok: false, error: authorization.error });
         if (wandaOrderCollection) {
+          if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
           if (typeof listOrders !== 'function') return json(res, 503, { ok: false, error: 'wanda_order_list_unavailable' });
           const requestUrl = new URL(req.url ?? '/', 'http://v2.local');
           const result = await listOrders(authorization.tenantId, parseOrderLimit(requestUrl));
           return json(res, 200, { source: 'wanda', ...result });
         }
-        if (typeof getOrder !== 'function') return json(res, 503, { ok: false, error: 'wanda_order_detail_unavailable' });
-        const orderId = decodeURIComponent(wandaOrderPath.slice('/api/wanda/orders/'.length));
+        const suffix = wandaFulfillment ? '/fulfillment' : '';
+        const orderId = decodeURIComponent(wandaOrderPath.slice('/api/wanda/orders/'.length, suffix ? -suffix.length : undefined));
         if (!orderId || orderId.includes('/')) return json(res, 400, { ok: false, error: 'order_id_invalid' });
+        if (wandaFulfillment) {
+          if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+          if (config.fulfillmentEnabled !== true) return json(res, 503, { ok: false, error: 'wanda_fulfillment_disabled' });
+          if (typeof fulfillOrder !== 'function') return json(res, 503, { ok: false, error: 'wanda_fulfillment_unavailable' });
+          if (!/^application\/json(?:\s*;|$)/i.test(header(req, 'content-type') ?? '')) return json(res, 415, { ok: false, error: 'json_required' });
+          const rawBody = await body(req, config.maxWebhookBodyBytes);
+          const request = parseJson(rawBody);
+          const idempotencyKey = header(req, 'idempotency-key');
+          if (!idempotencyKey || !String(idempotencyKey).trim()) return json(res, 400, { ok: false, error: 'idempotency_key_required' });
+          const result = await fulfillOrder(authorization.tenantId, orderId, request, idempotencyKey);
+          return json(res, 200, { source: 'wanda', ...result });
+        }
+        if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+        if (typeof getOrder !== 'function') return json(res, 503, { ok: false, error: 'wanda_order_detail_unavailable' });
         const order = await getOrder(authorization.tenantId, orderId);
         return json(res, 200, { source: 'wanda', order });
       }

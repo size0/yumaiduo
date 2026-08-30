@@ -9,6 +9,7 @@ import { loadV2Config } from '../src/config.mjs';
 import { createV2HttpServer } from '../src/http/server.mjs';
 import { createV2PlatformRuntime } from '../src/platform/runtime.mjs';
 import { createV2Runtime as createRulesFirstRuntime } from '../src/runtime/event-processor.mjs';
+import { V2EventStore } from '../src/runtime/event-store.mjs';
 import manifest from '../yumaiduo.plugin.json' with { type: 'json' };
 
 const silent = { debug() {}, info() {}, warn() {}, error() {} };
@@ -1602,4 +1603,56 @@ test('official registration and signed V2 webhooks are required before enqueuein
   const accepted = await fetch(`http://127.0.0.1:${address.port}/__plugin__/webhook/${value.event}`, { method: 'POST', headers: { ...headers, 'x-yumaiduo-signature': signature }, body: raw });
   assert.equal(accepted.status, 202);
   assert.deepEqual(events, [value]);
+});
+
+test('Wanda fulfillment uses authoritative ticket facts and never ships one order twice', async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-fulfillment-runtime-'));
+  let orderStatus = 2;
+  let shipCalls = 0;
+  let messageCalls = 0;
+  const config = loadV2Config({ env: {
+    CORE_URL: 'https://core.test', PLUGIN_DEVELOPER_TOKEN: 'pdk_test', PLUGIN_BASE_URL: 'http://plugin.test:4003',
+    WANDA_AI_V2_BACKEND_URL: 'http://backend.test', WANDA_AI_V2_BRIDGE_KEY: 'v2-secret',
+    CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 23).toString('base64'), LOG_LEVEL: 'error',
+    WANDA_ORDER_FULFILLMENT_ENABLED: 'true',
+  }, manifest });
+  const platform = {
+    createClient: () => ({
+      orders: {
+        get: async () => ({ orderId: 'order-1', tenantId: 'tenant-1', accountUnb: 'shop-1', buyerUnb: 'buyer-1', chatId: 'chat-1', orderStatus, payTime: '2026-08-30T10:00:00Z', payment: '7900', quantity: 1 }),
+        ship: async (orderId, request) => { assert.equal(orderId, 'order-1'); assert.equal(request.ticketCode, 'WANDA-001'); shipCalls += 1; orderStatus = 3; return { ok: true }; },
+      },
+      im: {
+        getSessionByOrder: async () => ({ accountUnb: 'shop-1', peerUnb: 'buyer-1', chatId: 'chat-1' }),
+        listMessages: async () => ({ items: [] }),
+        sendMessage: async (request) => { assert.match(request.text, /WANDA-001/u); messageCalls += 1; return { ok: true }; },
+      },
+    }),
+    health: () => ({ ok: true }),
+    verifyGateway: () => false,
+    verifyWebhook: () => false,
+  };
+  const runtime = createRulesFirstRuntime({
+    config, platform, backend: {}, logger: silent,
+    store: new V2EventStore(join(dataDir, 'events.v2.json'), config.encryptionKey),
+  });
+  await runtime.start();
+  t.after(() => runtime.stop());
+  const input = {
+    city: '昆明', movie_name: '奥德赛', cinema_name: '昆明西山万达广场店',
+    showtime_start: '20:10', showtime_end: '22:50', hall_name: 'IMAX厅', seats: ['5排6座'],
+    ticket_codes: ['WANDA-001'], message_text: '电影：奥德赛\n取票码：WANDA-001',
+  };
+  const first = await runtime.fulfillTenantOrder('tenant-1', 'order-1', input, 'fulfillment-1');
+  assert.equal(first.status, 'submitted');
+  assert.equal(shipCalls, 1);
+  assert.equal(messageCalls, 1);
+  const repeated = await runtime.fulfillTenantOrder('tenant-1', 'order-1', input, 'fulfillment-2');
+  assert.equal(repeated.status, 'already_submitted');
+  assert.equal(shipCalls, 1);
+  assert.equal(messageCalls, 1);
+  await assert.rejects(
+    runtime.fulfillTenantOrder('tenant-1', 'order-1', { ...input, ticket_codes: ['WANDA-002'], message_text: '取票码：WANDA-002' }, 'fulfillment-3'),
+    /wanda_fulfillment_conflict/u,
+  );
 });

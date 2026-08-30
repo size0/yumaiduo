@@ -71,6 +71,34 @@ test('observed order references are deduplicated and tenant scoped', async () =>
   assert.equal(JSON.stringify(references).includes('order-secret'), false);
 });
 
+test('Wanda fulfillment facts are encrypted, unique by tenant and order, and reject identity conflicts', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-fulfillment-'));
+  const path = join(dataDir, 'events.v2.json');
+  const key = Buffer.alloc(32, 14);
+  const store = new V2EventStore(path, key);
+  await store.initialize();
+  const record = {
+    tenant_id: 'tenant-a', order_id: 'order-1', shop_id: 'shop-1',
+    buyer_id: 'buyer-1', chat_id: 'chat-1', status: 'processing',
+    request_fingerprint: 'fingerprint-1', movie_name: '奥德赛', showtime_start: '20:10',
+    ticket_codes: ['SECRET-CODE'], message_text: '取票码：SECRET-CODE',
+  };
+  const first = await store.saveWandaFulfillment(record);
+  assert.equal(first.created, true);
+  assert.deepEqual(await store.getWandaFulfillment('tenant-a', 'order-1'), record);
+  const repeated = await store.saveWandaFulfillment({ ...record, status: 'submitted' });
+  assert.equal(repeated.created, false);
+  assert.equal(repeated.record.status, 'submitted');
+  await assert.rejects(
+    store.saveWandaFulfillment({ ...record, request_fingerprint: 'other', status: 'processing' }),
+    /wanda_fulfillment_conflict/u,
+  );
+  const reloaded = new V2EventStore(path, key);
+  await reloaded.initialize();
+  assert.equal((await reloaded.getWandaFulfillment('tenant-a', 'order-1')).movie_name, '奥德赛');
+  assert.equal((await readFile(path, 'utf8')).includes('SECRET-CODE'), false);
+});
+
 test('keyword image CDN upload cache persists encrypted and remains tenant scoped', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-image-upload-cache-'));
   const path = join(dataDir, 'events.v2.json');

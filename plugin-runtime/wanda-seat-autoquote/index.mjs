@@ -34,7 +34,8 @@ export async function createPluginRuntime({
     await runtime.start();
     server = httpServerFactory({
       config, platform, enqueue: runtime.enqueue, syncShops: runtime.syncTenantShops,
-      listOrders: runtime.listTenantOrders, getOrder: runtime.getTenantOrder, health, logger: log,
+      listOrders: runtime.listTenantOrders, getOrder: runtime.getTenantOrder,
+      fulfillOrder: runtime.fulfillTenantOrder, health, logger: log,
     });
     return server.listen();
   }
