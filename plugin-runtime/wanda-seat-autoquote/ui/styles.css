@@ -274,4 +274,4 @@ body { height:auto; padding-bottom:0; }
 #mainPage .chat-app,
 #settingsDrawer,
 #diagnosticsPanel { margin-bottom:0; }
-.plugin-status-bar { position:relative; bottom:auto; }
+.plugin-status-bar { position:fixed; bottom:0; }

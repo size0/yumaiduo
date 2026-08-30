@@ -123,7 +123,7 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(styles, /\.page \{ padding-bottom:0; \}/u);
     assert.match(styles, /#mainPage \{ padding-bottom:0; \}/u);
     assert.match(styles, /margin-bottom:0;/u);
-    assert.match(styles, /\.plugin-status-bar \{ position:relative; bottom:auto; \}/u);
+    assert.match(styles, /\.plugin-status-bar \{ position:fixed; bottom:0; \}/u);
     assert.match(styles, /\.knowledge-entry summary b \{ font-size:14px; \}/u);
     assert.match(styles, /\.knowledge-entry summary small \{ font-size:11px; \}/u);
     assert.match(styles, /\.order-table \{ font-size:13px; \}/u);
