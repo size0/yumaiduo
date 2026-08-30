@@ -239,7 +239,7 @@ AI 客服已接入 `/api/chat/text-messages`，并按 `conversation_id` 使用�
 https://wd.xdw0.cn/__plugin__/api/wanda/orders
 ```
 
-当前生产租户 ID 已固定为 `107`，调用方不需要提交租户 ID；服务端会自动绑定该租户，避免跨租户读取。接口密钥只保存在生产服务器，不写入 Git：
+当前生产配置为：租户 ID `107`，插件 ID `wanda-seat-autoquote`。租户 ID 是鱼麦多平台的商户/工作空间标识，不是插件 ID；订单中的 `accountUnb` 才是对应店铺标识。调用方不需要提交租户 ID，服务端会自动绑定 `107`，避免跨租户读取。接口密钥只保存在生产服务器，不写入 Git：
 
 ```text
 /etc/ticket-system/wanda-order-api.key
@@ -249,8 +249,8 @@ https://wd.xdw0.cn/__plugin__/api/wanda/orders
 
 ```bash
 WANDA_ORDER_API_KEY="$(sudo cat /etc/ticket-system/wanda-order-api.key)"
-curl --fail-with-body --silent --show-error \\
-  -H "Authorization: Bearer ${WANDA_ORDER_API_KEY}" \\
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer ${WANDA_ORDER_API_KEY}" \
   "https://wd.xdw0.cn/__plugin__/api/wanda/orders?limit=50"
 ```
 
@@ -258,8 +258,8 @@ curl --fail-with-body --silent --show-error \\
 
 ```bash
 WANDA_ORDER_API_KEY="$(sudo cat /etc/ticket-system/wanda-order-api.key)"
-curl --fail-with-body --silent --show-error \\
-  -H "Authorization: Bearer ${WANDA_ORDER_API_KEY}" \\
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer ${WANDA_ORDER_API_KEY}" \
   "https://wd.xdw0.cn/__plugin__/api/wanda/orders/{order_id}"
 ```
 
@@ -292,18 +292,56 @@ curl --fail-with-body --silent --show-error \\
 
 订单详情返回 `{ "source": "wanda", "order": { ... } }`。接口返回的是鱼麦多实时读取的权威订单信息；尚未被插件观察到的历史订单不会被猜测或伪造。未授权返回 `401`，接口未配置返回 `503`，参数错误返回 `400`。出票系统应保存 `orderId`，并在出票前重新请求订单详情确认状态。
 
-出票系统完成出票后，通过以下接口提交出票信息，插件会校验订单后调用鱼麦多官方发货接口，并向对应咸鱼会话发送出票系统提供的文字：
+出票系统完成出票后，通过以下接口提交出票信息。插件会校验订单身份和付款状态，调用鱼麦多官方发货接口，并向对应咸鱼会话发送出票系统提供的文字：
 
 ```http
 POST /__plugin__/api/wanda/orders/{order_id}/fulfillment
 Authorization: Bearer <接口密钥>
-Idempotency-Key: <每次出票请求唯一号>
+Idempotency-Key: <每次出票请求唯一号，至少 8 个字符>
 Content-Type: application/json
 ```
 
-请求体至少包含 `city`、`movie_name`、`cinema_name`、`showtime_start`、`hall_name`、`ticket_codes` 和 `message_text`，可选 `showtime_end`、`seats`、`ticket_url`。其中电影、影院、场次、影厅和座位以出票系统提交的信息为准，不再采用咸鱼图片中缺失或识别错误的字段；`message_text` 必须包含每一个取票码。接口以 `租户 ID + order_id` 唯一关联订单：相同出票内容重复提交不会再次发货，不同内容返回 `409`，订单身份、付款状态、发货状态或平台回读不通过则停止并转人工。
+请求示例：
 
-插件订单管理每 15 秒自动同步，出票信息会覆盖图片识别中的对应电影、影院、场次、影厅和座位显示。接口返回的 `source` 固定为 `wanda`；不会同步良票订单。
+```json
+{
+  "city": "昆明",
+  "movie_name": "奥德赛",
+  "cinema_name": "昆明西山万达广场店",
+  "showtime_start": "20:10",
+  "showtime_end": "22:50",
+  "hall_name": "IMAX厅",
+  "seats": ["5排6座"],
+  "ticket_codes": ["WANDA-001"],
+  "ticket_url": null,
+  "message_text": "电影：奥德赛\n取票码：WANDA-001"
+}
+```
+
+必填字段：`city`、`movie_name`、`cinema_name`、`showtime_start`、`hall_name`、`ticket_codes`、`message_text`。可选字段：`showtime_end`、`seats`、`ticket_url`，以及用于额外身份复核的 `shop_id`、`buyer_id`、`chat_id`。
+
+电影、影院、场次、影厅和座位以出票系统提交的信息为准；咸鱼订单图片识别不准、字段为空或人工介入时，不能用图片识别结果覆盖出票信息。`message_text` 必须包含每一个取票码，取票码不能重复。
+
+接口以 `租户 ID + order_id` 建立唯一出票记录，并再次校验鱼麦多官方订单中的店铺、买家、会话和订单号。相同出票内容重复提交返回 `already_submitted`，不会再次发货或重复发送消息；同一订单提交不同出票内容返回 `409`。订单未付款、已发货、已关闭、退款中、身份无法核验、发货结果未知或发货后官方回读不成功时停止并转人工。
+
+成功响应示例：
+
+```json
+{
+  "source": "wanda",
+  "status": "submitted",
+  "order": { "orderId": "订单号", "orderStatus": 3 },
+  "fulfillment": { "status": "submitted", "message_status": "sent" }
+}
+```
+
+自动发货总开关：
+
+```env
+WANDA_ORDER_FULFILLMENT_ENABLED=false
+```
+
+完成出票系统联调、沙箱/测试订单验证后，才允许在生产环境显式改为 `true`。插件订单管理每 15 秒自动同步；出票系统提交的电影、影院、场次、影厅和座位信息优先显示。接口返回的 `source` 固定为 `wanda`，不会同步良票订单。
 
 Node执行器在改价前再次读取订单和会话，拒绝身份不一致、已付款、已关闭、退款中或人工/买家新消息介入的订单；调用鱼麦多改价后必须重新读取订单并确认金额一致，才会发送“改价完成”通知。超时结果不会盲目重试，而是依靠持久化幂等收据重新读取对账。区域探针、截图金额、AI生成金额和不完整报价均不能触发改价。
 
