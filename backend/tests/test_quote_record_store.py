@@ -38,6 +38,8 @@ def record(record_id: str, tenant_id: str, created_at: str) -> dict[str, object]
         "chat_id": "chat-1",
         "created_at": created_at,
         "cinema": "测试影城",
+        "original_unit_price_cents": 7290,
+        "member_unit_price_cents": 6190,
         "unit_quote_cents": 7150,
     }
 
@@ -73,6 +75,8 @@ def test_quote_records_are_encrypted_deduplicated_and_tenant_scoped(tmp_path: Pa
     stored = store.list("tenant-a")
     assert stored[0]["record_id"] == "quote-1"
     assert stored[0]["unit_quote_cents"] == 7250
+    assert stored[0]["original_unit_price_cents"] == 7290
+    assert stored[0]["member_unit_price_cents"] == 6190
     assert stored[0]["quote_id"] == "quote-1"
     assert stored[0]["quote_version"].startswith("qv-")
     assert stored[0]["terms_fingerprint"] is None

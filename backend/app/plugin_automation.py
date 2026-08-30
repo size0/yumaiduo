@@ -1189,6 +1189,7 @@ class RulesFirstDecisionEngine:
                 "seat_zone_type": quote.seat_zone_type,
                 "ticket_count": quote.ticket_count,
                 "member_unit_price_cents": quote.member_unit_price_cents,
+                "original_unit_price_cents": quote.original_unit_price_cents,
                 "seat_type": quote.seat_type,
                 "base_unit_cents": quote.base_unit_cents,
                 "base_total_cents": quote.base_total_cents,

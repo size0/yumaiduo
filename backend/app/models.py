@@ -194,6 +194,7 @@ class RealQuote(BaseModel):
     quote_date: CalendarDate | None = None
     seat_zone_type: str = Field(min_length=1, max_length=40)
     member_unit_price_cents: int | None = Field(default=None, gt=0)
+    original_unit_price_cents: int | None = Field(default=None, gt=0)
     seat_type: Literal["wplus", "regular", "mixed"] | None = None
     base_unit_cents: int | None = Field(default=None, gt=0)
     base_total_cents: int | None = Field(default=None, gt=0)

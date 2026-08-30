@@ -1084,6 +1084,7 @@ async def test_selected_regular_seat_uses_its_exact_official_area_even_when_wplu
     assert quote.member_unit_price_cents == 6190
     assert quote.seat_type == "regular"
     assert quote.base_unit_cents == 7290
+    assert quote.original_unit_price_cents == 7290
     assert quote.base_total_cents == 7290
     assert quote.price_source == "realtime_regular_area"
     assert quote.unit_quote_cents == 6290
@@ -1153,6 +1154,7 @@ async def test_selected_ordinary_area_seat_can_disable_area_level_wplus_activity
     assert quote.quote_scope == "exact_seats"
     assert quote.seat_zone_type == "按摩椅区"
     assert quote.member_unit_price_cents == 8_090
+    assert quote.original_unit_price_cents == 8_890
     assert quote.seat_quotes[0].member_price_cents == 8_090
     assert quote.seat_type == "regular"
     assert quote.price_source == "realtime_regular_area"

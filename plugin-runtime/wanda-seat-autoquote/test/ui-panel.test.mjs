@@ -152,6 +152,10 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /image\/jpeg,image\/png,image\/webp,image\/gif/u);
     assert.match(appSource, /image_asset_id/u);
     assert.match(appSource, /linkedFactMap/u);
+    assert.match(appSource, /recordFact\('原价'/u);
+    assert.match(appSource, /recordFact\('会员价'/u);
+    assert.match(appSource, /original_unit_price_cents/u);
+    assert.match(appSource, /member_unit_price_cents/u);
     assert.doesNotMatch(appSource, /orderModal/u);
     assert.match(appSource, /wandaOrderRow/u);
     assert.match(appSource, /良票订单/u);
