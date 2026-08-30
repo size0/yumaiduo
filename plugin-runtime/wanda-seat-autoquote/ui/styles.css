@@ -231,11 +231,11 @@ body { height:auto; padding-bottom:0; }
 #mainPage .chat-app,
 #settingsDrawer,
 #diagnosticsPanel {
-  height:min(820px,calc(100dvh - 280px));
-  max-height:calc(100dvh - 280px);
+  height:min(900px,calc(100dvh - 170px));
+  max-height:calc(100dvh - 170px);
   margin-bottom:20px;
 }
-#mainPage .chat-app { min-height:min(620px,calc(100dvh - 280px)); }
+#mainPage .chat-app { min-height:min(620px,calc(100dvh - 170px)); }
 @media (max-width:760px) {
   #mainPage { padding-bottom:4px; }
   #mainPage .chat-app,
