@@ -33,6 +33,40 @@
 | `POST /api/wanda-ai-v2/plugin/commands/claim` | 领取带60秒租约的持久命令 |
 | `POST /api/wanda-ai-v2/plugin/commands/{command_id}/result` | 回传命令结果及官方回读证据 |
 
+## 出票系统只读订单接口
+
+为下游出票系统提供了独立的只读 Wanda 订单接口。它只调用本插件绑定的鱼麦多订单客户端，不查询良票订单，也不执行改价、付款、出票或其他写操作。
+
+启用方式：在运行环境设置 `WANDA_ORDER_API_KEY` 和 `WANDA_ORDER_API_TENANT_ID`。租户固定在服务端，调用方不能通过请求覆盖，避免跨租户读取。
+
+```text
+GET /__plugin__/api/wanda/orders?limit=50
+Authorization: Bearer <WANDA_ORDER_API_KEY>
+
+GET /__plugin__/api/wanda/orders/{order_id}
+Authorization: Bearer <WANDA_ORDER_API_KEY>
+```
+
+列表响应示例：
+
+```json
+{
+  "source": "wanda",
+  "orders": [{
+    "orderId": "...",
+    "orderStatus": 1,
+    "productTitle": "...",
+    "quantity": 2,
+    "payment": "0",
+    "createTime": "..."
+  }],
+  "count": 1,
+  "observedCount": 1
+}
+```
+
+接口为内部服务接口，应仅通过 HTTPS 或本机回环访问；未配置密钥返回 `503`，密钥错误返回 `401`，`limit` 范围为 `1–100`。订单详情和列表均来自鱼麦多实时读取，订单事件未被插件观察到时不会被伪造或猜测。
+
 生产不存在 `off/shadow/auto` 决策模式或legacy回退。事件响应不携带动作；插件无权生成业务动作。AI辅助和外部写熔断分别由后端独立控制。
 
 ## 目录

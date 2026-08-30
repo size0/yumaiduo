@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +50,29 @@ async function file(res, filename, mime) {
 function parseJson(rawBody) {
   try { return JSON.parse(rawBody); }
   catch { throw Object.assign(new Error('invalid_json'), { status: 400, code: 'invalid_json' }); }
+}
+function secureEqual(left, right) {
+  const expected = Buffer.from(String(left ?? ''));
+  const actual = Buffer.from(String(right ?? ''));
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+function wandaOrderApiAuthorized(req, config) {
+  if (!config.orderApiKey || !config.orderApiTenantId) return { status: 503, error: 'wanda_order_api_not_configured' };
+  const authorization = String(header(req, 'authorization') ?? '');
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+    ?? String(header(req, 'x-wanda-order-api-key') ?? '').trim();
+  if (!secureEqual(config.orderApiKey, token)) return { status: 401, error: 'wanda_order_api_unauthorized' };
+  return { tenantId: config.orderApiTenantId };
+}
+function parseOrderLimit(requestUrl) {
+  const raw = requestUrl.searchParams.get('limit');
+  if (raw === null || /^\s*$/.test(raw)) return 50;
+  if (!/^\d+$/.test(raw)) throw Object.assign(new Error('limit_invalid'), { status: 400, code: 'limit_invalid' });
+  const limit = Number(raw);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw Object.assign(new Error('limit_invalid'), { status: 400, code: 'limit_invalid' });
+  }
+  return limit;
 }
 function gatewayRequest(req, platform, rawBody) {
   return platform.verifyGateway?.({
@@ -199,6 +223,26 @@ export function createV2HttpServer({
         return json(res, snapshot.ok ? 200 : 503, snapshot);
       }
 
+      const wandaOrderPath = pathname.startsWith('/__plugin__/')
+        ? pathname.slice('/__plugin__'.length) : pathname;
+      const wandaOrderCollection = wandaOrderPath === '/api/wanda/orders';
+      const wandaOrderDetail = wandaOrderPath.startsWith('/api/wanda/orders/');
+      if (wandaOrderCollection || wandaOrderDetail) {
+        if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+        const authorization = wandaOrderApiAuthorized(req, config);
+        if (authorization.status) return json(res, authorization.status, { ok: false, error: authorization.error });
+        if (wandaOrderCollection) {
+          if (typeof listOrders !== 'function') return json(res, 503, { ok: false, error: 'wanda_order_list_unavailable' });
+          const requestUrl = new URL(req.url ?? '/', 'http://v2.local');
+          const result = await listOrders(authorization.tenantId, parseOrderLimit(requestUrl));
+          return json(res, 200, { source: 'wanda', ...result });
+        }
+        if (typeof getOrder !== 'function') return json(res, 503, { ok: false, error: 'wanda_order_detail_unavailable' });
+        const orderId = decodeURIComponent(wandaOrderPath.slice('/api/wanda/orders/'.length));
+        if (!orderId || orderId.includes('/')) return json(res, 400, { ok: false, error: 'order_id_invalid' });
+        const order = await getOrder(authorization.tenantId, orderId);
+        return json(res, 200, { source: 'wanda', order });
+      }
       const normalizedUiPath = pathname.startsWith('/api/') ? `/ui${pathname}` : pathname;
       const uiAsset = UI_ASSETS.get(normalizedUiPath);
       const isUiApi = normalizedUiPath.startsWith('/ui/api/');

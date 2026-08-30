@@ -21,6 +21,8 @@ async function withServer(run, {
   syncShops = async () => ({ ok: true, count: 0 }),
   listOrders = async () => ({ orders: [], count: 0, observedCount: 0 }),
   getOrder = async () => ({ orderId: 'order-1' }),
+  orderApiKey = '',
+  orderApiTenantId = '',
 } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ui-panel-'));
   const server = createV2HttpServer({
@@ -31,6 +33,8 @@ async function withServer(run, {
       maxUiBodyBytes: 30_000_000,
       requestTimeoutMs: 5_000,
       v4BackendUrl: 'http://127.0.0.1:8012',
+      orderApiKey,
+      orderApiTenantId,
       manifest: {
         id: 'wanda-seat-autoquote',
         name: '万达电影票 AI 客服 V4',
@@ -199,6 +203,35 @@ test('signed panel order detail is tenant scoped by the gateway', async () => {
     assert.deepEqual(await response.json(), { ok: true, order: { orderId: 'order-1' } });
   }, { getOrder: async (tenantId, orderId) => { calls.push({ tenantId, orderId }); return { orderId }; } });
   assert.deepEqual(calls, [{ tenantId: 'tenant-test', orderId: 'order-1' }]);
+});
+
+test('Wanda order integration API is authenticated, tenant-pinned and read-only', async () => {
+  const calls = [];
+  await withServer(async (baseUrl) => {
+    const rejected = await fetch(`${baseUrl}/api/wanda/orders`);
+    assert.equal(rejected.status, 401);
+    const wrong = await fetch(`${baseUrl}/api/wanda/orders`, { headers: { authorization: 'Bearer wrong' } });
+    assert.equal(wrong.status, 401);
+    const listed = await fetch(`${baseUrl}/__plugin__/api/wanda/orders?limit=25`, { headers: { authorization: 'Bearer wanda-secret' } });
+    assert.equal(listed.status, 200);
+    assert.deepEqual(await listed.json(), {
+      source: 'wanda', orders: [{ orderId: 'order-1' }], count: 1, observedCount: 1,
+    });
+    const detail = await fetch(`${baseUrl}/__plugin__/api/wanda/orders/order-1`, { headers: { authorization: 'Bearer wanda-secret' } });
+    assert.equal(detail.status, 200);
+    assert.deepEqual(await detail.json(), { source: 'wanda', order: { orderId: 'order-1' } });
+  }, {
+    orderApiKey: 'wanda-secret', orderApiTenantId: 'tenant-wanda',
+    listOrders: async (tenantId, limit) => {
+      calls.push(['list', tenantId, limit]);
+      return { orders: [{ orderId: 'order-1' }], count: 1, observedCount: 1 };
+    },
+    getOrder: async (tenantId, orderId) => {
+      calls.push(['detail', tenantId, orderId]);
+      return { orderId };
+    },
+  });
+  assert.deepEqual(calls, [['list', 'tenant-wanda', 25], ['detail', 'tenant-wanda', 'order-1']]);
 });
 
 test('V4 panel API is signed at the gateway and proxied only to the loopback backend', async () => {

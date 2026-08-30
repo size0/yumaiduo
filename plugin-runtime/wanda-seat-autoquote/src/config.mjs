@@ -8,6 +8,11 @@ function required(env, name) {
   return value;
 }
 
+function optional(env, name) {
+  const value = String(env[name] ?? '').trim();
+  return value || null;
+}
+
 function url(env, name) {
   const value = required(env, name).replace(/\/$/, '');
   let parsed;
@@ -63,6 +68,8 @@ export function loadV2Config({ env, manifest }) {
     encryptionKey: encryptionKey(env),
     logLevel: ['debug', 'info', 'warn', 'error'].includes(env.LOG_LEVEL) ? env.LOG_LEVEL : 'info',
     v4BackendUrl: loopbackUrl(env, 'WANDA_V4_BACKEND_URL', 'http://127.0.0.1:8012'),
+    orderApiKey: optional(env, 'WANDA_ORDER_API_KEY'),
+    orderApiTenantId: optional(env, 'WANDA_ORDER_API_TENANT_ID'),
     backend: Object.freeze({
       baseUrl: url(env, 'WANDA_AI_V2_BACKEND_URL'),
       sharedSecret: required(env, 'WANDA_AI_V2_BRIDGE_KEY'),
