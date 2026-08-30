@@ -120,6 +120,10 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(styles, /\.order-ticket-viewer/u);
     assert.match(styles, /html, body \{ height:auto; min-height:0; overflow-x:hidden; overflow-y:auto; \}/u);
     assert.match(styles, /#mainPage \.chat-app,[\s\S]*#settingsDrawer,[\s\S]*height:min\(820px,calc\(100dvh - 280px\)\)/u);
+    assert.match(styles, /\.page \{ padding-bottom:0; \}/u);
+    assert.match(styles, /#mainPage \{ padding-bottom:0; \}/u);
+    assert.match(styles, /margin-bottom:0;/u);
+    assert.match(styles, /\.plugin-status-bar \{ position:relative; bottom:auto; \}/u);
     assert.match(styles, /\.knowledge-entry summary b \{ font-size:14px; \}/u);
     assert.match(styles, /\.knowledge-entry summary small \{ font-size:11px; \}/u);
     assert.match(styles, /\.order-table \{ font-size:13px; \}/u);

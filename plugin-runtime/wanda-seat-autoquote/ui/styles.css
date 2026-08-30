@@ -267,3 +267,11 @@ body { height:auto; padding-bottom:0; }
 .order-table { font-size:13px; }
 .order-table th { font-size:12px; }
 .order-detail-button { font-size:12px; }
+
+/* Keep the main card and the runtime status bar adjacent in the host iframe. */
+.page { padding-bottom:0; }
+#mainPage { padding-bottom:0; }
+#mainPage .chat-app,
+#settingsDrawer,
+#diagnosticsPanel { margin-bottom:0; }
+.plugin-status-bar { position:relative; bottom:auto; }
