@@ -32,6 +32,22 @@ export function createV2BackendClient(config, { fetchImpl = globalThis.fetch, lo
     throw new Error('unreachable backend retry state');
   }
 
+  async function recognizeFulfillmentImage({ tenantId, imageUrl }) {
+    const response = await fetchImpl(join(config.v4BackendUrl, '/api/ticket-images/recognize'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-wanda-tenant-id': String(tenantId ?? ''),
+      },
+      body: JSON.stringify({ image_url: String(imageUrl ?? '') }),
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new V2BackendRequestError(response.status, payload?.error?.code ?? payload?.detail ?? 'ticket_image_recognition_failed');
+    if (!payload?.data || typeof payload.data !== 'object') throw new V2BackendRequestError(502, 'ticket_image_recognition_invalid');
+    return payload.data;
+  }
+
   async function fetchKeywordImage({ tenantId, assetId }) {
     const response = await fetchImpl(join(
       config.backend.baseUrl,
@@ -74,5 +90,6 @@ export function createV2BackendClient(config, { fetchImpl = globalThis.fetch, lo
     completeReminder: (taskId, leaseToken, result) => request(`/api/wanda-ai-v2/plugin/reminders/${encodeURIComponent(taskId)}/complete`, { body: { lease_token: leaseToken, result }, retry: true }),
     failReminder: (taskId, leaseToken, reason) => request(`/api/wanda-ai-v2/plugin/reminders/${encodeURIComponent(taskId)}/fail`, { body: { lease_token: leaseToken, reason }, retry: true }),
     fetchKeywordImage,
+    recognizeFulfillmentImage,
   });
 }

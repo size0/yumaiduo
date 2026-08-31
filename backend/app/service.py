@@ -183,7 +183,7 @@ class MovieImageRecognitionService:
             self._liangpiao_config = config
         return self._liangpiao_client
 
-    async def recognize_from_url(self, image_url: str, *, city_name: str | None = None) -> MovieImageInfo:
+    async def recognize_from_url(self, image_url: str, *, city_name: str | None = None, ticket_image: bool = False) -> MovieImageInfo:
         """Prefer Liangpiao URL recognition and fall back to Qwen on failure.
 
         A successful Liangpiao candidate is not a failure: it must remain in the
@@ -193,7 +193,7 @@ class MovieImageRecognitionService:
         """
         settings = self._settings_provider()
         liangpiao_error: str | None = None
-        if settings.liangpiao_app_key.strip() and settings.liangpiao_app_secret.strip():
+        if not ticket_image and settings.liangpiao_app_key.strip() and settings.liangpiao_app_secret.strip():
             try:
                 recognition = await self._configured_liangpiao_client(settings).recognize_url(
                     image_url, city_name=city_name,
@@ -211,8 +211,10 @@ class MovieImageRecognitionService:
             except Exception as error:
                 LOGGER.exception("event=liangpiao_recognition_failed")
                 liangpiao_error = type(error).__name__
-        else:
+        elif not ticket_image:
             liangpiao_error = "liangpiao_credentials_missing"
+        else:
+            liangpiao_error = "ticket_fulfillment_vision_contract"
         self._diagnostics.add(
             "liangpiao_recognition_fallback_to_qwen",
             reason=liangpiao_error,

@@ -4,7 +4,9 @@ import {
   FulfillmentRequestError,
   fulfillmentFingerprint,
   fulfillmentIdentity,
+  fulfillmentRequestFromTicketImage,
   normalizeFulfillmentRequest,
+  ticketImageUrl,
   sameFulfillmentFingerprint,
 } from '../actions/fulfillment.mjs';
 import { normalizeAuthoritativeOrder, orderChangeability } from '../actions/contracts.mjs';
@@ -469,7 +471,6 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     const normalizedTenant = text(tenantId);
     const normalizedOrderId = text(orderId);
     if (!normalizedTenant || !normalizedOrderId) throw fulfillmentError('order_not_found', 404);
-    const request = normalizeFulfillmentRequest(input);
     const normalizedIdempotencyKey = text(idempotencyKey);
     if (!normalizedIdempotencyKey || normalizedIdempotencyKey.length < 8 || normalizedIdempotencyKey.length > 200) {
       throw new FulfillmentRequestError('idempotency_key_invalid', 400);
@@ -478,6 +479,14 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     const client = platform.createClient(normalizedTenant);
     const rawOrder = await client.orders.get(normalizedOrderId);
     if (!rawOrder) throw fulfillmentError('order_not_found', 404);
+    const imageUrl = ticketImageUrl(input);
+    let fulfillmentInput = input;
+    if (imageUrl) {
+      if (typeof backend.recognizeFulfillmentImage !== 'function') throw fulfillmentError('ticket_image_recognition_unavailable', 503);
+      const recognized = await backend.recognizeFulfillmentImage({ tenantId: normalizedTenant, imageUrl });
+      fulfillmentInput = fulfillmentRequestFromTicketImage(input, recognized);
+    }
+    const request = normalizeFulfillmentRequest(fulfillmentInput);
     const officialSession = sessionFromPayload(await client.im.getSessionByOrder(normalizedOrderId));
     const normalizedOrder = normalizeAuthoritativeOrder(rawOrder, { sdk_tenant_id: normalizedTenant });
     const authoritativeOrder = {
@@ -544,7 +553,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     }
     try {
       await client.orders.ship(normalizedOrderId, {
-        ticketCode: request.ticket_codes.join('、'),
+        ...(request.ticket_codes.length ? { ticketCode: request.ticket_codes.join('、') } : {}),
         ...(request.ticket_url ? { ticketUrl: request.ticket_url } : {}),
       });
     } catch (error) {

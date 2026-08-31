@@ -110,6 +110,7 @@ class MovieImageInfo(BaseModel):
     format: str | None = Field(default=None, max_length=40)
     selected_seats: list[SelectedSeat] = Field(default_factory=list, max_length=30)
     selected_count_visible: int = Field(default=0, ge=0, le=30)
+    ticket_codes: list[str] = Field(default_factory=list, max_length=20)
     displayed_total: float | None = Field(default=None, ge=0)
     currency: Literal["CNY"] = "CNY"
     price_zones: list[PriceZone] = Field(default_factory=list, max_length=20)
@@ -120,6 +121,19 @@ class MovieImageInfo(BaseModel):
     match_level: Literal["EXACT", "CANDIDATE", "NONE", "SHOW_EXPIRED"] | None = None
     show_id: str | None = Field(default=None, max_length=100)
     candidate_cinemas: list[CinemaCandidate] = Field(default_factory=list, max_length=5)
+
+    @field_validator("ticket_codes", mode="before")
+    @classmethod
+    def normalize_ticket_codes(cls, value: object) -> object:
+        if value is None:
+            return []
+        values = [value] if isinstance(value, str) else value
+        if not isinstance(values, list):
+            raise ValueError("ticket_codes must be a list")
+        normalized = [re.sub(r"\s+", "", str(item).strip()) for item in values]
+        if any(not item for item in normalized) or len(set(normalized)) != len(normalized):
+            raise ValueError("ticket_codes must be non-empty and unique")
+        return normalized
 
     @field_validator("displayed_total", mode="before")
     @classmethod
@@ -159,6 +173,13 @@ class MovieImageInfo(BaseModel):
 class RecognitionResponse(BaseModel):
     ok: Literal[True] = True
     data: MovieImageInfo
+
+
+class TicketImageRecognitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image_url: str = Field(min_length=1, max_length=2_048)
+    city_name: str | None = Field(default=None, max_length=80)
 
 
 class ChatTextRequest(BaseModel):

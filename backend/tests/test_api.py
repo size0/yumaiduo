@@ -355,6 +355,27 @@ def test_upload_movie_screenshot_returns_structured_information() -> None:
     assert body["data"]["showtime_start"] == "22:40"
 
 
+def test_ticket_image_recognition_endpoint_uses_ticket_contract() -> None:
+    class TicketImageService(StubRecognitionService):
+        async def recognize_from_url(self, image_url: str, *, ticket_image: bool = False, **_kwargs: object) -> MovieImageInfo:
+            assert image_url == "https://img.alicdn.com/ticket.png"
+            assert ticket_image is True
+            return MovieImageInfo(
+                city="运城", movie_name="八仙！", cinema_name="运城万达广场店",
+                date="2026-08-31", showtime_start="15:30", showtime_end="17:54",
+                hall_name="9号4DX厅", ticket_codes=["2071 1100 0167 90"],
+                selected_count_visible=0,
+            )
+
+    client = TestClient(create_app(service=TicketImageService()))
+    response = client.post("/api/ticket-images/recognize", json={"image_url": "https://img.alicdn.com/ticket.png"})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["ticket_codes"] == ["20711100016790"]
+    assert response.json()["data"]["showtime_start"] == "15:30"
+
+
+
 def test_chat_image_message_returns_left_side_assistant_reply() -> None:
     client = TestClient(create_app(service=StubRecognitionService()))
     response = client.post(

@@ -301,7 +301,17 @@ Idempotency-Key: <每次出票请求唯一号，至少 8 个字符>
 Content-Type: application/json
 ```
 
-请求示例：
+出票系统可以直接提交结构化字段，也可以只提交出票凭证图片。图片模式下，插件把 `ticket_image_url` 交给 V4 视觉识别接口，解析出票凭证中的影院、城市、影片、日期、开场/结束时间、影厅、座位和“取票码”标签，并将解析后的权威字段写入本订单；未识别或有歧义时失败关闭，不使用订单标题或旧的闲鱼图片识别结果补猜。
+
+图片模式请求示例（会真实触发发货，图片地址必须是 `https://img.alicdn.com/` 或 `https://*.tbcdn.cn/`）：
+
+```json
+{
+  "ticket_image_url": "https://img.alicdn.com/your-issued-ticket.png"
+}
+```
+
+结构化请求示例：
 
 ```json
 {
@@ -318,7 +328,7 @@ Content-Type: application/json
 }
 ```
 
-必填字段：`city`、`movie_name`、`cinema_name`、`showtime_start`、`hall_name`、`ticket_codes`、`message_text`。可选字段：`showtime_end`、`seats`、`ticket_url`，以及用于额外身份复核的 `shop_id`、`buyer_id`、`chat_id`。
+结构化请求必填字段：`city`、`movie_name`、`cinema_name`、`showtime_start`、`hall_name`、`ticket_codes`、`message_text`。图片模式不要求调用方重复提交这些字段，但图片必须清晰显示日期、场次、影院、影片和取票码；插件解析完成后使用同一套必填校验。可选字段：`show_date`、`showtime_end`、`seats`、`ticket_url`，以及用于额外身份复核的 `shop_id`、`buyer_id`、`chat_id`。取票码图片中的空格会被去除，例如 `2071 1100 0167 90` 会保存为 `20711100016790`。
 
 电影、影院、场次、影厅和座位以出票系统提交的信息为准；咸鱼订单图片识别不准、字段为空或人工介入时，不能用图片识别结果覆盖出票信息。`message_text` 必须包含每一个取票码，取票码不能重复。
 

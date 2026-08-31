@@ -36,6 +36,7 @@ from .models import (
     PricingRulesView,
     RealQuote,
     RecognitionResponse,
+    TicketImageRecognitionRequest,
     VisionSettingsUpdate,
     VisionSettingsView,
 )
@@ -1052,6 +1053,16 @@ def create_app(
     async def recognize_movie_image(request: Request, image: UploadFile = File(...)) -> RecognitionResponse:
         enforce_rate_limit(request)
         return RecognitionResponse(data=await recognize_upload(image))
+
+    @app.post("/api/ticket-images/recognize", response_model=RecognitionResponse)
+    async def recognize_ticket_image(request: Request, payload: TicketImageRecognitionRequest) -> RecognitionResponse:
+        """Recognize an issuing-system ticket image with the ticket-code contract."""
+        enforce_rate_limit(request)
+        return RecognitionResponse(data=await recognition_service.recognize_from_url(
+            payload.image_url,
+            city_name=payload.city_name,
+            ticket_image=True,
+        ))
 
     @app.post("/api/chat/image-messages", response_model=ChatMessageResponse)
     async def create_chat_image_message(

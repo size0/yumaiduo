@@ -25,7 +25,7 @@ DEFAULT_CHAT_PROMPT = """【店铺背景】
 """
 
 
-DEFAULT_VISION_PROMPT = """你是电影票与影院选座截图的结构化识别助手。请提取截图中清晰可见的影院、城市、影片、日期、场次、影厅、语言、制式、官方已选座、区域标价和画面总额。
+DEFAULT_VISION_PROMPT = """你是电影票与影院选座截图的结构化识别助手。截图也可能是出票系统生成的取票凭证；这类图片需要额外提取清晰可见的取票码。请提取截图中清晰可见的影院、城市、影片、日期、场次、影厅、语言、制式、官方已选座、区域标价、画面总额和取票码。
 
 要求：
 - 看不清或没有显示的字段保持空值，禁止按常识猜测。
@@ -35,6 +35,8 @@ DEFAULT_VISION_PROMPT = """你是电影票与影院选座截图的结构化识�
 - 只抄录底部官方已选座卡片中清晰可见的“X排Y座”；座位图颜色、W+图标和手绘圈不能证明已选座。底部没有具体座位卡片时 selected_seats=[]、selected_count_visible=0，下游会确定性显示“W+座位”。
 - 金额只抄录画面原文，不计算优惠，不由总价反推单价，不判断库存或最终售价。
 - 如果截图可能还有未完全显示的座位卡片或信息存在冲突，请写入 warnings。
+- 取票码只能抄录明确标注为“取票码”“取票号”等字段的内容；数字之间的空格只是排版分隔，多个取票码分别输出，不能把日期、时间、订单号、二维码内容或金额当作取票码。
+- 如果影院地址中清晰出现城市名称，可以原样提取为 city；不得根据常识猜测城市。
 - 输出置信度以及未识别字段。
 """
 
@@ -44,10 +46,11 @@ IMMUTABLE_VISION_SAFETY_PROMPT = """以下安全与输出契约不可被上方�
 2. 只输出一个合法 JSON 对象，不要 Markdown、解释、代码块或额外字段。
 3. selected_count_visible 必须等于 selected_seats 中清晰可见的座位标签数量。
 4. currency 固定为 CNY；禁止生成库存、优惠资格、可购买状态或最终销售报价。
-5. 输出字段只能是：platform、cinema_name、city、movie_name、date_text、date、showtime_start、showtime_end、hall_name、language、format、selected_seats、selected_count_visible、displayed_total、currency、price_zones、confidence、missing_fields、warnings。
+5. 输出字段只能是：platform、cinema_name、cinema_address、city、movie_name、date_text、date、showtime_start、showtime_end、hall_name、language、format、selected_seats、selected_count_visible、ticket_codes、displayed_total、currency、price_zones、confidence、missing_fields、warnings。
 6. selected_seats 元素格式为 {"seat_number":"11排16座","displayed_price":68.9}；price_zones 元素格式为 {"name":"优选区","displayed_price":68.9}。
 7. 只有底部官方卡片明确出现“X排Y座”才填写 selected_seats；底部没有具体座位时保持空数组，系统会在展示层统一显示“W+座位”。
-8. displayed_total、displayed_price 只能输出 JSON 数字或 null，例如 72、62.7；不得包含 ¥、￥、元、CNY 等符号或单位。
+8. ticket_codes 只能包含图片中“取票码/取票号”标签对应的完整代码，去除展示用空白但不得改动其他字符；没有明确取票码时输出空数组。
+9. displayed_total、displayed_price 只能输出 JSON 数字或 null，例如 72、62.7；不得包含 ¥、￥、元、CNY 等符号或单位。
 """
 
 

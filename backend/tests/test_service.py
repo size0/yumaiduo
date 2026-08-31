@@ -83,6 +83,49 @@ async def test_liangpiao_failure_falls_back_to_qwen_image_recognition() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ticket_image_recognition_uses_qwen_and_extracts_codes() -> None:
+    payload = valid_model_result()
+    payload.update({
+        "cinema_name": "运城万达广场店",
+        "cinema_address": "运城市盐湖区禹西路与铺安街交叉路口东南角万达广场4楼万达影城",
+        "city": "运城",
+        "movie_name": "八仙！",
+        "date": "2026-08-31",
+        "date_text": "2026/08/31（周一）",
+        "showtime_start": "15:30",
+        "showtime_end": "17:54",
+        "hall_name": "9号4DX厅",
+        "selected_seats": [{"seat_number": "5排6座"}, {"seat_number": "5排7座"}],
+        "selected_count_visible": 2,
+        "ticket_codes": ["2071 1100 0167 90"],
+    })
+    requests: list[str] = []
+
+    class LiangpiaoMustNotRun:
+        async def recognize_url(self, *_args, **_kwargs) -> MovieImageInfo:
+            raise AssertionError("ticket fulfillment images must use the ticket vision contract")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, headers={"content-type": "image/png"}, content=b"\x89PNG\r\n\x1a\n" + b"ticket")
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]})
+
+    configured = settings().model_copy(update={"liangpiao_app_key": "app", "liangpiao_app_secret": "secret"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = MovieImageRecognitionService(configured, client=client)
+        service._configured_liangpiao_client = lambda _: LiangpiaoMustNotRun()
+        result = await service.recognize_from_url("https://img.alicdn.com/ticket.png", ticket_image=True)
+
+    assert requests == ["GET", "POST"]
+    assert result.movie_name == "八仙！"
+    assert result.city == "运城"
+    assert result.ticket_codes == ["20711100016790"]
+
+
+
+
+@pytest.mark.asyncio
 async def test_liangpiao_candidate_is_not_replaced_by_qwen_fallback() -> None:
     candidate = MovieImageInfo(
         city="深圳", cinema_name="万达影城", movie_name="奥德赛", match_level="CANDIDATE",

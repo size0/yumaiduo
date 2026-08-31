@@ -3,8 +3,10 @@ import test from 'node:test';
 import {
   FulfillmentRequestError,
   fulfillmentFingerprint,
+  fulfillmentRequestFromTicketImage,
   normalizeFulfillmentRequest,
   sameFulfillmentFingerprint,
+  ticketImageUrl,
 } from '../src/actions/fulfillment.mjs';
 
 function request(overrides = {}) {
@@ -29,6 +31,32 @@ test('fulfillment request requires authoritative movie and showtime facts', () =
   assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ movie_name: '' }))), 'movie_name_required');
   assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ showtime_start: '25:00' }))), 'showtime_start_invalid');
 });
+
+test('ticket fulfillment image maps authoritative facts and normalizes the printed code', () => {
+  const source = {
+    ticket_image_url: 'https://img.alicdn.com/ticket.png',
+    shop_id: 'shop-1', buyer_id: 'buyer-1', chat_id: 'chat-1',
+  };
+  assert.equal(ticketImageUrl(source), source.ticket_image_url);
+  const mapped = fulfillmentRequestFromTicketImage(source, {
+    city: '运城', movie_name: '八仙！', cinema_name: '运城万达广场店',
+    date: '2026-08-31', showtime_start: '15:30', showtime_end: '17:54',
+    hall_name: '9号4DX厅', selected_seats: ['5排6座', '5排7座'],
+    ticket_codes: ['2071 1100 0167 90'],
+  });
+  const normalized = normalizeFulfillmentRequest(mapped);
+  assert.equal(normalized.show_date, '2026-08-31');
+  assert.deepEqual(normalized.ticket_codes, ['20711100016790']);
+  assert.match(normalized.message_text, /运城万达广场店/u);
+  assert.match(normalized.message_text, /20711100016790/u);
+});
+
+test('ticket fulfillment image URL is restricted to approved HTTPS CDNs', () => {
+  assert.equal(ticketImageUrl({ ticket_image_url: 'https://img.alicdn.com/ticket.png' }), 'https://img.alicdn.com/ticket.png');
+  assert.equal(errorCode(() => ticketImageUrl({ ticket_image_url: 'http://img.alicdn.com/ticket.png' })), 'ticket_image_url_invalid');
+  assert.equal(errorCode(() => ticketImageUrl({ ticket_image_url: 'https://evil.example/ticket.png' })), 'ticket_image_url_invalid');
+});
+
 
 test('fulfillment request rejects duplicate or unverified ticket codes', () => {
   assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_codes: ['A-1', 'A-1'], message_text: 'A-1' }))), 'ticket_codes_duplicate');
