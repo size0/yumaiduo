@@ -164,7 +164,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /original_unit_price_cents/u);
     assert.match(appSource, /member_unit_price_cents/u);
     assert.match(appSource, /order\.fulfillment/u);
-    assert.match(appSource, /activeWorkspace==='orders'/u);
+    assert.match(appSource, /name==='orders'/u);
+    assert.doesNotMatch(appSource, /activeWorkspace==='orders'\)void loadOrders\(\)/u);
+    assert.doesNotMatch(appSource, /activeWorkspace==='orders'\)void loadOrders\(\),15000/u);
     assert.doesNotMatch(appSource, /orderModal/u);
     assert.match(appSource, /wandaOrderRow/u);
     assert.match(appSource, /良票订单/u);
