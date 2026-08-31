@@ -57,12 +57,28 @@ test('ticket fulfillment image URL is restricted to approved HTTPS CDNs', () => 
   assert.equal(errorCode(() => ticketImageUrl({ ticket_image_url: 'https://evil.example/ticket.png' })), 'ticket_image_url_invalid');
 });
 
-
 test('fulfillment request rejects duplicate or unverified ticket codes', () => {
   assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_codes: ['A-1', 'A-1'], message_text: 'A-1' }))), 'ticket_codes_duplicate');
   assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_codes: ['A-1', 'B-2'], message_text: 'A-1' }))), 'message_missing_ticket_code');
-  assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_codes: ['A 1'] }))), 'ticket_code_invalid');
+  assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_codes: ['A@1'] }))), 'ticket_code_invalid');
   assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_url: 'http://unsafe.test/ticket' }))), 'ticket_url_invalid');
+});
+
+test('fulfillment accepts printed ticket codes with display spacing', () => {
+  const normalized = normalizeFulfillmentRequest(request({
+    ticket_codes: ['2079 5600 0622 50'], message_text: '电影：奥德赛\n取票码：2079 5600 0622 50',
+  }));
+  assert.deepEqual(normalized.ticket_codes, ['20795600062250']);
+});
+
+test('fulfillment accepts a QR ticket image without requiring text ticket codes', () => {
+  const normalized = normalizeFulfillmentRequest(request({
+    ticket_codes: [], ticket_url: 'https://wd.xdw0.cn/api/xianyu-plugin/delivery-assets/qr.png',
+    message_text: '电影：奥德赛\n二维码取票码已上传，请查收。',
+  }));
+  assert.deepEqual(normalized.ticket_codes, []);
+  assert.equal(normalized.ticket_url, 'https://wd.xdw0.cn/api/xianyu-plugin/delivery-assets/qr.png');
+  assert.equal(errorCode(() => normalizeFulfillmentRequest(request({ ticket_codes: [], message_text: '没有二维码' }))), 'ticket_codes_or_url_required');
 });
 
 test('fulfillment fingerprint is unique to the tenant, order, identity and ticket facts', () => {

@@ -32,8 +32,10 @@ function date(value, field) {
   if (result && !DATE_PATTERN.test(result)) throw new FulfillmentRequestError(`${field}_invalid`);
   return result;
 }
-function code(value) { return text(value, 'ticket_code', { required: true, max: 120 }); }
-function compactCode(value) { return code(value).replace(/\s+/gu, ''); }
+function code(value) {
+  return text(value, 'ticket_code', { required: true, max: 120 }).replace(/\s+/gu, '');
+}
+function compactCode(value) { return code(value); }
 
 export function ticketImageUrl(input) {
   const value = text(input?.ticket_image_url ?? input?.ticketImageUrl ?? input?.image_url ?? input?.imageUrl, 'ticket_image_url', { max: 2_048 });
@@ -59,22 +61,32 @@ export function fulfillmentRequestFromTicketImage(input, recognized) {
     ? recognized.selected_seats.map((item) => typeof item === 'string' ? item : item?.seat_number).filter(Boolean)
     : [];
   const mapped = {
-    ...input, city: recognized.city, movie_name: recognized.movie_name,
-    cinema_name: recognized.cinema_name, show_date: showDate,
-    showtime_start: recognized.showtime_start, showtime_end: recognized.showtime_end,
-    hall_name: recognized.hall_name, seats, ticket_codes: ticketCodes,
+    ...input,
+    city: recognized.city,
+    movie_name: recognized.movie_name,
+    cinema_name: recognized.cinema_name,
+    show_date: showDate,
+    showtime_start: recognized.showtime_start,
+    showtime_end: recognized.showtime_end,
+    hall_name: recognized.hall_name,
+    seats,
+    ticket_codes: ticketCodes,
   };
   const suppliedMessage = String(mapped.message_text ?? mapped.messageText ?? '').trim();
   if (!suppliedMessage || ticketCodes.some((ticketCode) => !suppliedMessage.includes(ticketCode))) {
     mapped.message_text = [
-      `电影：${mapped.movie_name}`, `影院：${mapped.cinema_name}`,
+      `电影：${mapped.movie_name}`,
+      `影院：${mapped.cinema_name}`,
       `场次：${mapped.show_date || ''} ${mapped.showtime_start}${mapped.showtime_end ? `-${mapped.showtime_end}` : ''}`.trim(),
-      `影厅：${mapped.hall_name}`, seats.length ? `座位：${seats.join('、')}` : null,
+      `影厅：${mapped.hall_name}`,
+      seats.length ? `座位：${seats.join('、')}` : null,
       `取票码：${ticketCodes.join('、')}`,
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\\n');
   }
-  delete mapped.ticket_image_url; delete mapped.ticketImageUrl;
-  delete mapped.image_url; delete mapped.imageUrl;
+  delete mapped.ticket_image_url;
+  delete mapped.ticketImageUrl;
+  delete mapped.image_url;
+  delete mapped.imageUrl;
   return mapped;
 }
 
@@ -82,8 +94,8 @@ export function normalizeFulfillmentRequest(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new FulfillmentRequestError('fulfillment_body_invalid', 400);
   }
-  const rawCodes = input.ticket_codes ?? input.ticketCodes;
-  if (!Array.isArray(rawCodes) || rawCodes.length < 1 || rawCodes.length > 20) {
+  const rawCodes = input.ticket_codes ?? input.ticketCodes ?? [];
+  if (!Array.isArray(rawCodes) || rawCodes.length > 20) {
     throw new FulfillmentRequestError('ticket_codes_invalid');
   }
   const ticketCodes = rawCodes.map(code);
@@ -93,15 +105,17 @@ export function normalizeFulfillmentRequest(input) {
   if (new Set(ticketCodes).size !== ticketCodes.length) {
     throw new FulfillmentRequestError('ticket_codes_duplicate');
   }
+  const ticketUrl = text(input.ticket_url ?? input.ticketUrl, 'ticket_url', { max: 1_000 });
+  if (ticketUrl && !/^https:\/\//iu.test(ticketUrl)) throw new FulfillmentRequestError('ticket_url_invalid');
+  if (ticketCodes.length === 0 && !ticketUrl) throw new FulfillmentRequestError('ticket_codes_or_url_required');
   const messageText = text(input.message_text ?? input.messageText, 'message_text', { required: true, max: MAX_MESSAGE_LENGTH });
-  if (ticketCodes.some((code) => !messageText.includes(code))) {
+  const compactMessageText = messageText.replace(/\s+/gu, '');
+  if (ticketCodes.some((code) => !compactMessageText.includes(code))) {
     throw new FulfillmentRequestError('message_missing_ticket_code');
   }
   const seats = input.seats ?? [];
   if (!Array.isArray(seats) || seats.length > 30) throw new FulfillmentRequestError('seats_invalid');
   const normalizedSeats = seats.map((value) => text(value, 'seat', { required: true, max: 80 }));
-  const ticketUrl = text(input.ticket_url ?? input.ticketUrl, 'ticket_url', { max: 1_000 });
-  if (ticketUrl && !/^https:\/\//iu.test(ticketUrl)) throw new FulfillmentRequestError('ticket_url_invalid');
   return Object.freeze({
     city: text(input.city, 'city', { required: true, max: 80 }),
     show_date: date(input.show_date ?? input.showDate, 'show_date'),
