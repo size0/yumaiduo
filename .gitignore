@@ -23,3 +23,7 @@ backend/logs/
 plugin-runtime/**/data/
 plugin-runtime/**/logs/
 .migration-backup-*.tar.gz
+# Local release staging and packaged backup artifacts are not source uploads.
+.release-stage-*/
+*.tar.gz
+*.tgz
