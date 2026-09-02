@@ -75,10 +75,10 @@ class V4PricingEngine:
         if is_vip:
             return self._vip_priced_unit(original, rules)
         member = seat.member_cost_cents
+        if not rules.enabled:
+            return member if member is not None and member > 0 else original
         if member is None:
             raise PricingError("authoritative_member_price_required", "座位缺少官方会员成本。")
-        if not rules.enabled:
-            return member
         if rules.wanda_rules:
             raw = member + self._dynamic_wanda_adjustment(original, member, rules.wanda_rules)
         elif seat.physical_wplus:
