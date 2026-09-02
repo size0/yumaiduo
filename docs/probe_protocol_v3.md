@@ -582,7 +582,7 @@ ticketing
 
 ## 11. ProbeResult 行为结构
 
-对 Agent 和 QuoteEngine 暴露的安全结构：
+对 Agent 和 V4 Pricing 层暴露的安全结构：
 
 ```json
 {
@@ -631,9 +631,11 @@ temporary_order_id 的不可逆引用
 阶段耗时
 ```
 
-## 12. 报价规则
+## 12. Historical V3 Pricing Policy（仅历史记录）
 
-### 12.1 W+ 规则
+> 本节只记录 V3 当时的商业报价策略，**不属于 V4 Active Probe Protocol，不得作为 V4 ProbeCoordinator、WandaActiveProbe、ProbeResult、Probe lifecycle 或 V4 QuoteEngine 的实现依据**。V4 Probe 只返回官方价格事实；最终售价必须由 V4 当前 Pricing/Quote 逻辑决定。
+
+### 12.1 W+ 规则（V3 历史）
 
 V3 默认配置：
 
@@ -924,7 +926,7 @@ wanda_gateway_unavailable
 | 15/15 秒后台 release reconciliation | 缺失 | Blocker |
 | Backend restart recovery | 缺失 | Blocker |
 | Probe 审计 | Quote audit 有，但没有 Probe lifecycle audit | Blocker |
-| ProbeResult → QuoteEngine | 当前报价服务内部直接计算 | 需要拆分 |
+| ProbeResult → V4 Existing Pricing Engine | 当前报价服务内部直接计算 | 需要拆分，不能引入 V3 Pricing Policy |
 | Active Probe 与 `AGENT_HARNESS_READ_ONLY` 联动 | 未建立专用门禁 | Blocker |
 | Agent stale 与 Probe cleanup 分离 | 未建立 Probe 独立生命周期 | Blocker |
 | endpoint guard | 现有 Wanda endpoint allow-list 有部分保护 | 需补充 Active Probe 开关 guard |
@@ -955,9 +957,253 @@ WANDA_ACTIVE_PROBE_ENABLED=false
 
 并在 Coordinator、Wanda provider client、quote.preview 三层 fail closed。
 
-## 17. Golden Tests 与 Shadow 迁移基线
+## 17. V4 Pricing Architecture（只读审计）
 
-### 17.1 V3 已有测试来源
+本节记录当前 V4 实际运行代码中的报价职责，不修改公式，不把 V3 商业规则带入 Probe。
+
+### 17.1 当前主链路
+
+```text
+Wanda 官方 Provider
+→ WandaDirectQuoteService._seat_facts()
+→ Seat Facts
+   ├─ original price / salesPrice
+   ├─ regular settlePrice
+   ├─ W+ activity price
+   ├─ physical W+ eligibility
+   ├─ area_id / area_name / seat_id
+   └─ channel_fee
+→ WandaDirectQuoteService._priced_unit()
+   或 _vip_priced_unit()
+→ RealSeatQuote.unit_quote_cents
+→ RealQuote.total_quote_cents
+→ PluginAutomation._record_quote()
+→ QuoteRecordStore
+→ ReplyValidator / Agent 回复
+```
+
+当前没有独立命名为 `QuoteEngine` 的 V4 类；实际最终售价计算集中在：
+
+```text
+backend/app/wanda_direct_quote.py
+├─ WandaDirectQuoteService._priced_unit()
+├─ WandaDirectQuoteService._vip_priced_unit()
+├─ WandaDirectQuoteService._dynamic_wanda_adjustment()
+├─ WandaDirectQuoteService._exact_quote()
+└─ WandaDirectQuoteService._middle_wplus_quote()
+```
+
+### 17.2 V4 当前售价公式
+
+当 `rules.enabled == false`：
+
+```text
+有有效 member_price → member_price
+否则 → original_price
+```
+
+当 `rules.wanda_rules` 非空：
+
+```text
+discount_percent = member_price / original_price * 100
+adjustment = 按 wanda_rules 匹配的 fixed_adjustment_cents
+raw = member_price + adjustment
+```
+
+当前仓库 `data/pricing-rules.json` 的状态为：
+
+```text
+enabled = true
+wanda_rules = 六个完整区间
+每个区间 fixed_adjustment_cents = 290
+rounding_increment_cents = 10
+```
+
+因此当前仓库配置下，Wanda 普通座和 W+ 座均优先进入 `wanda_rules` 动态区间路径，而不是自动使用 V3 历史的 `-290 / +100` 分支。
+
+当 `wanda_rules` 为空时，才回退到代码中的兼容路径：
+
+```text
+W+ 且 member_price <= wplus_member_price_threshold_cents：
+    max(original_price + wplus_adjustment_cents, member_price)
+
+W+ 且 member_price > threshold：
+    member_price
+
+非 W+：
+    member_price + regular_adjustment_cents
+```
+
+所有非 VIP 结果随后执行：
+
+```text
+向 rounding_increment_cents 取整
+不低于 member_price
+不高于 original_price
+```
+
+VIP 影厅由 `_vip_priced_unit()` 独立处理：
+
+```text
+original_price <= vip_discount_threshold_cents：
+    original_price - vip_low_price_discount_cents
+
+original_price > vip_discount_threshold_cents：
+    original_price * vip_high_price_discount_percent / 100
+```
+
+随后按 `rounding_increment_cents` 取整，并限制在正数至实时原价之间。当前默认字段为：
+
+```text
+vip_fixed_cost_cents = 5000
+vip_discount_threshold_cents = 6000
+vip_high_price_discount_percent = 90
+vip_low_price_discount_cents = 200
+```
+
+### 17.3 多张票与渠道/区域分支
+
+- Exact seats：`_exact_quote()` 对每个实时座位生成 `RealSeatQuote`，最终 `total_quote_cents` 为每座 `unit_quote_cents` 求和。
+- 同一 `(area_id, price, channel_fee)` 的座位共享已取得的会员价事实；不同区域/类型不平均价格。
+- Area preview：`_middle_wplus_quote()` 先得到 W+ 参考单价；数量已知时使用 `unit_quote_cents * ticket_count`，未知时总价为空。
+- Wanda 区域差异来自 `physical_wplus`、`area_id`、`area_name`、`seat_type`、官方原价、会员价和 channel fee。
+- Liangpiao 使用独立的 `SelectedSeatQuoteService._apply_operator_pricing()`，受 `FIXED/LIMIT`、`liangpiao_rules`、`liangpiao_fixed_rules`、`marketAmount`、`estimateAmount` 和 `totalAmount` 影响。
+
+### 17.4 当前 V4 价格边界与配置来源
+
+当前存在的最终价格边界：
+
+```text
+动态 Wanda fixed_adjustment_cents
+普通座 adjustment
+VIP discount/fixed-cost 规则
+rounding_increment_cents
+member price floor
+original price ceiling
+```
+
+安全边界：
+
+```text
+最终报价不得低于有效会员成本
+最终报价不得高于实时官方原价
+取整后若 floor > ceiling，则拒绝报价
+```
+
+默认配置入口：
+
+```text
+WANDA_PRICING_RULES_PATH=data/pricing-rules.json
+```
+
+当前仓库可确认：
+
+```text
+enabled=true
+wanda_rules=六段 fixed_adjustment_cents=290
+rounding_increment_cents=10
+liangpiao_price_mode=LIMIT
+```
+
+本轮没有读取生产机进程环境，因此不能把仓库文件断言为生产最终生效值；生产环境若设置 `WANDA_PRICING_RULES_PATH` 覆盖，应单独脱敏核对。
+
+`QuoteRecordStore` 负责持久化和审计，不负责重新计算最终售价；`PricingRulesStore.rule_version()` 为实际规则生成版本摘要。
+
+### 17.5 WandaDirectQuoteService 的职责拆分结论
+
+当前 `WandaDirectQuoteService` 同时承担：
+
+```text
+影院匹配
+官方场次查询
+实时座位查询
+座位事实归一化
+Active Probe 触发（_probe_member_price）
+Probe 释放等待
+最终商业报价计算
+RealQuote 组装
+```
+
+后续应拆成：
+
+```text
+WandaReadClient / SeatFactMapper
+→ WandaActiveProbe
+→ ProbeResult（只含 original/member cost facts）
+→ V4 Existing Pricing Engine
+→ RealQuote / QuoteRecord
+```
+
+ProbeResult 禁止包含：
+
+```text
+selling_price
+quote_price
+markup
+discount
+adjustment
+threshold
+```
+
+本节只用于 V4 报价审计，不改变当前公式。
+
+## 18. Golden Tests 与 Shadow 迁移基线
+
+### 18.1 Golden Tests 分层
+
+#### A. Probe Golden Tests
+
+只验证：
+
+```text
+代表座选择
+create 是否成功
+lock 是否确认
+W+ 活动是否唯一
+member_price_cents 是否正确读取
+cancel 是否完成
+release 是否确认
+error code 是否一致
+```
+
+期望结果只允许是 Probe 事实，例如：
+
+```json
+{
+  "status": "SUCCESS",
+  "member_price_cents": 3800,
+  "release_verified": true
+}
+```
+
+不得验证或写入：
+
+```text
+selling_price
+quote_price
+markup
+discount
+adjustment
+threshold
+最终买家报价
+```
+
+#### B. V4 Pricing Tests
+
+使用脱离 Probe 的纯 `ProbeResult` 作为输入，调用 V4 当前 Pricing/Quote 逻辑，验证：
+
+```text
+V4 当前配置
+V4 当前 Wanda rules
+V4 当前 VIP 分支
+V4 当前 Liangpiao 分支
+取整、成本下限、原价上限
+多张求和
+```
+
+这些测试必须根据 V4 当前真实规则建立，不能复制 V3 Golden 的最终报价期望值。
+
+### 18.2 V3 已有测试来源
 
 现有测试已经覆盖以下行为类别：
 
@@ -984,7 +1230,7 @@ remaining 配额过滤
 禁止 legacy ticket URL 旁路
 ```
 
-### 17.2 当前未完成项
+### 18.3 当前未完成项
 
 尚未建立独立版本化的：
 
@@ -1005,7 +1251,7 @@ tests/fixtures/provider_replays/
 
 所以当前不能宣称 V3 Golden Fixtures 已完成。
 
-### 17.3 M2 必须建立的 Golden 场景
+### 18.4 M2 必须建立的 Golden 场景
 
 至少覆盖：
 
@@ -1032,9 +1278,34 @@ tests/fixtures/provider_replays/
 20 Probe 额度耗尽
 ```
 
-M2 的 V4 结果必须与本协议和 Golden Result 一致；不能以测试数量替代逐场景行为对照。
+M2 的 Probe 结果必须与本协议和 Probe Golden Result 一致；V4 Pricing Tests 只需与 V4 当前 Pricing 规则一致。不能要求 V3 最终 quote 与 V4 最终 quote 相同。
 
-## 18. Migration Blockers
+Shadow Replay 只比较 Probe 层：
+
+```text
+V3 输入 → V3 Probe → member price fact
+V4 输入 → V4 Probe → member price fact
+```
+
+比较：
+
+```text
+代表座
+区域类型
+member_price
+create/lock/cancel/release 行为
+error code
+```
+
+不比较：
+
+```text
+V3 最终 selling_price
+V3 最终 quote
+V3 与 V4 的最终 total_quote_cents
+```
+
+## 19. Migration Blockers
 
 在以下事项完成前，V3 不得删除：
 
@@ -1047,12 +1318,12 @@ M2 的 V4 结果必须与本协议和 Golden Result 一致；不能以测试数�
 7. V4 现有报价服务仍可能在只读模式下进入临时锁座探价路径。
 8. V4 没有独立 `WANDA_ACTIVE_PROBE_ENABLED=false` 双层 Kill Switch。
 9. V4 不能保证 Agent stale 后 Probe cleanup 独立继续完成。
-10. V4 尚未把 Probe 原始会员价事实和 QuoteEngine 价格计算完全拆开。
+10. V4 尚未把 Probe 原始会员价事实和 V4 Existing Pricing Engine 完全拆开；不得引入 V3 商业报价公式。
 11. Legacy local gateway path 与 direct official path 的取消/状态确认语义尚未统一。
-12. 尚未完成 V3 Golden Result 与 V4 Shadow Replay 一致性证明。
+12. 尚未完成 Probe-only Golden Result 与 V4 Shadow Replay 一致性证明；不要求 V3/V4 最终商业报价一致。
 13. 尚未完成真实 Provider Capture；本阶段不得用 mock 结果冒充真实验证。
 
-## 19. M1 结论
+## 20. M1 结论
 
 M1 已完成：
 
@@ -1065,6 +1336,8 @@ V3 并发、账号、租约和配额盘点
 V3 报价规则盘点
 V3 文件、配置项和错误码清单
 V4 已有能力与缺失能力映射
+V4 Pricing Architecture 审计
+V4 当前规则与生产配置来源审计
 Migration Blockers
 ```
 
