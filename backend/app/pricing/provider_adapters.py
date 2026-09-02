@@ -133,16 +133,44 @@ class WandaPricingFactsAdapter:
             release_verified = _probe_value(probe, "releaseVerified", "release_verified")
             if release_verified is not True:
                 raise PricingError("probe_release_not_verified", "Probe释放未验证，不能进入报价。")
-            facts = facts.with_probe_cost(
-                probe_result_id=_text(_probe_value(probe, "probeResultId", "probe_result_id", "id"), field="probe_result_id"),
-                seat_id=_text(_probe_value(probe, "seatId", "seat_id"), field="seat_id"),
-                original_price_cents=_cents(_probe_value(probe, "originalPriceCents", "original_price_cents"), field="original_price_cents", required=True),
-                member_cost_cents=_cents(_probe_value(probe, "memberCostCents", "member_cost_cents"), field="member_cost_cents", required=True),
-                release_verified=True,
-            )
+            if str(_probe_value(probe, "status") or "SUCCESS").upper() != "SUCCESS":
+                raise PricingError("probe_result_invalid", "ProbeResult未成功读取成本。")
+            probe_id = _text(_probe_value(probe, "probeResultId", "probe_result_id", "probe_id", "id"), field="probe_result_id")
+            prices = _items(probe, "seatTypePrices", "seat_type_prices")
+            if prices:
+                for price in prices:
+                    targets = self._probe_targets(facts, price)
+                    for target in targets:
+                        facts = facts.with_probe_cost(
+                            probe_result_id=probe_id, seat_id=target.seat_id,
+                            original_price_cents=_cents(_value(price, "originalPriceCents", "original_price_cents"), field="original_price_cents", required=True),
+                            member_cost_cents=_cents(_value(price, "memberPriceCents", "member_price_cents"), field="member_cost_cents", required=True),
+                            release_verified=True,
+                        )
+            else:
+                facts = facts.with_probe_cost(
+                    probe_result_id=probe_id,
+                    seat_id=_text(_probe_value(probe, "seatId", "seat_id"), field="seat_id"),
+                    original_price_cents=_cents(_probe_value(probe, "originalPriceCents", "original_price_cents"), field="original_price_cents", required=True),
+                    member_cost_cents=_cents(_probe_value(probe, "memberCostCents", "member_cost_cents"), field="member_cost_cents", required=True),
+                    release_verified=True,
+                )
         return facts
 
     from_provider = adapt
+
+    @staticmethod
+    def _probe_targets(facts: PricingFacts, price: object) -> list[PricingSeatFact]:
+        all_facts = list(facts.seats) + ([facts.area_reference] if facts.area_reference is not None else [])
+        representative = _optional_text(_value(price, "representativeSeatId", "representative_seat_id"))
+        candidates = [item for item in all_facts if representative and item.seat_id == representative]
+        if not candidates:
+            area_code = _optional_text(_value(price, "areaCode", "area_code"))
+            zone_type = str(_value(price, "zoneType", "zone_type") or "").upper()
+            candidates = [item for item in all_facts if area_code and item.area_code == area_code and item.zone_type.upper() == zone_type]
+        if not candidates:
+            raise PricingError("pricing_seat_not_found", "Probe座位类型无法映射到PricingFacts。")
+        return candidates
 
     @staticmethod
     def _probes(value: Sequence[object] | Mapping[str, object] | object | None) -> list[object]:

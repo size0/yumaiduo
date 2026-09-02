@@ -74,6 +74,23 @@ def test_wanda_adapter_consumes_only_verified_probe_result() -> None:
         }])
 
 
+def test_wanda_adapter_accepts_actual_probe_result_shape() -> None:
+    facts = WandaPricingFactsAdapter().adapt({
+        "showId": "show-1", "seats": [{
+            "seatId": "w1", "seatNumber": "1排1座", "areaId": "36", "areaCode": "36",
+            "areaName": "W+", "physicalWplus": True, "available": True,
+        }],
+    }, probe_results=[{
+        "probe_id": "probe-actual", "status": "SUCCESS", "release_verified": True,
+        "seat_type_prices": [{
+            "area_code": "36", "zone_type": "WPLUS", "representative_seat_id": "probe-seat",
+            "original_price_cents": 7290, "member_price_cents": 6190,
+        }],
+    }])
+    assert facts.seats[0].member_cost_cents == 6190
+    assert facts.seats[0].probe_result_id == "probe-actual"
+
+
 def test_wanda_adapter_does_not_use_displayed_price_as_original() -> None:
     facts = WandaPricingFactsAdapter().adapt({
         "showId": "show-1", "seats": [{"seatId": "r1", "seatNumber": "1排1座",
