@@ -185,6 +185,12 @@ def test_liangpiao_unavailable_and_string_amount_validation() -> None:
             "available": True, "showId": "lp", "totalAmount": "70.00", "priceMode": "FIXED",
             "seats": [{"rowNo": 1, "colNo": 1}],
         })
+    with pytest.raises(PricingError) as raised:
+        adapter.from_preflight({
+            "available": True, "showId": "lp", "totalAmount": "7000", "priceMode": "FIXED",
+            "seats": [{"rowNo": 1, "colNo": 1, "available": False}],
+        })
+    assert raised.value.code == "LIANGPIAO_SEAT_UNAVAILABLE"
 
 
 def test_quote_result_compatibility_maps_without_recalculation() -> None:

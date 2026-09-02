@@ -200,6 +200,8 @@ class LiangpiaoPricingFactsAdapter:
 
     @staticmethod
     def _seat(raw: object, index: int) -> PricingSeatFact:
+        if _value(raw, "available", "isAvailable") is False:
+            raise PricingError("LIANGPIAO_SEAT_UNAVAILABLE", "良票预检座位事实不可售。")
         seat_id, label = _seat_identity(raw, index)
         return PricingSeatFact(
             seat_id=seat_id, seat_label=label,

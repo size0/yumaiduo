@@ -175,7 +175,11 @@ class PricingFacts:
         object.__setattr__(self, "provider", provider)
         if not _text(self.show_id):
             raise PricingError("pricing_input_invalid", "show_id不能为空。")
-        default_mode = (self.price_mode or "FIXED").upper()
+        mode = self.price_mode.upper() if isinstance(self.price_mode, str) else self.price_mode
+        if mode is not None and mode not in {"FIXED", "LIMIT"}:
+            raise PricingError("pricing_input_invalid", "price_mode无效。")
+        object.__setattr__(self, "price_mode", mode)
+        default_mode = mode or "FIXED"
         route = self.quote_route or ("WANDA_SELF" if provider == "WANDA" else f"LIANGPIAO_{default_mode}")
         if route not in {"WANDA_SELF", "LIANGPIAO_LIMIT", "LIANGPIAO_FIXED"}:
             raise PricingError("pricing_input_invalid", "quote_route无效。")
@@ -188,6 +192,8 @@ class PricingFacts:
         object.__setattr__(self, "quote_route", route)
         if self.area_quote_strategy not in {None, "AVERAGE", "HIGHEST", "LOWEST"}:
             raise PricingError("pricing_input_invalid", "area_quote_strategy无效。")
+        if not _text(self.ticket_mode):
+            raise PricingError("pricing_input_invalid", "ticket_mode不能为空。")
         if self.quantity is not None and (not isinstance(self.quantity, int) or isinstance(self.quantity, bool) or not 1 <= self.quantity <= 20):
             raise PricingError("pricing_input_invalid", "quantity必须是1至20的整数或空值。")
         if self.quote_scope not in {"exact_seats", "area_preview", "area_probe"}:
