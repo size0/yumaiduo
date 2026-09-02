@@ -25,6 +25,7 @@ from .errors import ProviderError
 from .models import MovieImageInfo, PricingRulesUpdate, RealQuote, RealSeatQuote
 from .reply_template_store import ReplyTemplates, render_template
 from .observability import LOGGER
+from .probe.policy import ProbePolicy
 
 
 CINEMA_ORIGIN: Final = "https://cinema-api-prd-mx.wandafilm.com"
@@ -888,6 +889,8 @@ class WandaDirectQuoteService:
         showtime_id: str,
         seat: Mapping[str, Any],
     ) -> int:
+        if not ProbePolicy.context_allows_active_probe():
+            raise ProviderError("QUOTE_REQUIRES_ACTIVE_PROBE", "实时会员成本缺失，需要独立 Active Probe。")
         seat_id = str(seat.get("seat_id") or "").strip()
         area_id = str(seat.get("area_id") or "").strip()
         original_price = int(seat.get("price") or 0)

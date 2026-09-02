@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..models import MovieImageInfo
+from ..probe.policy import disable_active_probe
 from .observations import Observation
 from .registry import ToolDefinition, ToolRegistry
 
@@ -195,12 +196,20 @@ def build_read_only_registry(
                 quote_target = getattr(route, "recognition", recognition)
                 preferred_cinema_id = getattr(route, "wanda_cinema_id", None)
             mapped_quote = getattr(quote_service, "quote_mapped", None)
-            quote = await (
-                mapped_quote(quote_target, wanda_cinema_id=preferred_cinema_id)
-                if preferred_cinema_id and callable(mapped_quote)
-                else quote_service.quote(quote_target)
-            )
-        except Exception:
+            # quote.preview is read-only: it may never fall through to the
+            # legacy WandaDirectQuoteService temporary-order probe.
+            with disable_active_probe():
+                quote = await (
+                    mapped_quote(quote_target, wanda_cinema_id=preferred_cinema_id)
+                    if preferred_cinema_id and callable(mapped_quote)
+                    else quote_service.quote(quote_target)
+                )
+        except Exception as error:
+            if getattr(error, "code", "") == "QUOTE_REQUIRES_ACTIVE_PROBE":
+                return Observation.warning(
+                    "QUOTE_REQUIRES_ACTIVE_PROBE",
+                    message="实时会员成本缺失，需要由确定性的 ProbeCoordinator 处理。",
+                )
             return Observation.warning("quote_failed", message="这个场次暂时没有查到可用价格，需要人工确认。")
         data = quote.model_dump(mode="json") if hasattr(quote, "model_dump") else {}
         now = datetime.now(timezone.utc)

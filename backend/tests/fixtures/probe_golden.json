@@ -1,0 +1,22 @@
+[
+  {"name":"normal_success","expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"create_failure","create_error":"temporary_lock_failed","expected_error_code":"temporary_lock_failed","expected_release_verified":false,"expected_terminal_statuses":["FAILED"]},
+  {"name":"order_id_missing","create_order_id":false,"expected_error_code":"temporary_lock_state_unknown","expected_release_verified":false,"expected_terminal_statuses":["FAILED"]},
+  {"name":"lock_status_not_40","lock_status":30,"expected_error_code":"temporary_lock_state_unknown","expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"wplus_activity_missing","activity_available":false,"expected_error_code":"activity_offers_failed","expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"total_pay_price_missing","member_price_cents":null,"expected_error_code":"wplus_price_unavailable","expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"cancel_failure","cancel_error":"temporary_lock_release_unverified","expected_error_code":"temporary_lock_release_unverified","expected_release_verified":false,"expected_terminal_statuses":["RELEASE_UNVERIFIED"]},
+  {"name":"order_status_not_60","cancel_status":40,"expected_error_code":"temporary_lock_release_unverified","expected_release_verified":false,"expected_terminal_statuses":["RELEASE_UNVERIFIED"]},
+  {"name":"lock_seat_time_not_minus_1","cancel_lock_seat_time":0,"expected_error_code":"temporary_lock_release_unverified","expected_release_verified":false,"expected_terminal_statuses":["RELEASE_UNVERIFIED"]},
+  {"name":"release_immediate","available_after_seconds":0,"expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"release_after_2_seconds","available_after_seconds":2,"expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"release_after_5_seconds","available_after_seconds":5,"expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"release_never_verified","available_after_seconds":99,"expected_error_code":"temporary_lock_release_unverified","expected_release_verified":false,"expected_terminal_statuses":["RELEASE_UNVERIFIED"]},
+  {"name":"multiple_seat_types","seat_type_prices":[{"area_code":"A","zone_type":"W+","original_price_cents":5000,"member_price_cents":3800},{"area_code":"B","zone_type":"W+","original_price_cents":6000,"member_price_cents":4800}],"expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"regular_and_wplus_mixed","seat_type_prices":[{"area_code":"A","zone_type":"普通","original_price_cents":5000,"member_price_cents":4300},{"area_code":"B","zone_type":"W+","original_price_cents":6000,"member_price_cents":3800}],"expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"same_show_concurrency","expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"same_account_concurrency","expected_error_code":null,"expected_release_verified":true,"expected_terminal_statuses":["RELEASE_VERIFIED"]},
+  {"name":"token_invalid","token_present":false,"expected_error_code":"wplus_account_unavailable","expected_release_verified":false,"expected_terminal_statuses":["FAILED"]},
+  {"name":"wplus_invalid","is_wplus":false,"expected_error_code":"wplus_account_unavailable","expected_release_verified":false,"expected_terminal_statuses":["FAILED"]},
+  {"name":"quota_exhausted","remaining":0,"expected_error_code":"wplus_account_unavailable","expected_release_verified":false,"expected_terminal_statuses":["FAILED"]}
+]

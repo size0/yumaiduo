@@ -53,6 +53,8 @@ class Settings(BaseModel):
     # write commands remain fused off until the new write path is reviewed.
     agent_harness_read_only: bool = True
     new_agent_harness_enabled: bool = False
+    # Active Probe is a state-writing operation and remains independently fused off.
+    wanda_active_probe_enabled: bool = False
     liangpiao_callback_enabled: bool = False
 
     @field_validator("base_url", "chat_base_url", "liangpiao_base_url")
@@ -118,5 +120,6 @@ class Settings(BaseModel):
             ),
             agent_harness_read_only=_env_flag("AGENT_HARNESS_READ_ONLY", True),
             new_agent_harness_enabled=_env_flag("NEW_AGENT_HARNESS_ENABLED"),
+            wanda_active_probe_enabled=_env_flag("WANDA_ACTIVE_PROBE_ENABLED"),
             liangpiao_callback_enabled=_env_flag("LIANGPIAO_CALLBACK_ENABLED"),
         )
