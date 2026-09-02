@@ -26,7 +26,7 @@ class V4PricingEngine:
             if base is None:
                 raise PricingError("authoritative_original_price_required", "区域参考缺少官方原价。")
             return QuoteResult(
-                provider="WANDA", quote_scope=facts.quote_scope,
+                provider="WANDA", quote_scope=facts.quote_scope, quote_route=facts.quote_route,
                 seat_zone_type="W+" if reference.physical_wplus else reference.area_name or "普通",
                 seat_type="wplus" if reference.physical_wplus else "regular",
                 member_unit_price_cents=reference.member_cost_cents,
@@ -36,6 +36,7 @@ class V4PricingEngine:
                 channel_fee_total_cents=reference.channel_fee_cents * quantity if quantity else None,
                 ticket_count=quantity, needs_ticket_count=quantity is None, seat_quotes=(),
                 pricing_rule_version=rules.rule_version if rules.enabled else None,
+                price_source="realtime_vip_area" if facts.is_vip else "realtime_wplus_area" if reference.physical_wplus else "realtime_regular_area",
                 pricing_source="万达官方实时座位原价（W+区域优先）+ 后台报价规则（只读）" if rules.enabled else "万达官方实时W+区域原价（只读）",
             )
         if not facts.seats:
@@ -51,9 +52,10 @@ class V4PricingEngine:
         members = {item.member_cost_cents for item in priced}
         originals = {item.original_price_cents for item in priced}
         types = {"wplus" if item.physical_wplus else "regular" for item in facts.seats}
+        seat_type = next(iter(types)) if len(types) == 1 else "mixed"
         zones = {item.zone_type for item in priced}
         return QuoteResult(
-            provider="WANDA", quote_scope="exact_seats",
+            provider="WANDA", quote_scope="exact_seats", quote_route=facts.quote_route,
             seat_zone_type=next(iter(zones)) if len(zones) == 1 else "混合区域",
             seat_type=next(iter(types)) if len(types) == 1 else "mixed",
             member_unit_price_cents=next(iter(members)) if len(members) == 1 else None,
@@ -65,6 +67,7 @@ class V4PricingEngine:
             channel_fee_total_cents=sum(item.channel_fee_cents for item in priced),
             ticket_count=len(priced), needs_ticket_count=False, seat_quotes=tuple(priced),
             pricing_rule_version=rules.rule_version if rules.enabled else None,
+            price_source=("realtime_vip_area" if facts.is_vip else "realtime_regular_area" if seat_type == "regular" else "realtime_wplus_area" if seat_type == "wplus" else "realtime_mixed_area"),
             pricing_source="万达官方实时座位原价（W+区域优先）+ 后台报价规则（只读）" if rules.enabled else "万达官方实时座位原价（W+区域优先，只读）",
         )
 
@@ -143,7 +146,7 @@ class V4PricingEngine:
         quantity = facts.quantity
         unit = buyer_amount // quantity if quantity and buyer_amount % quantity == 0 else None
         return QuoteResult(
-            provider="LIANGPIAO", quote_scope="exact_seats", seat_zone_type="LIANGPIAO", seat_type="mixed",
+            provider="LIANGPIAO", quote_scope="exact_seats", quote_route=f"LIANGPIAO_{mode}", seat_zone_type="LIANGPIAO", seat_type="mixed",
             member_unit_price_cents=None, original_unit_price_cents=None,
             base_unit_cents=base // quantity if quantity and base % quantity == 0 else None,
             base_total_cents=base, unit_quote_cents=unit, total_quote_cents=buyer_amount,
@@ -151,6 +154,7 @@ class V4PricingEngine:
             price_mode=mode, max_price_cents=maximum, provider_amount_cents=provider_amount,
             operator_pricing_applied=applied, operator_markup_percent=markup,
             pricing_rule_version=facts.provider_pricing_rule_version or rules.rule_version,
+            price_source="liangpiao_realtime_preflight",
             provider_quote_id=facts.provider_quote_id, provider_quote_hash=facts.provider_quote_hash,
             pricing_source="良票实时选座预检 + 后台良票报价规则" if applied else "良票实时选座预检",
             semantic_flags=("PRICING_SEMANTIC_REVIEW_REQUIRED",) if maximum != buyer_amount else (),

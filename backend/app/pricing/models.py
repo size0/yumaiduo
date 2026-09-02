@@ -6,6 +6,7 @@ from typing import Any, Literal, Mapping, Sequence
 from .errors import PricingError
 
 ProviderName = Literal["WANDA", "LIANGPIAO"]
+QuoteRoute = Literal["WANDA_SELF", "LIANGPIAO_LIMIT", "LIANGPIAO_FIXED"]
 QuoteScope = Literal["exact_seats", "area_preview", "area_probe"]
 PriceMode = Literal["FIXED", "LIMIT"]
 
@@ -144,6 +145,7 @@ class PricingFacts:
 
     provider: ProviderName
     show_id: str
+    quote_route: QuoteRoute | None = None
     cinema_id: str | int | None = None
     hall_name: str = ""
     is_vip: bool = False
@@ -153,6 +155,7 @@ class PricingFacts:
     area_reference: PricingSeatFact | None = None
     price_mode: PriceMode | None = None
     ticket_mode: str = "STANDARD"
+    area_quote_strategy: str | None = None
     provider_total_amount_cents: int | None = None
     provider_estimate_amount_cents: int | None = None
     provider_buyer_amount_cents: int | None = None
@@ -172,6 +175,19 @@ class PricingFacts:
         object.__setattr__(self, "provider", provider)
         if not _text(self.show_id):
             raise PricingError("pricing_input_invalid", "show_id不能为空。")
+        default_mode = (self.price_mode or "FIXED").upper()
+        route = self.quote_route or ("WANDA_SELF" if provider == "WANDA" else f"LIANGPIAO_{default_mode}")
+        if route not in {"WANDA_SELF", "LIANGPIAO_LIMIT", "LIANGPIAO_FIXED"}:
+            raise PricingError("pricing_input_invalid", "quote_route无效。")
+        if provider == "WANDA" and route != "WANDA_SELF":
+            raise PricingError("pricing_input_invalid", "Wanda只能使用WANDA_SELF报价路由。")
+        if provider == "LIANGPIAO" and route not in {"LIANGPIAO_LIMIT", "LIANGPIAO_FIXED"}:
+            raise PricingError("pricing_input_invalid", "良票只能使用对应price_mode报价路由。")
+        if provider == "LIANGPIAO" and self.price_mode is not None and route != f"LIANGPIAO_{self.price_mode}":
+            raise PricingError("pricing_input_invalid", "quote_route必须与price_mode一致。")
+        object.__setattr__(self, "quote_route", route)
+        if self.area_quote_strategy not in {None, "AVERAGE", "HIGHEST", "LOWEST"}:
+            raise PricingError("pricing_input_invalid", "area_quote_strategy无效。")
         if self.quantity is not None and (not isinstance(self.quantity, int) or isinstance(self.quantity, bool) or not 1 <= self.quantity <= 20):
             raise PricingError("pricing_input_invalid", "quantity必须是1至20的整数或空值。")
         if self.quote_scope not in {"exact_seats", "area_preview", "area_probe"}:
@@ -249,6 +265,8 @@ class QuoteResult:
     operator_pricing_applied: bool = False
     operator_markup_percent: float | None = None
     pricing_rule_version: str | None = None
+    quote_route: QuoteRoute = "WANDA_SELF"
+    price_source: str | None = None
     provider_quote_id: str | None = None
     provider_quote_hash: str | None = None
     pricing_source: str = ""
