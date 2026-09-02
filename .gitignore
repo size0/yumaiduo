@@ -27,3 +27,4 @@ plugin-runtime/**/logs/
 .release-stage-*/
 *.tar.gz
 *.tgz
+README - 副本.md
