@@ -39,6 +39,15 @@ class CancelResult(BaseModel):
     accepted: bool
 
 
+class OrderLookupResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["ORDER_FOUND_LOCKED", "ORDER_NOT_FOUND_CONFIRMED", "LOOKUP_UNKNOWN", "UNSUPPORTED"]
+    temporary_order_id: str | None = Field(default=None, max_length=240)
+    order_status: int | str | None = None
+    lock_seat_time: int | None = None
+
+
 class SeatAvailabilityResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

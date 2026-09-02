@@ -169,7 +169,7 @@ async def test_unknown_create_is_recoverable_and_never_retries_with_another_acco
     assert result.error_code == "create_unknown"
     assert store.list_all()[0].status == ProbeStatus.CREATE_UNKNOWN
     assert provider.calls == ["create_order"]
-    assert store.show_lock("show")["lock_state"] == "RELEASE_UNVERIFIED"
+    assert store.show_lock("show")["lock_state"] == "PROBE_UNKNOWN_HOLD"
 
 
 def test_multi_worker_show_gate_and_lease_expiry_recovery(tmp_path: Path) -> None:

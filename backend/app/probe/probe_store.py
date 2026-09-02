@@ -93,7 +93,7 @@ class DurableProbeStore:
             ).fetchone()
             if row is not None:
                 same_probe = row[0] == probe_id
-                pending = row[1] == "RELEASE_UNVERIFIED"
+                pending = row[1] in {"RELEASE_UNVERIFIED", "PROBE_UNKNOWN_HOLD"}
                 active = row[2] > now_text
                 if pending or (active and not same_probe):
                     connection.commit()
@@ -108,6 +108,15 @@ class DurableProbeStore:
             )
             connection.commit()
             return True
+
+    def mark_show_unknown_hold(self, show_id: str, probe_id: str, *, lease_expires_at: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO probe_show_locks(show_id, probe_id, lock_state, lease_expires_at) VALUES (?, ?, 'PROBE_UNKNOWN_HOLD', ?) "
+                "ON CONFLICT(show_id) DO UPDATE SET probe_id=excluded.probe_id, lock_state='PROBE_UNKNOWN_HOLD', lease_expires_at=excluded.lease_expires_at",
+                (show_id, probe_id, lease_expires_at),
+            )
+            connection.commit()
 
     def mark_show_release_unverified(self, show_id: str, probe_id: str, *, lease_expires_at: str) -> None:
         with self._connect() as connection:

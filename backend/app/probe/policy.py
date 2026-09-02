@@ -28,13 +28,15 @@ class ProbePolicy:
         release_recheck_delays_seconds: tuple[float, ...] = (0.0, 2.0, 5.0),
         reconciliation_delays_seconds: tuple[float, ...] = (15.0, 15.0),
         account_lease_ttl_seconds: float = 180.0,
+        unknown_create_hold_seconds: float = 900.0,
     ) -> None:
         self.active_probe_enabled = bool(active_probe_enabled)
         self.agent_harness_read_only = bool(agent_harness_read_only)
         self.release_recheck_delays_seconds = tuple(float(item) for item in release_recheck_delays_seconds)
         self.reconciliation_delays_seconds = tuple(float(item) for item in reconciliation_delays_seconds)
         self.account_lease_ttl_seconds = float(account_lease_ttl_seconds)
-        if self.account_lease_ttl_seconds <= 0:
+        self.unknown_create_hold_seconds = float(unknown_create_hold_seconds)
+        if self.account_lease_ttl_seconds <= 0 or self.unknown_create_hold_seconds <= self.account_lease_ttl_seconds:
             raise ValueError("probe_lease_ttl_invalid")
         if self.release_recheck_delays_seconds != (0.0, 2.0, 5.0):
             raise ValueError("probe_release_delays_must_be_0_2_5")

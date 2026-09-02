@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -93,6 +93,15 @@ class ProbeCoordinator:
                 self._probe_store.release_show(request.show_id, probe_id)
                 self._lease_store.release(account.account_ref, probe_id)
                 lease_acquired = False
+            elif latest and latest.status == ProbeStatus.CREATE_UNKNOWN:
+                unknown_expiry = (now + timedelta(seconds=self._policy.unknown_create_hold_seconds)).isoformat()
+                self._probe_store.mark_show_unknown_hold(
+                    request.show_id, probe_id, lease_expires_at=unknown_expiry,
+                )
+                self._lease_store.renew(
+                    account.account_ref, probe_id, now=now,
+                    ttl_seconds=self._policy.unknown_create_hold_seconds,
+                )
             else:
                 self._probe_store.mark_show_release_unverified(
                     request.show_id, probe_id, lease_expires_at=lease_expiry,

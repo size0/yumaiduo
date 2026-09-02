@@ -15,6 +15,9 @@ class ProbeDisabledError(ProbeError):
         super().__init__(code, "Active Probe 当前已关闭。")
 
 
+CREATE_UNKNOWN_UNRECOVERABLE_AUTOMATICALLY = "CREATE_UNKNOWN_UNRECOVERABLE_AUTOMATICALLY"
+
+
 class ProbeCleanupError(ProbeError):
     def __init__(self) -> None:
         super().__init__("temporary_lock_release_unverified", "临时锁座释放尚未确认。")
