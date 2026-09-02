@@ -48,9 +48,9 @@ def accounts(provider: FixtureWandaProvider | None = None) -> FixtureProbeAccoun
 
 def seats() -> list[LiveSeat]:
     return [
-        LiveSeat(seat_id="s-1", label="12排16座", area_code="A", zone_type="W+", available=True, wplus=True),
-        LiveSeat(seat_id="s-2", label="12排17座", area_code="A", zone_type="W+", available=True, wplus=True),
-        LiveSeat(seat_id="s-3", label="13排1座", area_code="B", zone_type="普通", available=True, wplus=False),
+        LiveSeat(seat_id="s-1", label="12排16座", area_code="A", zone_type="W+", available=True, wplus=True, original_price_cents=5000),
+        LiveSeat(seat_id="s-2", label="12排17座", area_code="A", zone_type="W+", available=True, wplus=True, original_price_cents=5000),
+        LiveSeat(seat_id="s-3", label="13排1座", area_code="B", zone_type="普通", available=True, wplus=False, original_price_cents=5000),
     ]
 
 
@@ -88,9 +88,9 @@ async def test_success_returns_probe_facts_only_and_releases(tmp_path: Path) -> 
     assert result.release_verified is True
     assert result.model_dump().keys() == {
         "probe_id", "provider", "show_id", "status", "seat_type_prices",
-        "release_verified", "error_code",
+        "cancel_confirmed", "release_verified", "release_timing_class", "error_code",
     }
-    assert provider.calls == ["create_order", "order_status", "activity", "read_member_prices", "cancel_order", "order_status", "available_seat_ids"]
+    assert provider.calls == ["create_order", "order_status", "activity", "cancel_order", "order_status", "available_seat_ids"]
     order = store.get(result.probe_id)
     assert order is not None and order.status == ProbeStatus.RELEASE_VERIFIED
     assert leases.get("acct-test-1") is None

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Protocol
 
 from .account_pool import ProbeAccount
 from .audit import ProbeAuditStore
+from .canonical import (
+    ActivityOffersResult,
+    CancelResult,
+    CreateOrderResult,
+    OrderStatusResult,
+    SeatAvailabilityResult,
+)
 from .errors import ProbeError
 from .models import ProbeOrder, ProbeResult, ProbeSeatTypePrice, ProbeStatus
 from .policy import ProbePolicy
@@ -16,12 +24,11 @@ from .seat_selector import LiveSeat
 class WandaProbeProvider(Protocol):
     fixture: bool
 
-    async def create_order(self, *, account: ProbeAccount, show_id: str, seat_ids: list[str]) -> Mapping[str, Any]: ...
-    async def order_status(self, *, temporary_order_reference: str) -> Mapping[str, Any]: ...
-    async def activity(self, *, temporary_order_reference: str) -> Mapping[str, Any]: ...
-    async def read_member_prices(self, *, activity: Mapping[str, Any], seats: list[LiveSeat]) -> list[Mapping[str, Any]]: ...
-    async def cancel_order(self, *, temporary_order_reference: str) -> Mapping[str, Any]: ...
-    async def available_seat_ids(self, *, show_id: str, seat_ids: list[str]) -> set[str]: ...
+    async def create_probe_order(self, *, account: ProbeAccount, show_id: str, seat_ids: list[str]) -> CreateOrderResult: ...
+    async def get_order_status(self, *, temporary_order_reference: str) -> OrderStatusResult: ...
+    async def get_activity_offers(self, *, temporary_order_reference: str) -> ActivityOffersResult: ...
+    async def cancel_probe_order(self, *, temporary_order_reference: str) -> CancelResult: ...
+    async def get_available_seats(self, *, show_id: str, seat_ids: list[str]) -> SeatAvailabilityResult: ...
 
 
 class WandaActiveProbe:
@@ -53,12 +60,13 @@ class WandaActiveProbe:
         provider = provider or self._provider
         recovered: list[str] = []
         for order in self._store.recoverable():
+            if order.status == ProbeStatus.CREATE_UNKNOWN:
+                # No safe order reference exists. A future provider may add
+                # lookup_probe_order; until then this remains a manual/M3 gate.
+                continue
             if not order.temporary_order_reference:
                 continue
-            if order.status == ProbeStatus.RELEASE_VERIFIED:
-                recovered.append(order.probe_id)
-                continue
-            release_verified, _ = await self._cleanup(order, order.temporary_order_reference, provider=provider)
+            release_verified, _, _ = await self._cleanup(order, order.temporary_order_reference, provider=provider)
             if release_verified:
                 recovered.append(order.probe_id)
         return recovered
@@ -69,11 +77,12 @@ class WandaActiveProbe:
         temporary_ref: str | None = None
         facts: list[ProbeSeatTypePrice] = []
         error_code: str | None = None
+        cancel_confirmed = False
         try:
-            response = await self._provider.create_order(
+            created = await self._provider.create_probe_order(
                 account=account, show_id=order.show_id, seat_ids=[seat.seat_id for seat in seats],
             )
-            temporary_ref = _order_reference(response)
+            temporary_ref = created.temporary_order_id
             if temporary_ref:
                 self._record(order.probe_id, "temporary_order_observed")
                 current = self._store.get(order.probe_id)
@@ -82,18 +91,24 @@ class WandaActiveProbe:
                         order.probe_id, expected_revision=current.revision,
                         temporary_order_reference=temporary_ref,
                     )
-            _verify_create(response)
-            status = await self._provider.order_status(temporary_order_reference=temporary_ref or "")
-            _verify_locked(status)
-            self._store.transition(order.probe_id, ProbeStatus.LOCKED, locked_at=_now())
-            activity = await self._provider.activity(temporary_order_reference=temporary_ref or "")
-            _verify_activity(activity)
-            raw_facts = await self._provider.read_member_prices(activity=activity, seats=seats)
-            facts = _facts(raw_facts, seats)
-            self._store.transition(order.probe_id, ProbeStatus.PRICE_READ, price_read_at=_now())
+            if created.outcome == "UNKNOWN":
+                error_code = "create_unknown"
+                self._mark_create_unknown(order.probe_id)
+            else:
+                _verify_create(created)
+                status = await self._provider.get_order_status(temporary_order_reference=temporary_ref or "")
+                _verify_locked(status)
+                self._store.transition(order.probe_id, ProbeStatus.LOCKED, locked_at=_now())
+                activity = await self._provider.get_activity_offers(temporary_order_reference=temporary_ref or "")
+                _verify_activity(activity)
+                facts = _facts_from_activity(activity, seats)
+                self._store.transition(order.probe_id, ProbeStatus.PRICE_READ, price_read_at=_now())
+        except asyncio.TimeoutError:
+            error_code = "create_unknown"
+            self._mark_create_unknown(order.probe_id)
         except asyncio.CancelledError:
-            # The finally block starts cleanup in a child task and shields it;
-            # the caller's cancellation remains the result of this operation.
+            # finally starts cleanup in a child task; cancellation remains the
+            # result of this operation while cleanup continues independently.
             raise
         except ProbeError as error:
             error_code = error.code
@@ -103,7 +118,7 @@ class WandaActiveProbe:
             if temporary_ref:
                 cleanup = asyncio.create_task(self._cleanup(order, temporary_ref, provider=self._provider))
                 try:
-                    release_verified, cleanup_error = await asyncio.shield(cleanup)
+                    release_verified, cleanup_error, cancel_confirmed = await asyncio.shield(cleanup)
                     if cleanup_error:
                         error_code = cleanup_error
                 except Exception:
@@ -111,12 +126,17 @@ class WandaActiveProbe:
                     error_code = "temporary_lock_release_unverified"
                 latest = self._store.get(order.probe_id)
                 if latest and latest.status not in {ProbeStatus.RELEASE_VERIFIED, ProbeStatus.RELEASE_UNVERIFIED}:
-                    self._store.transition(order.probe_id, ProbeStatus.RELEASE_UNVERIFIED, error_code="temporary_lock_release_unverified")
-            else:
+                    self._store.transition(
+                        order.probe_id, ProbeStatus.RELEASE_UNVERIFIED,
+                        error_code="temporary_lock_release_unverified",
+                    )
+            elif error_code != "create_unknown":
                 release_verified = False
                 latest = self._store.get(order.probe_id)
                 if latest and latest.status != ProbeStatus.FAILED:
                     self._store.transition(order.probe_id, ProbeStatus.FAILED, error_code=error_code or "probe_failed")
+            else:
+                release_verified = False
         latest = self._store.get(order.probe_id)
         release_verified = bool(latest and latest.status == ProbeStatus.RELEASE_VERIFIED)
         if error_code is None and not release_verified:
@@ -124,23 +144,36 @@ class WandaActiveProbe:
         return ProbeResult(
             probe_id=order.probe_id, show_id=order.show_id,
             status="SUCCESS" if error_code is None else "FAILED",
-            seat_type_prices=facts, release_verified=release_verified, error_code=error_code,
+            seat_type_prices=facts, cancel_confirmed=cancel_confirmed,
+            release_verified=release_verified,
+            release_timing_class=self._release_tracker.last_timing_class if release_verified else "UNVERIFIED",
+            error_code=error_code,
         )
+
+    def _mark_create_unknown(self, probe_id: str) -> None:
+        current = self._store.get(probe_id)
+        if current and current.status == ProbeStatus.CREATED:
+            self._store.transition(probe_id, ProbeStatus.CREATE_UNKNOWN, error_code="create_unknown")
 
     async def _cleanup(
         self, order: ProbeOrder, temporary_ref: str, *, provider: WandaProbeProvider,
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool, str | None, bool]:
         current = self._store.get(order.probe_id)
-        if current and current.status not in {ProbeStatus.CANCEL_REQUESTED, ProbeStatus.CANCEL_CONFIRMED, ProbeStatus.RELEASE_CHECKING, ProbeStatus.RELEASE_VERIFIED, ProbeStatus.RELEASE_UNVERIFIED}:
+        if current and current.status not in {
+            ProbeStatus.CANCEL_REQUESTED, ProbeStatus.CANCEL_CONFIRMED,
+            ProbeStatus.RELEASE_CHECKING, ProbeStatus.RELEASE_VERIFIED,
+            ProbeStatus.RELEASE_UNVERIFIED,
+        }:
             self._store.transition(order.probe_id, ProbeStatus.CANCEL_REQUESTED, cancel_requested_at=_now())
         cancel_call_ok = True
         try:
-            await provider.cancel_order(temporary_order_reference=temporary_ref)
+            cancel_response = await provider.cancel_probe_order(temporary_order_reference=temporary_ref)
+            cancel_call_ok = cancel_response.accepted
         except Exception:
             cancel_call_ok = False
         status_confirmed = False
         try:
-            status = await provider.order_status(temporary_order_reference=temporary_ref)
+            status = await provider.get_order_status(temporary_order_reference=temporary_ref)
             status_confirmed = _cancel_confirmed(status)
         except Exception:
             status_confirmed = False
@@ -156,57 +189,62 @@ class WandaActiveProbe:
             self._store.release_show(order.show_id, order.probe_id)
         else:
             self._record(order.probe_id, "release_unverified")
-            from datetime import datetime, timedelta, timezone
             expiry = (datetime.now(timezone.utc) + timedelta(seconds=self._policy.account_lease_ttl_seconds)).isoformat()
             self._store.mark_show_release_unverified(order.show_id, order.probe_id, lease_expires_at=expiry)
             self._release_tracker.schedule_reconciliation(order, provider)
-        return release_verified, None if cancel_call_ok and status_confirmed and release_verified else "temporary_lock_release_unverified"
+        return (
+            release_verified,
+            None if cancel_call_ok and status_confirmed and release_verified else "temporary_lock_release_unverified",
+            cancel_call_ok and status_confirmed,
+        )
 
 
-def _order_reference(response: Mapping[str, Any]) -> str | None:
-    data = response.get("data") if isinstance(response.get("data"), Mapping) else response
-    value = data.get("orderId") if isinstance(data, Mapping) else None
-    return str(value).strip() if value is not None and str(value).strip() else None
-
-
-def _verify_create(response: Mapping[str, Any]) -> None:
-    data = response.get("data") if isinstance(response.get("data"), Mapping) else {}
-    if response.get("code") != 0 or data.get("bizCode") != 0 or not _order_reference(response):
+def _verify_create(response: CreateOrderResult) -> None:
+    if response.outcome != "CONFIRMED" or response.code not in (0, "0") or response.biz_code not in (0, "0") or not response.temporary_order_id:
         raise ProbeError("temporary_lock_state_unknown")
 
 
-def _verify_locked(response: Mapping[str, Any]) -> None:
-    if response.get("orderStatus") != 40 or int(response.get("lockSeatTime", -1)) < 0:
+def _verify_locked(response: OrderStatusResult) -> None:
+    if response.order_status not in (40, "40") or response.lock_seat_time is None or response.lock_seat_time < 0:
         raise ProbeError("temporary_lock_state_unknown")
 
 
-def _verify_activity(response: Mapping[str, Any]) -> None:
-    if response.get("able") is not True or "W+会员专享" not in str(response.get("name") or ""):
+def _verify_activity(response: ActivityOffersResult) -> None:
+    if not response.able or "W+会员专享" not in response.name:
         raise ProbeError("activity_offers_failed")
-    allot = response.get("allotSeat")
-    if not isinstance(allot, Mapping) or not isinstance(allot.get("totalPayPrice"), int) or allot["totalPayPrice"] <= 0:
+    if response.total_pay_price_cents is None and not response.seat_type_prices:
         raise ProbeError("wplus_price_unavailable")
 
 
-def _facts(raw: list[Mapping[str, Any]], seats: list[LiveSeat]) -> list[ProbeSeatTypePrice]:
-    if not raw:
+def _facts_from_activity(response: ActivityOffersResult, seats: list[LiveSeat]) -> list[ProbeSeatTypePrice]:
+    if response.seat_type_prices:
+        return list(response.seat_type_prices)
+    if response.member_price_cents is None and response.total_pay_price_cents is None:
         raise ProbeError("wplus_price_unavailable")
-    result: list[ProbeSeatTypePrice] = []
-    for item in raw:
-        result.append(ProbeSeatTypePrice.model_validate(item))
-    return result
+    member = response.member_price_cents or response.total_pay_price_cents
+    return [ProbeSeatTypePrice(
+        area_code=seat.area_code, zone_type=seat.zone_type,
+        representative_seat_id=seat.seat_id,
+        original_price_cents=seat.original_price_cents or _raise_original_price(),
+        member_price_cents=member,
+    ) for seat in seats]
 
 
-def _cancel_confirmed(response: Mapping[str, Any]) -> bool:
-    return response.get("orderStatus") == 60 and response.get("lockSeatTime") == -1
+def _raise_original_price() -> int:
+    raise ProbeError("official_original_price_unavailable")
+
+
+def _cancel_confirmed(response: OrderStatusResult) -> bool:
+    return response.order_status in (60, "60") and response.lock_seat_time == -1
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
 
 
 class FixtureWandaProvider:
+    """In-memory canonical provider used by M2/M2.5 tests only."""
+
     fixture = True
 
     def __init__(
@@ -218,6 +256,7 @@ class FixtureWandaProvider:
         available_after_seconds: int = 0,
         create_error: str | None = None,
         create_order_id: bool = True,
+        create_unknown: bool = False,
         lock_status: int = 40,
         activity_available: bool = True,
         cancel_error: str | None = None,
@@ -233,6 +272,7 @@ class FixtureWandaProvider:
         self.available_after_seconds = available_after_seconds
         self.create_error = create_error
         self.create_order_id = create_order_id
+        self.create_unknown = create_unknown
         self.lock_status = lock_status
         self.activity_available = activity_available
         self.cancel_error = cancel_error
@@ -245,62 +285,58 @@ class FixtureWandaProvider:
         self.created = asyncio.Event()
         self._availability_calls = 0
         self._cancelled = False
+        self._seats: list[str] = []
 
     @classmethod
     def from_scenario(cls, scenario: Mapping[str, Any]) -> "FixtureWandaProvider":
         return cls(**{key: value for key, value in scenario.items() if key in {
-            "member_price_cents", "create_delay_seconds", "available_after_seconds", "create_error", "create_order_id",
-            "lock_status", "activity_available", "cancel_error", "cancel_status",
-            "cancel_lock_seat_time", "token_present", "is_wplus", "remaining",
+            "member_price_cents", "create_delay_seconds", "available_after_seconds", "create_error",
+            "create_order_id", "create_unknown", "lock_status", "activity_available", "cancel_error",
+            "cancel_status", "cancel_lock_seat_time", "token_present", "is_wplus", "remaining",
         }})
 
-    async def create_order(self, *, account: ProbeAccount, show_id: str, seat_ids: list[str]) -> Mapping[str, Any]:
+    async def create_probe_order(self, *, account: ProbeAccount, show_id: str, seat_ids: list[str]) -> CreateOrderResult:
         self.calls.append("create_order")
         self.created.set()
+        self._seats = list(seat_ids)
         if self.create_delay_seconds:
             await asyncio.sleep(self.create_delay_seconds)
         if self.create_error:
             raise ProbeError(self.create_error)
-        data: dict[str, Any] = {"bizCode": 0}
-        if self.create_order_id:
-            data["orderId"] = "fixture-order-1"
-        return {"code": 0, "data": data}
+        if self.create_unknown:
+            return CreateOrderResult(outcome="UNKNOWN")
+        return CreateOrderResult(
+            code=0, biz_code=0,
+            temporary_order_id="fixture-order-1" if self.create_order_id else None,
+        )
 
-    async def order_status(self, *, temporary_order_reference: str) -> Mapping[str, Any]:
+    async def get_order_status(self, *, temporary_order_reference: str) -> OrderStatusResult:
         self.calls.append("order_status")
         if not self._cancelled:
-            return {"orderStatus": self.lock_status, "lockSeatTime": 1}
-        return {"orderStatus": self.cancel_status, "lockSeatTime": self.cancel_lock_seat_time}
+            return OrderStatusResult(order_status=self.lock_status, lock_seat_time=1)
+        return OrderStatusResult(order_status=self.cancel_status, lock_seat_time=self.cancel_lock_seat_time)
 
-    async def activity(self, *, temporary_order_reference: str) -> Mapping[str, Any]:
+    async def get_activity_offers(self, *, temporary_order_reference: str) -> ActivityOffersResult:
         self.calls.append("activity")
-        return {
-            "able": self.activity_available, "name": "W+会员专享",
-            "allotSeat": {"totalPayPrice": self.member_price_cents or 0},
-        }
+        return ActivityOffersResult(
+            able=self.activity_available, name="W+会员专享",
+            total_pay_price_cents=self.member_price_cents,
+            member_price_cents=self.member_price_cents,
+        )
 
-    async def read_member_prices(self, *, activity: Mapping[str, Any], seats: list[LiveSeat]) -> list[Mapping[str, Any]]:
-        self.calls.append("read_member_prices")
-        if self.member_price_cents is None:
-            raise ProbeError("wplus_price_unavailable")
-        return [{
-            "area_code": seat.area_code, "zone_type": seat.zone_type,
-            "representative_seat_id": seat.seat_id,
-            "original_price_cents": seat.original_price_cents or 5000,
-            "member_price_cents": self.member_price_cents,
-        } for seat in seats]
-
-    async def cancel_order(self, *, temporary_order_reference: str) -> Mapping[str, Any]:
+    async def cancel_probe_order(self, *, temporary_order_reference: str) -> CancelResult:
         self.calls.append("cancel_order")
         if self.cancel_delay_seconds:
             await asyncio.sleep(self.cancel_delay_seconds)
         if self.cancel_error:
             raise ProbeError(self.cancel_error)
         self._cancelled = True
-        return {"ok": True}
+        return CancelResult(accepted=True)
 
-    async def available_seat_ids(self, *, show_id: str, seat_ids: list[str]) -> set[str]:
+    async def get_available_seats(self, *, show_id: str, seat_ids: list[str]) -> SeatAvailabilityResult:
         self.calls.append("available_seat_ids")
         self._availability_calls += 1
         elapsed = (0, 2, 5)[min(self._availability_calls - 1, 2)]
-        return set(seat_ids) if elapsed >= self.available_after_seconds else set()
+        return SeatAvailabilityResult(
+            available_seat_ids=set(seat_ids) if elapsed >= self.available_after_seconds else set(),
+        )

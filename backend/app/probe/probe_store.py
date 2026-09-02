@@ -142,7 +142,8 @@ class DurableProbeStore:
 
 
 _ALLOWED_TRANSITIONS = {
-    ProbeStatus.CREATED: frozenset({ProbeStatus.CREATED, ProbeStatus.LOCKED, ProbeStatus.CANCEL_REQUESTED, ProbeStatus.FAILED}),
+    ProbeStatus.CREATED: frozenset({ProbeStatus.CREATED, ProbeStatus.CREATE_UNKNOWN, ProbeStatus.LOCKED, ProbeStatus.CANCEL_REQUESTED, ProbeStatus.FAILED}),
+    ProbeStatus.CREATE_UNKNOWN: frozenset({ProbeStatus.CREATE_UNKNOWN, ProbeStatus.RELEASE_UNVERIFIED}),
     ProbeStatus.LOCKED: frozenset({ProbeStatus.LOCKED, ProbeStatus.PRICE_READ, ProbeStatus.CANCEL_REQUESTED, ProbeStatus.FAILED}),
     ProbeStatus.PRICE_READ: frozenset({ProbeStatus.PRICE_READ, ProbeStatus.CANCEL_REQUESTED}),
     ProbeStatus.CANCEL_REQUESTED: frozenset({ProbeStatus.CANCEL_REQUESTED, ProbeStatus.CANCEL_CONFIRMED, ProbeStatus.RELEASE_CHECKING, ProbeStatus.RELEASE_UNVERIFIED}),

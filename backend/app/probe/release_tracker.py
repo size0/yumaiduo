@@ -9,7 +9,7 @@ from .probe_store import DurableProbeStore
 
 
 class ReleaseProvider(Protocol):
-    async def available_seat_ids(self, *, show_id: str, seat_ids: list[str]) -> set[str]: ...
+    async def get_available_seats(self, *, show_id: str, seat_ids: list[str]) -> object: ...
 
 
 class Clock(Protocol):
@@ -36,6 +36,14 @@ class FakeClock:
         self.elapsed_seconds += float(seconds)
 
 
+def _timing_class(delay: float) -> str:
+    if delay <= 0:
+        return "IMMEDIATE"
+    if delay <= 2:
+        return "AFTER_2S"
+    return "AFTER_5S"
+
+
 class ReleaseTracker:
     def __init__(
         self,
@@ -51,6 +59,7 @@ class ReleaseTracker:
         self._clock = clock or SystemClock()
         self._delays = delays_seconds
         self._scheduler = scheduler
+        self.last_timing_class = "UNKNOWN"
 
     async def verify(self, order: ProbeOrder, provider: ReleaseProvider, *, cancel_confirmed: bool = True) -> bool:
         if not order.seat_ids:
@@ -67,8 +76,10 @@ class ReleaseTracker:
             if interval > 0:
                 await self._clock.sleep(interval)
             previous_delay = float(delay)
-            available = await provider.available_seat_ids(show_id=order.show_id, seat_ids=list(order.seat_ids))
-            if set(order.seat_ids).issubset(available) and cancel_confirmed:
+            response = await provider.get_available_seats(show_id=order.show_id, seat_ids=list(order.seat_ids))
+            available = getattr(response, "available_seat_ids", response)
+            if set(order.seat_ids).issubset(set(available)) and cancel_confirmed:
+                self.last_timing_class = _timing_class(float(delay))
                 latest = self._store.get(order.probe_id)
                 if latest and latest.status != ProbeStatus.RELEASE_VERIFIED:
                     self._store.transition(
@@ -76,6 +87,7 @@ class ReleaseTracker:
                         release_verified_at=self._clock.now().isoformat(),
                     )
                 return True
+        self.last_timing_class = "UNVERIFIED"
         latest = self._store.get(order.probe_id)
         if latest and latest.status != ProbeStatus.RELEASE_UNVERIFIED:
             self._store.transition(order.probe_id, ProbeStatus.RELEASE_UNVERIFIED, error_code="temporary_lock_release_unverified")

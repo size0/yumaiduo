@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ProbeStatus(StrEnum):
     CREATED = "CREATED"
+    CREATE_UNKNOWN = "CREATE_UNKNOWN"
     LOCKED = "LOCKED"
     PRICE_READ = "PRICE_READ"
     CANCEL_REQUESTED = "CANCEL_REQUESTED"
@@ -59,5 +60,7 @@ class ProbeResult(BaseModel):
     show_id: str = Field(min_length=1, max_length=240)
     status: Literal["SUCCESS", "FAILED"]
     seat_type_prices: list[ProbeSeatTypePrice] = Field(default_factory=list, max_length=100)
+    cancel_confirmed: bool = False
     release_verified: bool
+    release_timing_class: Literal["IMMEDIATE", "AFTER_2S", "AFTER_5S", "UNVERIFIED", "UNKNOWN"] = "UNKNOWN"
     error_code: str | None = Field(default=None, max_length=120)

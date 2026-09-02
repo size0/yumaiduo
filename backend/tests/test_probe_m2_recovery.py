@@ -74,7 +74,7 @@ async def test_same_account_is_serialized_durably(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [ProbeStatus.LOCKED, ProbeStatus.CANCEL_REQUESTED, ProbeStatus.RELEASE_CHECKING])
+@pytest.mark.parametrize("status", [ProbeStatus.CREATED, ProbeStatus.LOCKED, ProbeStatus.PRICE_READ, ProbeStatus.CANCEL_REQUESTED, ProbeStatus.CANCEL_CONFIRMED, ProbeStatus.RELEASE_CHECKING])
 async def test_restart_resumes_cancel_and_release_for_each_nonterminal_state(tmp_path: Path, status: ProbeStatus) -> None:
     path = tmp_path / f"{status.value}.sqlite3"
     store = DurableProbeStore(path)
