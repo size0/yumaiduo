@@ -64,7 +64,7 @@ class ReplyTemplates(BaseModel):
         max_length=4_000,
     )
     cinema_match_failure_template: str = Field(
-        default="我看到了截图中的影院是{影院}，但暂时无法唯一匹配万达官方门店。请补充“城市＋影院全名”，我会继续按原截图核对。",
+        default="我看到了截图中的影院是{影院}，但暂时无法唯一匹配官方影院。请补充“城市＋影院全名”，我会继续按原截图核对。",
         min_length=1,
         max_length=2_000,
     )
@@ -75,6 +75,34 @@ class ReplyTemplates(BaseModel):
     )
     missing_fields_template: str = Field(
         default="截图中还缺少：{缺失信息}。请补充这些信息后，我会继续按原截图核价。",
+        min_length=1,
+        max_length=2_000,
+    )
+    wplus_quote_marker_template: str = Field(
+        default=(
+            "※{城市} | {影院}\n影片：{影片}\n日期：{日期}\n场次：{场次}\n"
+            "截图是否已标记需要出票的位置"
+        ),
+        min_length=1,
+        max_length=2_000,
+    )
+    wplus_unit_price_reply_template: str = Field(
+        default="{报价单价} 一张",
+        min_length=1,
+        max_length=500,
+    )
+    wplus_marker_confirmation_template: str = Field(
+        default="请把需要出票的位置在座位图上圈好后，重新发送一张标记好的截图给我。",
+        min_length=1,
+        max_length=2_000,
+    )
+    wplus_marker_missing_template: str = Field(
+        default="请把需要出票的位置在座位图上圈好后，重新发送一张标记好的截图给我。",
+        min_length=1,
+        max_length=2_000,
+    )
+    wplus_marker_confirmed_template: str = Field(
+        default="请问需要几张呢？",
         min_length=1,
         max_length=2_000,
     )
@@ -95,6 +123,14 @@ class ReplyTemplates(BaseModel):
     )
     quote_unavailable_template: str = Field(
         default="实时报价暂未取得：{失败原因}\n请刷新场次截图后再发我核价。",
+        min_length=1,
+        max_length=2_000,
+    )
+    same_type_unavailable_template: str = Field(
+        default=(
+            "{不可选座位}不可选，同类型参考价{同类型参考价}元/张"
+            "（{张数}张约{同类型参考总价}元）。请换座后发最新截图。"
+        ),
         min_length=1,
         max_length=2_000,
     )
@@ -127,6 +163,23 @@ class ReplyTemplates(BaseModel):
         default="订单已付款并已发货，请留意已经发送的出票信息；后续以订单状态和人工通知为准。",
         min_length=1,
         max_length=1_000,
+    )
+    liangpiao_ticketed_template: str = Field(default="良票已出票成功！\n取票码：{取票码}\n{取票链接}", min_length=1, max_length=1_000)
+    # A FAILED Liangpiao order has already released the provider hold.  Do not
+    # tell the buyer to apply a second refund; offer the shop's fixed-price
+    # channel instead.  The caller must still verify price mode and shop policy
+    # before rendering this template.
+    liangpiao_failed_template: str = Field(
+        default="很抱歉，特惠渠道出票失败了（{失败原因}）。订单资金已按平台结果释放。\n是否要换一口价继续出票？",
+        min_length=1, max_length=1_000,
+    )
+    liangpiao_fixed_quote_template: str = Field(
+        default="可以为您换一口价继续出票：{一口价金额}元，共{张数}张。报价有效期至{报价有效期}，确认后请重新拍下对应商品。",
+        min_length=1, max_length=1_000,
+    )
+    liangpiao_fixed_failed_template: str = Field(
+        default="一口价渠道也未能完成出票，暂不再尝试其他渠道；请按平台退款/失败结果处理，必要时联系人工客服。",
+        min_length=1, max_length=1_000,
     )
     movie_reminder_template: str = Field(
         default="观影提醒：{movie} 将于 {showtime} 放映，影院：{cinema}。记得提前取票、检票入场，祝您观影愉快～",
@@ -187,10 +240,7 @@ class ReplyTemplates(BaseModel):
         min_length=1, max_length=1_000,
     )
     order_submit_unpaid_template: str = Field(
-        default=(
-            "请直接提交订单，拍下后先不要付款；系统会按已确认的{张数}张核算并改价；"
-            "收到“改价已完成，可以付款”的通知后再付款。"
-        ),
+        default="请直接提交订单，拍下后先不要付款，我这边改价。",
         min_length=1, max_length=1_000,
     )
     order_detected_hold_payment_template: str = Field(
@@ -238,18 +288,28 @@ _TEMPLATE_LABELS = {
     "recognition_failure_other_template": "识别失败文案－其它",
     "recognition_template": "识图主体",
     "cinema_match_failure_template": "影院匹配失败补问文案",
-    "unsupported_cinema_template": "非万达影院文案",
+    "unsupported_cinema_template": "影院匹配失败兜底文案",
     "missing_fields_template": "截图缺项补问文案",
+    "wplus_quote_marker_template": "W+报价后标记确认文案",
+    "wplus_unit_price_reply_template": "W+单价回复文案",
+    "wplus_marker_confirmation_template": "W+标记确认文案",
+    "wplus_marker_missing_template": "W+未标记补问文案",
+    "wplus_marker_confirmed_template": "W+已标记下单引导文案",
     "showtime_changed_template": "场次信息变化文案",
     "exact_quote_template": "精确座位报价",
     "area_quote_template": "区域单价报价",
     "quote_unavailable_template": "无法取得报价",
     "quote_expired_template": "报价过期文案",
+    "same_type_unavailable_template": "选中座位不可售－同类型参考价",
     "no_quote_template": "未执行报价",
     "guidance_template": "上传引导",
     "quote_above_fan_price_template": "报价超过粉丝自购价文案",
     "payment_success_pending_ticket_template": "支付成功待出票文案",
     "order_shipped_template": "已发货订单文案",
+    "liangpiao_ticketed_template": "良票出票成功文案",
+    "liangpiao_failed_template": "良票出票失败文案",
+    "liangpiao_fixed_quote_template": "良票一口价切换报价文案",
+    "liangpiao_fixed_failed_template": "良票一口价二次失败文案",
     "movie_reminder_template": "观影提醒",
     "order_pending_with_quote_template": "拍下未确认－有报价记录",
     "order_pending_without_quote_template": "拍下未确认－无报价记录",
@@ -290,16 +350,26 @@ _ALLOWED_VARIABLES = {
     "cinema_match_failure_template": {"影院"},
     "unsupported_cinema_template": set(),
     "missing_fields_template": {"缺失信息"},
+    "wplus_quote_marker_template": {"影片", "城市", "影院", "日期", "场次"},
+    "wplus_unit_price_reply_template": {"报价单价"},
+    "wplus_marker_confirmation_template": set(),
+    "wplus_marker_missing_template": set(),
+    "wplus_marker_confirmed_template": set(),
     "showtime_changed_template": set(),
     "exact_quote_template": {"影片", "城市", "影院", "日期", "场次", "影厅", "座位", "报价名称", "逐座报价", "报价合计", "报价说明", "规则版本"},
     "area_quote_template": {"影片", "城市", "影院", "日期", "场次", "影厅", "座位", "报价名称", "报价单价", "张数提示", "报价说明", "规则版本"},
     "quote_unavailable_template": {"失败原因"},
     "quote_expired_template": set(),
+    "same_type_unavailable_template": {"不可选座位", "同类型参考价", "张数", "同类型参考总价"},
     "no_quote_template": set(),
     "guidance_template": set(),
     "quote_above_fan_price_template": {"报价金额", "粉丝自购价"},
     "payment_success_pending_ticket_template": set(),
     "order_shipped_template": set(),
+    "liangpiao_ticketed_template": {"取票码", "取票链接"},
+    "liangpiao_failed_template": {"失败原因"},
+    "liangpiao_fixed_quote_template": {"一口价金额", "张数", "报价有效期"},
+    "liangpiao_fixed_failed_template": set(),
     "movie_reminder_template": {"movie", "showtime", "cinema", "date", "hall", "seats"},
     "order_pending_with_quote_template": {"报价金额"},
     "order_pending_without_quote_template": set(),
@@ -400,6 +470,10 @@ class ReplyTemplateStore:
             "payment_success_pending_ticket_template": (("支付", "付款"), ("出票",)),
             "payment_manual_review_template": (("暂停出票",), ("人工",)),
             "order_shipped_template": (("发货", "出票"),),
+            "liangpiao_ticketed_template": (("出票",), ("取票码",)),
+            "liangpiao_failed_template": (("出票",), ("失败", "失败原因")),
+            "liangpiao_fixed_quote_template": (("一口价",), ("确认", "重新拍下")),
+            "liangpiao_fixed_failed_template": (("一口价",), ("失败",)),
         }
         for field, groups in required_groups.items():
             text = getattr(values, field)
@@ -415,6 +489,16 @@ class ReplyTemplateStore:
             except (OSError, ValueError):
                 return ReplyTemplates()
             updates: dict[str, str] = {}
+            defaults = ReplyTemplates()
+            legacy_wplus_confirmation = (
+                "这张图按W+座位处理，请确认图片中是否已经用画笔圈出了座位位置？"
+                "如果没有标记，请圈好后重新发送截图，人工会按照标记的位置出票。"
+            )
+            if loaded.wplus_marker_confirmation_template == legacy_wplus_confirmation:
+                updates["wplus_marker_confirmation_template"] = defaults.wplus_marker_confirmation_template
+            legacy_wplus_missing = "好的，请用画笔圈好想要的座位位置后重新发送截图，人工会按照标记的位置出票。"
+            if loaded.wplus_marker_missing_template == legacy_wplus_missing:
+                updates["wplus_marker_missing_template"] = defaults.wplus_marker_missing_template
             legacy_confirmation = "为避免误改价，请明确回复“确认报价”，或按当前报价张数直接拍下订单。"
             if loaded.quote_confirmation_clarify_template == legacy_confirmation:
                 updates["quote_confirmation_clarify_template"] = ReplyTemplates().quote_confirmation_clarify_template
@@ -444,12 +528,27 @@ class ReplyTemplateStore:
                 updates["quote_quantity_order_guidance_template"] = (
                     ReplyTemplates().quote_quantity_order_guidance_template
                 )
-            old_order_submit = (
-                "请按{张数}张提交订单，拍下后先不要付款；"
-                "收到“改价已完成，可以付款”的通知后再付款。"
-            )
-            if loaded.order_submit_unpaid_template == old_order_submit:
+            old_order_submit_templates = {
+                (
+                    "请按{张数}张提交订单，拍下后先不要付款；"
+                    "收到“改价已完成，可以付款”的通知后再付款。"
+                ),
+                (
+                    "请直接提交订单，拍下后先不要付款；系统会按已确认的{张数}张核算并改价；"
+                    "收到“改价已完成，可以付款”的通知后再付款。"
+                ),
+            }
+            if loaded.order_submit_unpaid_template in old_order_submit_templates:
                 updates["order_submit_unpaid_template"] = ReplyTemplates().order_submit_unpaid_template
+            old_wplus_marker_confirmed_templates = {
+                "好的，已确认图片中有画笔标记，人工会按照标记的位置出票。",
+                (
+                    "好的，已确认截图中有画笔标记。请直接提交订单，拍下后先不要付款；"
+                    "并告知需要几张票，收到“改价已完成，可以付款”的通知后再付款。"
+                ),
+            }
+            if loaded.wplus_marker_confirmed_template in old_wplus_marker_confirmed_templates:
+                updates["wplus_marker_confirmed_template"] = ReplyTemplates().wplus_marker_confirmed_template
             return loaded.model_copy(update=updates) if updates else loaded
 
     def save(self, update: dict[str, Any]) -> ReplyTemplates:

@@ -17,6 +17,15 @@ def test_template_reader_ignores_forward_compatible_unknown_top_level_keys() -> 
     assert not hasattr(templates, "future_rule_catalog")
 
 
+def test_liangpiao_fulfillment_templates_are_configurable() -> None:
+    templates = ReplyTemplates(
+        liangpiao_ticketed_template="出票成功：{取票码}\n{取票链接}",
+        liangpiao_failed_template="出票失败：{失败原因}",
+    )
+    assert templates.liangpiao_ticketed_template == "出票成功：{取票码}\n{取票链接}"
+    assert templates.liangpiao_failed_template == "出票失败：{失败原因}"
+
+
 def test_reply_templates_use_editable_chinese_variables_and_persist(tmp_path: Path) -> None:
     path = tmp_path / "reply-templates.json"
     store = ReplyTemplateStore(path)
@@ -41,14 +50,19 @@ def test_reply_templates_use_editable_chinese_variables_and_persist(tmp_path: Pa
     assert "{订单金额}" in current.price_change_confirmation_template
     assert "{报价金额}" in current.post_order_recognition_reprice_template
     assert "{失败原因}" in current.price_change_failure_template
+    assert "{不可选座位}" in current.same_type_unavailable_template
+    assert "{同类型参考价}" in current.same_type_unavailable_template
 
     saved = store.save({
         **store.current().model_dump(),
         "quote_unavailable_template": "暂时无法报价：{失败原因}\n请重新发送完整截图。",
+        "same_type_unavailable_template": "换座：{不可选座位}，参考{同类型参考价}元/张，共{张数}张{同类型参考总价}元。",
     })
 
     assert saved.revision == 2
-    assert ReplyTemplateStore(path).current().quote_unavailable_template.startswith("暂时无法报价")
+    loaded = ReplyTemplateStore(path).current()
+    assert loaded.quote_unavailable_template.startswith("暂时无法报价")
+    assert loaded.same_type_unavailable_template.startswith("换座：")
 
 
 def test_render_template_preserves_intentional_blank_lines_between_sections() -> None:
@@ -77,6 +91,26 @@ def test_render_template_preserves_intentional_blank_lines_between_sections() ->
         "座位以实时可售和最终出票为准\n\n"
         "请核对城市、影院和场次是否一致。"
     )
+
+
+def test_legacy_wplus_marker_templates_migrate_to_concise_action(tmp_path: Path) -> None:
+    path = tmp_path / "reply-templates.json"
+    path.write_text(ReplyTemplates().model_copy(update={
+        "wplus_marker_confirmation_template": (
+            "这张图按W+座位处理，请确认图片中是否已经用画笔圈出了座位位置？"
+            "如果没有标记，请圈好后重新发送截图，人工会按照标记的位置出票。"
+        ),
+        "wplus_marker_missing_template": (
+            "好的，请用画笔圈好想要的座位位置后重新发送截图，人工会按照标记的位置出票。"
+        ),
+    }).model_dump_json(), encoding="utf-8")
+
+    current = ReplyTemplateStore(path).current()
+
+    expected = "请把需要出票的位置在座位图上圈好后，重新发送一张标记好的截图给我。"
+    assert current.wplus_marker_confirmation_template == expected
+    assert current.wplus_marker_missing_template == expected
+    assert "不能直接选择" not in expected
 
 
 def test_legacy_ticket_count_prompt_is_shortened_to_a_direct_question(tmp_path: Path) -> None:

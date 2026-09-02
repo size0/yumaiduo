@@ -103,8 +103,8 @@ RULE_TEMPLATES: dict[str, RuleTemplateDefinition] = {
         handoff="price_change_unknown",
     ),
     "flow.payment.received": _definition(
-        "flow.payment.received", "付款已确认，已进入人工出票流程；出票后会发送取票信息。",
-        {"PAID_WAITING_FULFILLMENT"}, required=("付款已确认", "人工出票流程"),
+        "flow.payment.received", "付款已确认，订单已进入出票流程；出票后会发送取票信息。",
+        {"PAID_WAITING_FULFILLMENT"}, required=("付款已确认", "出票流程"),
     ),
     "flow.payment.manual_review": _definition(
         "flow.payment.manual_review",
@@ -113,12 +113,38 @@ RULE_TEMPLATES: dict[str, RuleTemplateDefinition] = {
         handoff="payment_before_amount_verification",
     ),
     "flow.fulfillment.in_progress": _definition(
-        "flow.fulfillment.in_progress", "订单正在人工出票，请耐心等待。",
-        {"FULFILLMENT_IN_PROGRESS"}, required=("正在人工出票",),
+        "flow.fulfillment.in_progress", "订单正在出票处理中，请耐心等待。",
+        {"FULFILLMENT_IN_PROGRESS"}, required=("正在出票处理",),
     ),
     "flow.fulfillment.ticket_sent": _definition(
         "flow.fulfillment.ticket_sent", "出票信息已经发送，请按已发送的取票指引核对。",
         {"TICKET_SENT"}, required=("出票信息已经发送",),
+    ),
+    "flow.fulfillment.liangpiao_ticketed": _definition(
+        "flow.fulfillment.liangpiao_ticketed", _REPLY_DEFAULTS.liangpiao_ticketed_template,
+        {"TICKET_SENT", "COMPLETED"}, variables={"取票码", "取票链接"},
+        sources={"取票码": {"audited_fulfillment_event"}, "取票链接": {"audited_fulfillment_event"}},
+        required=("出票成功", "取票码"),
+    ),
+    "flow.fulfillment.liangpiao_failed": _definition(
+        "flow.fulfillment.liangpiao_failed", _REPLY_DEFAULTS.liangpiao_failed_template,
+        {"MANUAL_HOLD"}, variables={"失败原因"}, sources={"失败原因": {"audited_fulfillment_event"}},
+        required=("出票失败", "释放"), handoff="liangpiao_ticketing_failed",
+    ),
+    "flow.fulfillment.liangpiao_failed_switch_offer": _definition(
+        "flow.fulfillment.liangpiao_failed_switch_offer",
+        "特惠渠道出票失败了，订单资金已按平台结果释放。需要我按同场次的一口价继续出票吗？",
+        {"MANUAL_HOLD"}, required=("出票失败", "一口价", "继续出票"),
+        handoff="liangpiao_fixed_switch_pending",
+    ),
+    "flow.fulfillment.fixed_quote_ready": _definition(
+        "flow.fulfillment.fixed_quote_ready",
+        "可以按一口价继续出票：{quoted_total_amount}元（报价有效至{quote_expires_at}）。请确认后重新拍下，付款前不要提交其他订单。",
+        {"QUOTED"}, variables={"quoted_total_amount", "quote_expires_at"},
+        sources={
+            "quoted_total_amount": {"valid_quote_record"},
+            "quote_expires_at": {"valid_quote_record"},
+        }, required=("一口价", "请确认后重新拍下"),
     ),
     "flow.manual.created": _definition(
         "flow.manual.created", "当前信息需要人工核验，请勿付款；处理完成后会继续通知。",

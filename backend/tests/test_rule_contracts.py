@@ -17,12 +17,12 @@ def test_rule_decision_and_ai_assist_contracts_are_bounded_and_forbid_authority_
     })
     assert decision.state_revision == 8
 
-    assist = AiAssistResult.model_validate({
-        "intent_candidate": "ask_price",
-        "confidence": 0.82,
-        "source_message_ids": ["message-1"],
-    })
-    assert assist.intent_candidate == "ask_price"
+    with pytest.raises(Exception):
+        AiAssistResult.model_validate({
+            "intent_candidate": "ask_price",
+            "confidence": 0.82,
+            "source_message_ids": ["message-1"],
+        })
 
     with pytest.raises(ValidationError):
         AiAssistResult.model_validate({"confirmed_quote_record_id": "quote-1", "confidence": 1})

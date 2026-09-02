@@ -25,6 +25,8 @@ class Settings(BaseModel):
     chat_api_key: str = ""
     chat_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     chat_model: str = "qwen3.5-flash-2026-02-23"
+    chat_max_completion_tokens: int = Field(default=3000, ge=256, le=3000)
+    chat_context_messages: int = Field(default=12, ge=4, le=50)
     wanda_account_pool_path: str = "E:/票务系统/backend/data/accounts.json"
     wanda_cinema_cache_path: str = "E:/票务系统/backend/data/cinema_cache.sqlite"
     wanda_fixed_account_phone: str = ""
@@ -39,9 +41,18 @@ class Settings(BaseModel):
     liangpiao_app_key: str = ""
     liangpiao_app_secret: str = ""
     liangpiao_request_timeout_seconds: float = Field(default=20, ge=5, le=60)
+    liangpiao_recognition_async_enabled: bool = False
+    liangpiao_recognition_poll_interval_seconds: float = Field(default=1, ge=0.2, le=10)
+    liangpiao_recognition_poll_timeout_seconds: float = Field(default=120, ge=10, le=600)
+    rules_first_max_concurrent_events: int = Field(default=8, ge=1, le=32)
     liangpiao_selected_seat_quote_enabled: bool = False
     liangpiao_order_create_enabled: bool = False
+    liangpiao_order_phone: str = ""
     external_writes_enabled: bool = False
+    # Reset-phase default: Agent Harness can observe and reply, but transaction
+    # write commands remain fused off until the new write path is reviewed.
+    agent_harness_read_only: bool = True
+    new_agent_harness_enabled: bool = False
     liangpiao_callback_enabled: bool = False
 
     @field_validator("base_url", "chat_base_url", "liangpiao_base_url")
@@ -75,6 +86,8 @@ class Settings(BaseModel):
             chat_api_key=os.getenv("DASHSCOPE_CHAT_API_KEY", api_key).strip(),
             chat_base_url=os.getenv("DASHSCOPE_CHAT_BASE_URL", base_url),
             chat_model=os.getenv("DASHSCOPE_CHAT_MODEL", model),
+            chat_max_completion_tokens=int(os.getenv("CHAT_MAX_COMPLETION_TOKENS", "3000")),
+            chat_context_messages=int(os.getenv("CHAT_CONTEXT_MESSAGES", "12")),
             wanda_account_pool_path=os.getenv(
                 "WANDA_ACCOUNT_POOL_PATH", "E:/票务系统/backend/data/accounts.json"
             ),
@@ -93,10 +106,17 @@ class Settings(BaseModel):
             liangpiao_app_key=os.getenv("LIANGPIAO_APP_KEY", "").strip(),
             liangpiao_app_secret=os.getenv("LIANGPIAO_APP_SECRET", "").strip(),
             liangpiao_request_timeout_seconds=float(os.getenv("LIANGPIAO_REQUEST_TIMEOUT_SECONDS", "20")),
+            liangpiao_recognition_async_enabled=_env_flag("LIANGPIAO_RECOGNITION_ASYNC_ENABLED"),
+            liangpiao_recognition_poll_interval_seconds=float(os.getenv("LIANGPIAO_RECOGNITION_POLL_INTERVAL_SECONDS", "1")),
+            liangpiao_recognition_poll_timeout_seconds=float(os.getenv("LIANGPIAO_RECOGNITION_POLL_TIMEOUT_SECONDS", "120")),
+            rules_first_max_concurrent_events=int(os.getenv("RULES_FIRST_MAX_CONCURRENT_EVENTS", "8")),
             liangpiao_selected_seat_quote_enabled=_env_flag("LIANGPIAO_SELECTED_SEAT_QUOTE_ENABLED"),
             liangpiao_order_create_enabled=_env_flag("LIANGPIAO_ORDER_CREATE_ENABLED"),
+            liangpiao_order_phone=os.getenv("LIANGPIAO_ORDER_PHONE", "").strip(),
             external_writes_enabled=_env_flag(
                 "EXTERNAL_WRITES_ENABLED", _env_flag("WANDA_EXTERNAL_WRITES_ENABLED"),
             ),
+            agent_harness_read_only=_env_flag("AGENT_HARNESS_READ_ONLY", True),
+            new_agent_harness_enabled=_env_flag("NEW_AGENT_HARNESS_ENABLED"),
             liangpiao_callback_enabled=_env_flag("LIANGPIAO_CALLBACK_ENABLED"),
         )

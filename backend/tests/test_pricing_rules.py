@@ -35,11 +35,13 @@ def test_pricing_rules_api_is_bounded_versioned_and_persistent(tmp_path: Path) -
         "wplus_member_price_threshold_cents": 6000,
         "wplus_adjustment_cents": -290,
         "rounding_increment_cents": 10,
+        "liangpiao_price_mode": "LIMIT",
     })
     assert saved.status_code == 200
     body = saved.json()
     assert body["revision"] == 1
     assert body["wplus_friday_member_day_enabled"] is False
+    assert body["liangpiao_price_mode"] == "LIMIT"
     assert body["rule_version"].startswith("pricing-r1-")
     assert PricingRulesStore(path).current().enabled is True
     assert "自由" not in path.read_text(encoding="utf-8")
@@ -52,6 +54,48 @@ def test_pricing_rules_api_is_bounded_versioned_and_persistent(tmp_path: Path) -
         "rounding_increment_cents": 10,
     })
     assert rejected.status_code == 422
+
+
+def test_dynamic_pricing_bands_round_trip_and_validate_coverage(tmp_path: Path) -> None:
+    path = tmp_path / "pricing-rules.json"
+    store = PricingRulesStore(path)
+    bands = {
+        "liangpiao_rules": [
+            {"min_discount_percent": 0, "max_discount_percent": 50, "markup_percent": 10},
+            {"min_discount_percent": 50, "max_discount_percent": 100, "markup_percent": 5},
+        ],
+        "wanda_rules": [
+            {"min_discount_percent": 0, "max_discount_percent": 100, "fixed_adjustment_cents": 290},
+        ],
+    }
+
+    saved = store.save(PricingRulesUpdate(enabled=True, **bands))
+
+    assert saved.liangpiao_rules[0].markup_percent == 10
+    assert saved.wanda_rules[0].fixed_adjustment_cents == 290
+    assert PricingRulesStore(path).current().model_dump(mode="json")["wanda_rules"] == bands["wanda_rules"]
+
+    with pytest.raises(ValueError, match="cover 0 to 100"):
+        PricingRulesUpdate(
+            liangpiao_rules=[{"min_discount_percent": 0, "max_discount_percent": 40, "markup_percent": 10}],
+        )
+
+
+def test_legacy_client_save_does_not_erase_dynamic_bands(tmp_path: Path) -> None:
+    path = tmp_path / "pricing-rules.json"
+    store = PricingRulesStore(path)
+    dynamic = PricingRulesUpdate(
+        enabled=True,
+        liangpiao_rules=[{"min_discount_percent": 0, "max_discount_percent": 100, "markup_percent": 10}],
+        wanda_rules=[{"min_discount_percent": 0, "max_discount_percent": 100, "fixed_adjustment_cents": 290}],
+    )
+    store.save(dynamic.model_copy(update={"liangpiao_price_mode": "LIMIT"}))
+
+    saved_by_old_client = store.save(PricingRulesUpdate(enabled=True, regular_adjustment_cents=100))
+
+    assert saved_by_old_client.liangpiao_price_mode == "LIMIT"
+    assert len(saved_by_old_client.liangpiao_rules) == 1
+    assert len(saved_by_old_client.wanda_rules) == 1
 
 
 def test_positive_wplus_discount_is_normalized_to_a_negative_adjustment(tmp_path: Path) -> None:
@@ -146,6 +190,27 @@ async def test_saved_rules_apply_to_existing_quote_service_without_restart(tmp_p
     assert before.pricing_rule_version is None
     assert after.unit_quote_cents == 6290
     assert after.pricing_rule_version is not None
+
+
+def test_dynamic_wanda_band_is_used_when_configured() -> None:
+    rules = PricingRulesUpdate(
+        enabled=True,
+        wanda_rules=[
+            {"min_discount_percent": 0, "max_discount_percent": 60, "fixed_adjustment_cents": 290},
+            {"min_discount_percent": 60, "max_discount_percent": 70, "fixed_adjustment_cents": 150},
+            {"min_discount_percent": 70, "max_discount_percent": 100, "fixed_adjustment_cents": 0},
+        ],
+    )
+
+    assert WandaDirectQuoteService._priced_unit(
+        original_price=10_000, member_price=6_500, is_wplus=True, rules=rules,
+    ) == 6_650
+    assert WandaDirectQuoteService._priced_unit(
+        original_price=10_000, member_price=7_500, is_wplus=True, rules=rules,
+    ) == 7_500
+    assert WandaDirectQuoteService._priced_unit(
+        original_price=10_000, member_price=6_500, is_wplus=False, rules=rules,
+    ) == 6_650
 
 
 def test_wplus_formula_examples_and_price_boundaries() -> None:

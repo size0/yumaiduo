@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 import unicodedata
+from decimal import Decimal
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,7 @@ from .config import Settings
 from .diagnostics import DiagnosticsStore
 from .errors import ProviderError
 from .models import MovieImageInfo, PricingRulesUpdate, RealQuote, RealSeatQuote
+from .reply_template_store import ReplyTemplates, render_template
 from .observability import LOGGER
 
 
@@ -57,12 +59,14 @@ class WandaDirectQuoteService:
         lock_status_retry_delays: Sequence[float] = (0, 0.25, 0.75),
         showtime_hedge_delay_seconds: float = 1.5,
         pricing_rules: PricingRulesUpdate | Callable[[], PricingRulesUpdate] | None = None,
+        reply_templates: Callable[[], ReplyTemplates] | None = None,
     ) -> None:
         self._settings_provider = settings if callable(settings) else lambda: settings
         self._pricing_rules_provider = (
             pricing_rules if callable(pricing_rules)
             else lambda: pricing_rules or PricingRulesUpdate()
         )
+        self._reply_templates_provider = reply_templates
         initial = self._settings_provider()
         self._client = httpx.AsyncClient(
             transport=transport,
@@ -97,7 +101,124 @@ class WandaDirectQuoteService:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def quote(self, recognition: MovieImageInfo) -> RealQuote:
+    async def list_wplus_seats(
+        self,
+        recognition: MovieImageInfo,
+        *,
+        row_no: int | None = None,
+        seat_preference: str | None = None,
+        wanda_cinema_id: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Read the live Wanda W+ seat map for a buyer's row preference.
+
+        This is deliberately separate from ``quote``: an unmarked W+ image is
+        a seat-area consultation, so we must show currently available member
+        seats before asking the buyer whether the seats were marked. No price,
+        lock, order, or selected-seat quote is produced here.
+        """
+        settings = self._settings_provider()
+        account = self._fixed_account(settings)
+        quote_date = self._resolved_date(recognition)
+        if not quote_date or not recognition.showtime_start:
+            raise ProviderError(
+                "wanda_seat_identity_incomplete",
+                "查询W+座位需要完整的日期和开场时间。",
+            )
+        self._validate_quote_datetime(recognition, quote_date)
+        cached_showtimes: dict[str, Mapping[str, Any]] = {}
+        city_is_unverified = not recognition.city or "city" in recognition.missing_fields
+        try:
+            cinema = await self._resolve_cinema(
+                settings, recognition, preferred_cinema_id=wanda_cinema_id,
+            )
+        except ProviderError as error:
+            if error.code not in {"wanda_cinema_not_found", "wanda_cinema_not_unique"}:
+                raise
+            cinema, showtime_payload, showtime, _ = await self._resolve_cinema_by_showtime(
+                settings, account, recognition, quote_date, cached_showtimes=cached_showtimes,
+            )
+        else:
+            cinema_id = str(cinema["cinema_id"])
+            showtime_payload = await self._official_get(
+                account,
+                CINEMA_ORIGIN,
+                "/showtime/by_cinema.api",
+                [("cinemaId", cinema_id), ("showDate", quote_date.replace("-", "")), ("json", "true")],
+                channel=H5_CHANNEL,
+                event="wanda_showtimes_response",
+            )
+            cached_showtimes[cinema_id] = showtime_payload
+            if int(cinema.get("match_score") or 0) < 90:
+                cinema, showtime_payload, showtime, _ = await self._resolve_cinema_by_showtime(
+                    settings, account, recognition, quote_date, cached_showtimes=cached_showtimes,
+                )
+            else:
+                try:
+                    showtime, _ = self._match_showtime(showtime_payload, recognition, quote_date)
+                except ProviderError:
+                    if not city_is_unverified:
+                        raise
+                    cinema, showtime_payload, showtime, _ = await self._resolve_cinema_by_showtime(
+                        settings, account, recognition, quote_date, cached_showtimes=cached_showtimes,
+                    )
+        showtime_id = str(showtime.get("showtimeId") or showtime.get("id") or "").strip()
+        if not showtime_id:
+            raise ProviderError("wanda_showtime_invalid", "万达官方场次缺少场次 ID。")
+        realtime_payload = await self._official_get(
+            account,
+            FRONT_ORIGIN,
+            "/order/real_time_seat.api",
+            [("dId", showtime_id)],
+            channel=APP_CHANNEL,
+            event="wanda_realtime_seats_response",
+        )
+        seats = self._seat_facts(realtime_payload, self._area_prices(showtime))
+        requested_row = row_no
+        if requested_row is None and seat_preference:
+            match = re.search(r"(?:第\s*)?(\d{1,2})\s*排", str(seat_preference))
+            if match:
+                requested_row = int(match.group(1))
+        available = [
+            {
+                "seat_number": str(seat["label"]),
+                "row_no": int(seat["row"]),
+                "col_no": int(seat["column"]),
+                "status": "AVAILABLE",
+                "seat_zone_type": "W+",
+            }
+            for seat in seats
+            if seat.get("available") is True
+            and seat.get("wplus") is True
+            and (requested_row is None or int(seat["row"]) == requested_row)
+        ]
+        available.sort(key=lambda seat: (seat["row_no"], seat["col_no"]))
+        return {
+            "ok": True,
+            "cinema_id": str(cinema["cinema_id"]),
+            "show_id": showtime_id,
+            "date": quote_date,
+            "showtime_start": recognition.showtime_start,
+            "seat_zone_type": "W+",
+            "requested_row": requested_row,
+            "seat_preference": str(seat_preference or "").strip() or None,
+            "available_seats": available[:100],
+            "available_count": len(available),
+            "buyer_guidance": (
+                f"已查询到当前第{requested_row}排可售W+座位："
+                + "、".join(seat["seat_number"] for seat in available[:100])
+                + "。这些位置仅用于核实价格和人工处理；已知张数不要重复询问。"
+                if available and requested_row is not None
+                else (
+                    "已查询到当前可售W+座位，但没有匹配到该排；请买家重新说明排数或在截图上标记位置。"
+                    if requested_row is not None
+                    else "已查询当前可售W+座位，请买家确认位置和张数。"
+                )
+            ),
+        }
+
+    async def quote(
+        self, recognition: MovieImageInfo, *, wanda_cinema_id: str | None = None,
+    ) -> RealQuote:
         started = time.perf_counter()
         settings = self._settings_provider()
         rules = PricingRulesUpdate.model_validate(self._pricing_rules_provider())
@@ -112,7 +233,9 @@ class WandaDirectQuoteService:
         cached_showtimes: dict[str, Mapping[str, Any]] = {}
         city_is_unverified = not recognition.city or "city" in recognition.missing_fields
         try:
-            cinema = await self._resolve_cinema(settings, recognition)
+            cinema = await self._resolve_cinema(
+                settings, recognition, preferred_cinema_id=wanda_cinema_id,
+            )
         except ProviderError as error:
             if error.code not in {"wanda_cinema_not_found", "wanda_cinema_not_unique"}:
                 raise
@@ -157,6 +280,7 @@ class WandaDirectQuoteService:
         )
         area_prices = self._area_prices(showtime)
         seats = self._seat_facts(realtime_payload, area_prices)
+        vip_pricing = self._is_vip_showtime(showtime)
         ticket_count = len(recognition.selected_seats) if recognition.selected_seats else None
         if recognition.selected_seats:
             # An explicit X排Y座 is authoritative. Quote that seat's official
@@ -167,7 +291,7 @@ class WandaDirectQuoteService:
             if unavailable:
                 same_type_reference = await self._unavailable_same_type_reference(
                     selected, unavailable, account=account, cinema_id=cinema_id,
-                    showtime_id=showtime_id, seats=seats,
+                    showtime_id=showtime_id, seats=seats, vip_pricing=vip_pricing,
                 )
                 if same_type_reference is not None:
                     raise ProviderError(
@@ -184,7 +308,12 @@ class WandaDirectQuoteService:
                 if key in member_prices:
                     continue
                 uses_wplus_pricing = bool(seat.get("wplus_pricing_eligible", seat.get("wplus")))
-                if uses_wplus_pricing and rules.wplus_friday_member_day_enabled:
+                if vip_pricing:
+                    # A VIP hall has no ordinary member price in this API. It
+                    # therefore enters the universal Wanda rule at a 100%
+                    # discount ratio (official salesPrice as the reference).
+                    member_price = None
+                elif uses_wplus_pricing and rules.wplus_friday_member_day_enabled:
                     member_price = self._positive_int(seat.get("wplus_member_price"))
                 elif rules.wplus_friday_member_day_enabled:
                     member_price = self._positive_int(seat.get("friday_member_price"))
@@ -192,7 +321,7 @@ class WandaDirectQuoteService:
                         member_price = self._positive_int(seat.get("regular_member_price"))
                 else:
                     member_price = self._positive_int(seat.get("regular_member_price"))
-                if member_price is None and uses_wplus_pricing:
+                if member_price is None and uses_wplus_pricing and not vip_pricing:
                     member_price = await self._probe_member_price(
                         account,
                         cinema_id=cinema_id,
@@ -200,18 +329,20 @@ class WandaDirectQuoteService:
                         seat=seat,
                     )
                 member_prices[key] = member_price
-            if any(value is None for value in member_prices.values()):
+            if not vip_pricing and any(value is None for value in member_prices.values()):
                 raise ProviderError(
                     "wanda_regular_member_price_unavailable",
                     "万达官方场次未返回所选座位的实时会员价，无法安全计算报价。",
                 )
-            result = self._exact_quote(selected, member_prices, cinema, official_movie)
+            result = self._exact_quote(
+                selected, member_prices, cinema, official_movie, vip_pricing=vip_pricing,
+            )
         else:
             wplus_area = self._available_wplus_area_reference(area_prices, seats)
             if wplus_area is None:
                 raise ProviderError(
                     "wanda_wplus_seat_unavailable",
-                    "当前场次没有同时具备官方区域价格和可售座位的W+专享区。",
+                    "当前场次会员区域无可选座位",
                 )
             member_price = (
                 wplus_area.get("member_price")
@@ -347,6 +478,21 @@ class WandaDirectQuoteService:
         """Accept only city clarifications that uniquely map to the official cinema cache."""
         return await self.canonical_city_hint(value) is not None
 
+    async def quote_mapped(
+        self, recognition: MovieImageInfo, *, wanda_cinema_id: str,
+    ) -> RealQuote:
+        """Quote using an explicit local Wanda ID from the cinema route mapping."""
+        return await self.quote(recognition, wanda_cinema_id=wanda_cinema_id)
+
+    async def match_cached_cinema(self, recognition: MovieImageInfo) -> dict[str, Any] | None:
+        """Return a unique match in the local Wanda capability catalog, if any."""
+        try:
+            return await self._resolve_cinema(self._settings_provider(), recognition)
+        except ProviderError as error:
+            if error.code in {"wanda_cinema_not_found", "wanda_cinema_not_unique"}:
+                return None
+            raise
+
     async def complete_cinema(self, recognition: MovieImageInfo) -> MovieImageInfo:
         """Complete a uniquely matched truncated cinema name from the official cache."""
         candidate = recognition
@@ -365,7 +511,10 @@ class WandaDirectQuoteService:
             "city": candidate.city or matched["city_name"],
         })
 
-    async def _resolve_cinema(self, settings: Settings, recognition: MovieImageInfo) -> dict[str, Any]:
+    async def _resolve_cinema(
+        self, settings: Settings, recognition: MovieImageInfo,
+        *, preferred_cinema_id: str | None = None,
+    ) -> dict[str, Any]:
         wanted = self._normalize_name(recognition.cinema_name or "")
         wanted_alias = self._cinema_match_key(recognition.cinema_name or "")
         if not wanted:
@@ -382,21 +531,48 @@ class WandaDirectQuoteService:
                 "wanda_cinema_cache_unavailable",
                 "无法读取万达官方影院缓存，请先在票务系统刷新影院列表。",
             ) from None
+        preferred = str(preferred_cinema_id or "").strip()
+        if preferred:
+            matches = [row for row in rows if str(row["cinema_id"] or "").strip() == preferred]
+            if len(matches) != 1:
+                raise ProviderError("wanda_cinema_mapping_not_found", "本地万达影院映射不存在或已失效。")
+            row = matches[0]
+            return {
+                "cinema_id": str(row["cinema_id"]),
+                "cinema_name": str(row["cinema_name"]),
+                "city_name": str(row["city_name"]),
+                "match_score": 100,
+            }
+
         wanted_city = self._normalize_name(recognition.city or "")
         scored: list[tuple[int, sqlite3.Row]] = []
         for row in rows:
             cinema_name = str(row["cinema_name"] or "")
             actual = self._normalize_name(cinema_name)
             actual_alias = self._cinema_match_key(cinema_name)
+            # Some Liangpiao canonical names omit the city prefix while the
+            # local Wanda cache includes it (e.g. “万达寰映影城（振华广场杜比
+            # 影院店）” vs “呼和浩特寰映影城振华广场店”). Use the recognized
+            # city as additional geography when comparing both aliases.
+            row_city = str(row["city_name"] or "")
+            city_context = row_city if any("\u4e00" <= char <= "\u9fff" for char in row_city) else (recognition.city or "")
             candidate_wanted_alias = self._cinema_candidate_match_key(
-                recognition.cinema_name or "", str(row["city_name"] or ""), str(row["address"] or "")
+                recognition.cinema_name or "", city_context, str(row["address"] or "")
             )
             candidate_actual_alias = self._cinema_candidate_match_key(
-                cinema_name, str(row["city_name"] or ""), str(row["address"] or "")
+                cinema_name, city_context, str(row["address"] or "")
             )
             address_identity_tokens = self._cinema_address_identity_tokens(str(row["address"] or ""))
             city = self._normalize_name(str(row["city_name"] or ""))
-            if wanted_city and city and wanted_city not in city and city not in wanted_city:
+            # Synthetic cache fixtures and some provider records use opaque
+            # city codes (for example ``city-bj``); they are not comparable to
+            # a recognized Chinese city name and must not reject an otherwise
+            # exact cinema match.
+            if (
+                wanted_city and city
+                and any("\u4e00" <= char <= "\u9fff" for char in city)
+                and wanted_city not in city and city not in wanted_city
+            ):
                 continue
             if actual == wanted:
                 score = 100
@@ -1265,6 +1441,17 @@ class WandaDirectQuoteService:
         return (start + timedelta(minutes=duration)).strftime("%H:%M")
 
     @staticmethod
+    def _is_vip_showtime(showtime: Mapping[str, Any]) -> bool:
+        values = (
+            showtime.get("hallType"), showtime.get("wandaSign"), showtime.get("hallName"),
+        )
+        return any(
+            "VIP" in unicodedata.normalize("NFKC", str(value or "")).upper()
+            or "贵宾厅" in str(value or "")
+            for value in values
+        )
+
+    @staticmethod
     def _hall_matches(wanted: str, actual: str) -> bool:
         wanted_key = wanted.upper().replace(" ", "")
         actual_key = actual.upper().replace(" ", "")
@@ -1394,6 +1581,7 @@ class WandaDirectQuoteService:
         cinema_id: str,
         showtime_id: str,
         seats: list[dict[str, Any]],
+        vip_pricing: bool = False,
     ) -> str | None:
         type_keys = {self._seat_type_key(seat) for seat in selected}
         if len(type_keys) != 1:
@@ -1403,32 +1591,41 @@ class WandaDirectQuoteService:
             return None
         reference = candidates[0]
         uses_wplus_pricing = bool(reference.get("wplus_pricing_eligible", reference.get("wplus")))
-        member_price = self._positive_int(
-            reference.get("wplus_member_price")
-            if uses_wplus_pricing else reference.get("regular_member_price")
-        )
-        if member_price is None:
-            member_price = await self._probe_member_price(
-                account,
-                cinema_id=cinema_id,
-                showtime_id=showtime_id,
-                seat=reference,
-            )
         rules = PricingRulesUpdate.model_validate(self._pricing_rules_provider())
-        unit_quote = self._priced_unit(
-            original_price=int(reference["price"]),
-            member_price=member_price,
-            is_wplus=uses_wplus_pricing,
-            rules=rules,
-        )
+        if vip_pricing:
+            unit_quote = self._vip_priced_unit(int(reference["price"]), rules)
+        else:
+            member_price = self._positive_int(
+                reference.get("wplus_member_price")
+                if uses_wplus_pricing else reference.get("regular_member_price")
+            )
+            if member_price is None:
+                member_price = await self._probe_member_price(
+                    account,
+                    cinema_id=cinema_id,
+                    showtime_id=showtime_id,
+                    seat=reference,
+                )
+            unit_quote = self._priced_unit(
+                original_price=int(reference["price"]),
+                member_price=member_price,
+                is_wplus=uses_wplus_pricing,
+                rules=rules,
+            )
         ticket_count = len(selected)
         total_quote = unit_quote * ticket_count
-        return (
-            f"{'、'.join(unavailable)}当前不可选，不能按原座位下单；"
-            f"同座位类型当前参考价：{unit_quote / 100:.2f}一张，"
-            f"按{ticket_count}张参考合计{total_quote / 100:.2f}元；"
-            "请重新选择同类型可售座位并发送最新截图。"
+        template = (
+            self._reply_templates_provider().same_type_unavailable_template
+            if self._reply_templates_provider is not None else
+            "{不可选座位}不可选，同类型参考价{同类型参考价}元/张"
+            "（{张数}张约{同类型参考总价}元）。请换座后发最新截图。"
         )
+        return render_template(template, {
+            "不可选座位": "、".join(unavailable),
+            "同类型参考价": f"{unit_quote / 100:.2f}",
+            "张数": ticket_count,
+            "同类型参考总价": f"{total_quote / 100:.2f}",
+        })
 
     @classmethod
     def _same_type_probe_candidates(
@@ -1494,7 +1691,15 @@ class WandaDirectQuoteService:
             return member_price if member_price is not None and member_price > 0 else original_price
         if member_price is None or member_price <= 0:
             raise ValueError("authoritative_member_price_required")
-        if is_wplus:
+        if rules.wanda_rules:
+            # The configured Wanda bands replace the legacy +1/-2.90 policy
+            # for every Wanda seat type, not only W+ seats. The discount rate
+            # uses the official member price and official original price.
+            adjustment = WandaDirectQuoteService._dynamic_wanda_adjustment(
+                original_price, member_price, rules.wanda_rules,
+            )
+            raw = member_price + adjustment
+        elif is_wplus:
             raw = (
                 max(original_price + rules.wplus_adjustment_cents, member_price)
                 if member_price <= rules.wplus_member_price_threshold_cents
@@ -1510,6 +1715,29 @@ class WandaDirectQuoteService:
         rounded = max(increment, ((raw + increment // 2) // increment) * increment)
         return min(max(rounded, lower), upper)
 
+    @staticmethod
+    def _vip_priced_unit(original_price: int, rules: PricingRulesUpdate) -> int:
+        if original_price <= 0:
+            raise ValueError("authoritative_original_price_required")
+        if original_price <= rules.vip_discount_threshold_cents:
+            raw = original_price - rules.vip_low_price_discount_cents
+        else:
+            raw = (original_price * rules.vip_high_price_discount_percent + 50) // 100
+        increment = rules.rounding_increment_cents
+        rounded = ((raw + increment // 2) // increment) * increment
+        return min(max(rounded, increment), original_price)
+
+    @staticmethod
+    def _dynamic_wanda_adjustment(original_price: int, member_price: int, bands: Sequence[Any]) -> int:
+        discount_percent = Decimal(member_price * 100) / Decimal(original_price)
+        for index, band in enumerate(bands):
+            minimum = Decimal(str(band.min_discount_percent))
+            maximum = Decimal(str(band.max_discount_percent))
+            is_last = index == len(bands) - 1
+            if minimum <= discount_percent < maximum or (is_last and discount_percent <= maximum):
+                return int(band.fixed_adjustment_cents)
+        raise ValueError("pricing_discount_band_not_covered")
+
     def _exact_quote(
         self,
         selected_facts: list[dict[str, Any]],
@@ -1518,6 +1746,7 @@ class WandaDirectQuoteService:
         official_movie: str,
         *,
         same_type_probe_used: bool = False,
+        vip_pricing: bool = False,
     ) -> RealQuote:
         rules = PricingRulesUpdate.model_validate(self._pricing_rules_provider())
         selected: list[RealSeatQuote] = []
@@ -1531,13 +1760,16 @@ class WandaDirectQuoteService:
                 seat_number=str(seat["label"]),
                 seat_zone_type=zone,
                 original_price_cents=int(seat["price"]),
-                member_price_cents=member_price,
+                member_price_cents=None if vip_pricing else member_price,
                 channel_fee_cents=int(seat["channel_fee"]),
-                unit_quote_cents=self._priced_unit(
-                    original_price=int(seat["price"]),
-                    member_price=member_price,
-                    is_wplus=bool(seat.get("wplus_pricing_eligible", seat.get("wplus"))),
-                    rules=rules,
+                unit_quote_cents=(
+                    self._vip_priced_unit(int(seat["price"]), rules)
+                    if vip_pricing else self._priced_unit(
+                        original_price=int(seat["price"]),
+                        member_price=member_price,
+                        is_wplus=bool(seat.get("wplus_pricing_eligible", seat.get("wplus"))),
+                        rules=rules,
+                    )
                 ),
             ))
         member_values = {item.member_price_cents for item in selected}
@@ -1555,8 +1787,12 @@ class WandaDirectQuoteService:
             seat_type=seat_type,
             base_unit_cents=next(iter(base_values)) if len(base_values) == 1 else None,
             base_total_cents=sum(item.original_price_cents for item in selected),
-            price_source="realtime_regular_area" if seat_type == "regular" else (
-                "realtime_wplus_area" if seat_type == "wplus" else "realtime_mixed_area"
+            price_source=(
+                "realtime_vip_area" if vip_pricing else (
+                    "realtime_regular_area" if seat_type == "regular" else (
+                        "realtime_wplus_area" if seat_type == "wplus" else "realtime_mixed_area"
+                    )
+                )
             ),
             unit_quote_cents=selected[0].unit_quote_cents if len({item.unit_quote_cents for item in selected}) == 1 else None,
             total_quote_cents=sum(item.unit_quote_cents for item in selected),
@@ -1566,13 +1802,19 @@ class WandaDirectQuoteService:
             needs_ticket_count=False,
             same_type_probe_used=same_type_probe_used,
             pricing_source=(
-                "万达官方实时座位原价（W+区域优先）+ 后台报价规则（只读）"
-                if rules.enabled else "万达官方实时座位原价（W+区域优先，只读）"
+                "万达官方VIP厅实时销售价 + VIP厅报价规则（只读）"
+                if vip_pricing else (
+                    "万达官方实时座位原价（W+区域优先）+ 后台报价规则（只读）"
+                    if rules.enabled else "万达官方实时座位原价（W+区域优先，只读）"
+                )
             ),
             pricing_rule_version=self._pricing_rule_version(rules) if rules.enabled else None,
             detail=(
                 f"已通过万达官方场次和实时座位图读取区域原价，全程只读、未锁座；影片：{official_movie}"
-                + ("；最终展示金额已应用后台确定性报价规则" if rules.enabled else "")
+                + (
+                    "；已应用VIP厅报价规则"
+                    if vip_pricing else ("；最终展示金额已应用后台确定性报价规则" if rules.enabled else "")
+                )
             ),
             matched_cinema_name=cinema["cinema_name"],
             matched_city_name=cinema.get("city_name"),
@@ -1825,7 +2067,12 @@ class WandaDirectQuoteService:
     def _cinema_match_key(cls, value: str) -> str:
         """Normalize buyer-platform branding without dropping the venue identity."""
         normalized = cls._normalize_name(value)
-        for generic in ("万达影城", "万达影院", "万达电影", "寰映影城", "寰映影院"):
+        for generic in (
+            "万达寰映影城", "万达寰映影院", "万达寰时影城", "万达寰時影城",
+            "万达方米影城", "万达方米影院",
+            "万达影城", "万达影院", "万达电影", "寰映影城", "寰映影院",
+            "寰时影城", "寰時影城", "寰时影院", "寰時影院", "方米影城", "方米影院",
+        ):
             normalized = normalized.replace(generic, "")
         # Platform titles sometimes append the English mall brand to the same
         # Chinese venue identity (for example “盐田壹海城ONE MALL”). Wanda's
@@ -1833,7 +2080,7 @@ class WandaDirectQuoteService:
         normalized = normalized.replace("onemall", "")
         for format_name in (
             "laserimax", "imax", "prime", "cinity", "xland", "cola",
-            "杜比影院", "杜比影", "杜比", "激光厅", "激光",
+            "杜比影院", "杜比影", "杜比", "激光厅", "激光", "巨幕",
         ):
             normalized = normalized.replace(format_name, "")
         normalized = normalized.replace("特许", "")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .reply_template_store import ReplyTemplates, render_template
@@ -64,6 +65,19 @@ def _official_order_amount_cents(order: Mapping[str, Any]) -> int | None:
     return None
 
 
+def _future_iso_timestamp(value: object) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed > datetime.now(timezone.utc)
+
+
 def _fixed_transaction_reply(
     *, state: str, transition_code: str, event_id: str,
     current: object, templates: ReplyTemplates,
@@ -88,7 +102,7 @@ def _fixed_transaction_reply(
     elif state == "TICKET_SENT":
         template_name = "order_shipped_template"
     elif state in {"ORDER_UNVERIFIED", "MANUAL_HOLD"} and transition_code not in {
-        "explicit_human_takeover", "multiple_active_orders_detected",
+        "explicit_human_takeover", "multiple_active_orders_detected", "fixed_switch_rejected", "fixed_switch_expired",
     }:
         template_name = "manual_review_template"
     if template_name is None:
@@ -108,11 +122,12 @@ class RuleStateCoordinator:
 
     def __init__(
         self, store: TransactionStateStore, quote_store: object | None = None,
-        reply_template_store: object | None = None,
+        reply_template_store: object | None = None, liangpiao_order_phone: str = "",
     ) -> None:
         self._store = store
         self._quote_store = quote_store
         self._reply_template_store = reply_template_store
+        self._liangpiao_order_phone = str(liangpiao_order_phone or "").strip()
 
     def _templates(self) -> ReplyTemplates:
         current = getattr(self._reply_template_store, "current", None)
@@ -169,6 +184,7 @@ class RuleStateCoordinator:
             current.flow_state in {"WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT"}
             and current.price_change_status == "succeeded"
             and current.payment_status in {"unpaid", "verified_paid"}
+            and current.order_id == order_id
             and isinstance(current.target_amount_cents, int)
             and observed_order_amount == current.target_amount_cents
         )
@@ -187,6 +203,39 @@ class RuleStateCoordinator:
             and quote_record.get("terms_fingerprint")
             and quote_record.get("terms_fingerprint") == active_quote_record.get("terms_fingerprint")
         )
+        changed_failed_quote = bool(
+            isinstance(quote_record, Mapping)
+            and quote_record.get("status") not in {None, "succeeded"}
+            and isinstance(active_quote_record, Mapping)
+            and quote_record.get("terms_fingerprint")
+            and active_quote_record.get("terms_fingerprint")
+            and not same_quote_terms
+            and not current.order_id
+        )
+        if changed_failed_quote:
+            invalidate = getattr(self._quote_store, "invalidate", None)
+            if callable(invalidate):
+                invalidated = invalidate(
+                    tenant_id=identity["tenant_id"],
+                    record_id=str(active_quote_record.get("record_id") or current.active_quote_record_id),
+                    reason="superseded_by_new_failed_quote_attempt",
+                )
+                if isinstance(invalidated, Mapping):
+                    active_quote_record = invalidated
+        if event_type in {"order.refund.finished", "order.refunded"} and order_id and current.active_quote_record_id:
+            release_binding = getattr(self._quote_store, "release_order_binding", None)
+            if callable(release_binding):
+                released = release_binding(
+                    record_id=current.active_quote_record_id,
+                    tenant_id=identity["tenant_id"],
+                    shop_id=identity["shop_id"],
+                    buyer_id=identity["buyer_id"],
+                    chat_id=identity["chat_id"],
+                    order_id=order_id,
+                    released_at=datetime.now(timezone.utc),
+                )
+                if isinstance(released, Mapping):
+                    active_quote_record = released
         terminal_states = {"COMPLETED", "CANCELLED", "REFUNDED"}
         change_action = next(
             (action for action in actions if isinstance(action, Mapping) and action.get("type") == "change_order_price"),
@@ -231,7 +280,15 @@ class RuleStateCoordinator:
                 ),
             )
 
-        terminal_locked = current.flow_state in terminal_states and not starts_replacement_generation
+        fixed_switch_recovery_event = bool(
+            reason.startswith("fixed_switch_")
+            and getattr(current, "fixed_switch_status", "none") in {"pending", "confirmed"}
+        )
+        terminal_locked = bool(
+            current.flow_state in terminal_states
+            and not starts_replacement_generation
+            and not fixed_switch_recovery_event
+        )
         terminal_transaction_reasons = {
             "order_submission_guidance_ready", "confirmed_quote_record_bound_to_order",
             "bound_order_amount_already_matches_quote", "authoritative_order_amount_already_matches_quote",
@@ -260,11 +317,19 @@ class RuleStateCoordinator:
             actions = []
             change_action = None
             decision = {**decision, "actions": [], "reason": "terminal_event_ignored"}
+        elif event_type in {"order.refund.applied", "order.refund.finished", "order.refunded"}:
+            # Official refund facts must be applied even when the transaction
+            # was previously held for a payment/price mismatch. Otherwise a
+            # refunded order leaves MANUAL_HOLD latched and blocks the buyer's
+            # still-open replacement order forever.
+            actions = []
+            change_action = None
+            decision = {**decision, "actions": [], "reason": "official_refund_state_update"}
         elif explicit_human_takeover:
             actions = []
             change_action = None
             decision = {**decision, "actions": [], "reason": "explicit_human_takeover"}
-        elif automation_hold_active:
+        elif automation_hold_active and not reason.startswith("fixed_switch_"):
             actions = []
             change_action = None
             decision = {**decision, "actions": [], "reason": "automation_hold_active"}
@@ -275,12 +340,40 @@ class RuleStateCoordinator:
             target_state = current.flow_state
             transition_code = "terminal_event_ignored"
             updates = {}
+        elif event_type == "order.refund.applied":
+            target_state = "REFUND_PENDING"
+            transition_code = "official_refund_pending"
+            updates = {
+                "order_status": "refund_pending", "payment_status": "refund_pending",
+                "order_id": order_id,
+                "fixed_switch_source_order_status": "refund_pending",
+                "fixed_switch_source_platform_order_id": (
+                    current.fixed_switch_source_platform_order_id or current.order_id or order_id
+                ),
+            }
+        elif event_type in {"order.refund.finished", "order.refunded"}:
+            target_state = "REFUNDED"
+            transition_code = "official_refund_completed"
+            updates = {
+                "quote_status": "expired", "confirmation_status": "invalidated",
+                "active_quote_record_id": None, "confirmed_quote_record_id": None,
+                "confirmation_version": None, "confirmation_source": None,
+                "confirmation_event_id": None, "confirmed_ticket_count": None,
+                "target_amount_cents": None,
+                "order_status": "refunded", "payment_status": "refunded",
+                "fulfillment_status": "none", "order_id": order_id,
+                "price_change_status": "skipped",
+                "fixed_switch_source_order_status": "closed",
+                "fixed_switch_source_platform_order_id": (
+                    current.fixed_switch_source_platform_order_id or current.order_id or order_id
+                ),
+            }
         elif explicit_human_takeover:
             target_state = "MANUAL_HOLD"
             transition_code = "explicit_human_takeover"
             handoff_reason = "explicit_human_takeover"
             updates = {"automation_control": "human_hold"}
-        elif automation_hold_active:
+        elif automation_hold_active and not reason.startswith("fixed_switch_"):
             target_state = "MANUAL_HOLD"
             transition_code = "automation_hold_active"
             updates = {}
@@ -288,20 +381,59 @@ class RuleStateCoordinator:
             target_state = "MANUAL_HOLD"
             transition_code = "multiple_active_orders_detected"
             handoff_reason = "multiple_active_orders"
-        elif event_type == "order.refund.applied":
-            target_state = "REFUND_PENDING"
-            transition_code = "official_refund_pending"
+        elif reason == "wplus_marker_confirmed_order_guidance":
+            target_state = "QUOTED"
+            transition_code = "wplus_marker_confirmed_order_guidance"
             updates = {
-                "order_status": "refund_pending", "payment_status": "refund_pending",
-                "order_id": order_id,
+                "quote_status": "ready",
+                "confirmation_status": "pending",
+                "expected_inputs": ["ticket_count", "order"],
             }
-        elif event_type == "order.refund.finished":
-            target_state = "REFUNDED"
-            transition_code = "official_refund_completed"
+        elif reason == "fixed_switch_quote_ready":
+            fixed_quote_action = next((action for action in actions if isinstance(action, Mapping) and isinstance(action.get("fixed_switch_quote"), Mapping)), None)
+            fixed_quote = fixed_quote_action.get("fixed_switch_quote") if isinstance(fixed_quote_action, Mapping) else {}
+            target_state = "QUOTED"
+            transition_code = "fixed_switch_quote_created"
             updates = {
-                "order_status": "refunded", "payment_status": "refunded",
-                "order_id": order_id,
+                "fixed_switch_status": "confirmed",
+                "fixed_switch_quote_confirmation_status": "pending",
+                "fixed_switch_quote_id": _pick(fixed_quote, "quote_id"),
+                "fixed_switch_quote_hash": _pick(fixed_quote, "quote_hash"),
+                "fixed_switch_quote_generation": fixed_quote.get("generation"),
+                "fixed_switch_confirmation_event_id": event_id,
+                "fixed_switch_expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+                "quote_status": "ready", "confirmation_status": "pending",
+                "target_amount_cents": fixed_quote.get("amount_fen"),
+                "confirmed_ticket_count": fixed_quote.get("ticket_count"),
             }
+        elif reason == "fixed_switch_rejected":
+            target_state = "MANUAL_HOLD"
+            transition_code = "fixed_switch_rejected"
+            updates = {"fixed_switch_status": "rejected", "fixed_switch_quote_confirmation_status": "none"}
+        elif reason == "fixed_switch_expired":
+            target_state = "MANUAL_HOLD"
+            transition_code = "fixed_switch_expired"
+            updates = {"fixed_switch_status": "expired", "fixed_switch_quote_confirmation_status": "none"}
+        elif reason == "fixed_switch_price_confirmed":
+            target_state = "CONFIRMED"
+            transition_code = "fixed_switch_price_confirmation_recorded"
+            updates = {
+                "fixed_switch_quote_confirmation_status": "confirmed",
+                "quote_status": "ready", "confirmation_status": "confirmed",
+                "fixed_switch_replacement_order_id": None,
+                "order_id": None, "order_status": "none",
+                "price_change_status": "none", "payment_status": "unpaid",
+                "fulfillment_status": "none",
+            }
+        elif reason in {"fixed_switch_quote_failed", "fixed_switch_quote_invalid", "fixed_switch_source_quote_missing", "fixed_switch_source_seats_missing", "fixed_switch_unavailable", "fixed_switch_quote_missing"}:
+            target_state = "MANUAL_HOLD"
+            transition_code = reason
+            handoff_reason = reason
+            updates = {"fixed_switch_status": "failed"}
+            actions = []
+            decision = {**decision, "actions": [], "reason": reason}
         elif (
             order_status in {"4", "completed", "finished", "已完成", "交易成功"}
             and (event_type in {"order.paid", "order.shipped", "order.finished"} or reason == "authoritative_shipped_status_reply_ready")
@@ -322,6 +454,32 @@ class RuleStateCoordinator:
                 "order_status": "shipped", "payment_status": "verified_paid",
                 "fulfillment_status": "shipped", "order_id": order_id,
             }
+        elif (
+            paid_lifecycle_signal
+            and current.fixed_switch_replacement_order_id
+            and current.fixed_switch_replacement_order_id != order_id
+        ):
+            target_state = current.flow_state
+            transition_code = "fixed_switch_unbound_paid_ignored"
+            updates = {}
+            actions = []
+            decision = {**decision, "actions": [], "reason": transition_code}
+        elif (
+            paid_lifecycle_signal
+            and current.fixed_switch_replacement_order_id == order_id
+            and current.fixed_switch_quote_confirmation_status == "confirmed"
+            and not _future_iso_timestamp(current.fixed_switch_expires_at)
+        ):
+            target_state = "MANUAL_HOLD"
+            transition_code = "fixed_switch_quote_expired_after_payment"
+            handoff_reason = transition_code
+            updates = {
+                "fixed_switch_status": "expired",
+                "order_status": "paid", "payment_status": "verified_paid",
+                "fulfillment_status": "none", "order_id": order_id,
+            }
+            actions = []
+            decision = {**decision, "actions": [], "reason": transition_code}
         elif paid_lifecycle_signal and not payment_gate_verified:
             target_state = "MANUAL_HOLD"
             if observed_order_amount is None:
@@ -345,6 +503,66 @@ class RuleStateCoordinator:
                 "order_status": "paid", "payment_status": "verified_paid",
                 "fulfillment_status": "pending", "order_id": order_id,
             }
+            fixed_switch_paid = bool(
+                current.fixed_switch_status == "confirmed"
+                and current.fixed_switch_source_order_status == "closed"
+                and current.fixed_switch_quote_confirmation_status == "confirmed"
+                and current.fixed_switch_replacement_order_id == order_id
+                and current.fixed_switch_quote_id
+                and current.fixed_switch_quote_hash
+                and len(current.fixed_switch_quote_hash) == 64
+                and isinstance(current.fixed_switch_quote_generation, int)
+                and isinstance(current.confirmed_ticket_count, int)
+                and current.fulfillment_status == "none"
+                and _future_iso_timestamp(current.fixed_switch_expires_at)
+            )
+            provider_quote = active_quote_record or quote_record
+            if fixed_switch_paid:
+                order_action = {
+                    "id": f"{event_id}:create-liangpiao-order",
+                    "type": "create_liangpiao_order",
+                    "order_id": order_id,
+                    "quote_id": current.fixed_switch_quote_id,
+                    "quote_hash": current.fixed_switch_quote_hash,
+                    "confirmation_id": current.fixed_switch_confirmation_event_id or event_id,
+                    "latest_buyer_message": "新订单付款已确认，按一口价报价进入出票流程",
+                    "buyer_phone": _pick(order, "phone", "mobile", "tel") or self._liangpiao_order_phone,
+                    "generation": current.fixed_switch_quote_generation,
+                    "ticket_count": current.confirmed_ticket_count,
+                    "buyer_confirmed": True,
+                    "allow_seat_change": False,
+                    "shop_id": identity["shop_id"], "buyer_id": identity["buyer_id"], "chat_id": identity["chat_id"],
+                    "trace_id": event_id,
+                    "rule_governed": True,
+                }
+                actions = [order_action, *actions]
+                decision = {**decision, "actions": actions}
+            elif (
+                isinstance(provider_quote, Mapping)
+                and provider_quote.get("quote_route") == "liangpiao_exact"
+                and _pick(provider_quote, "provider_quote_id", "quote_id")
+                and _pick(provider_quote, "provider_quote_hash", "quote_hash")
+                and current.confirmation_status == "confirmed"
+            ):
+                order_action = {
+                    "id": f"{event_id}:create-liangpiao-order",
+                    "type": "create_liangpiao_order",
+                    "order_id": order_id,
+                    "quote_id": _pick(provider_quote, "provider_quote_id", "quote_id"),
+                    "quote_hash": _pick(provider_quote, "provider_quote_hash", "quote_hash"),
+                    "confirmation_id": current.confirmation_event_id or current.confirmation_version or event_id,
+                    "latest_buyer_message": "确认下单",
+                    "buyer_phone": _pick(order, "phone", "mobile", "tel") or self._liangpiao_order_phone,
+                    "generation": int(provider_quote.get("quote_generation") or current.generation),
+                    "ticket_count": current.confirmed_ticket_count,
+                    "buyer_confirmed": True,
+                    "allow_seat_change": False,
+                    "shop_id": identity["shop_id"], "buyer_id": identity["buyer_id"], "chat_id": identity["chat_id"],
+                    "trace_id": event_id,
+                    "rule_governed": True,
+                }
+                actions = [order_action, *actions]
+                decision = {**decision, "actions": actions}
         elif isinstance(change_action, Mapping):
             snapshot = change_action.get("quote_snapshot") if isinstance(change_action.get("quote_snapshot"), Mapping) else {}
             target_state = "PRICE_CHANGING"
@@ -365,6 +583,12 @@ class RuleStateCoordinator:
                 "price_change_command_id": _pick(change_action, "id"),
                 "expected_inputs": [],
             }
+            if snapshot.get("fixed_switch") is True:
+                updates.update({
+                    "fixed_switch_replacement_order_id": _pick(snapshot, "order_id"),
+                    "fixed_switch_status": "confirmed",
+                    "fixed_switch_quote_confirmation_status": "confirmed",
+                })
         elif reason == "order_created_before_quote_requires_explicit_confirmation":
             target_state = "QUOTED"
             transition_code = "order_before_quote_confirmation_required"
@@ -391,6 +615,17 @@ class RuleStateCoordinator:
                 target_state = "COLLECTING"
                 transition_code = "quote_input_incomplete"
                 updates = {"quote_status": "collecting"}
+                if changed_failed_quote:
+                    updates.update({
+                        "confirmation_status": "invalidated",
+                        "active_quote_record_id": None,
+                        "confirmed_quote_record_id": None,
+                        "confirmation_version": None,
+                        "confirmation_source": None,
+                        "confirmation_event_id": None,
+                        "confirmed_ticket_count": None,
+                        "target_amount_cents": None,
+                    })
         elif reason == "quote_confirmation_clarification_ready":
             target_state = "QUOTED"
             transition_code = "explicit_quote_confirmation_required"
@@ -462,14 +697,42 @@ class RuleStateCoordinator:
             target_state = "ORDER_UNVERIFIED"
             transition_code = "order_unverified"
             updates = {"order_status": "unverified"}
-        elif reason in {"authoritative_order_amount_already_matches_quote", "bound_order_amount_already_matches_quote"}:
+        elif reason in {
+            "authoritative_order_amount_already_matches_quote",
+            "bound_order_amount_already_matches_quote",
+            "fixed_switch_order_amount_already_matches",
+        }:
             target_state = "WAITING_PAYMENT"
             transition_code = "order_amount_already_verified"
             order = body.get("order") if isinstance(body.get("order"), Mapping) else {}
             updates = {
-                "quote_status": "ready", "order_status": "pending_payment",
-                "price_change_status": "succeeded", "order_id": _pick(order, "orderId", "order_id"),
+                "quote_status": "ready", "confirmation_status": "confirmed",
+                "order_status": "pending_payment", "price_change_status": "succeeded",
+                "order_id": _pick(order, "orderId", "order_id"),
             }
+            # The quote finder may safely fall back to an older confirmed
+            # record when a newer duplicate is still being delivery-reconciled.
+            # Persist the actual record used for this order, otherwise the
+            # payment gate loses the confirmation lineage on the next event.
+            quote_snapshot = decision.get("quote_snapshot") if isinstance(decision, Mapping) else None
+            if isinstance(quote_snapshot, Mapping):
+                record_id = _pick(quote_snapshot, "quote_record_id", "record_id")
+                if record_id:
+                    updates.update({
+                        "active_quote_record_id": record_id,
+                        "confirmed_quote_record_id": record_id,
+                        "confirmation_version": _pick(quote_snapshot, "confirmation_version"),
+                        "confirmation_source": _pick(quote_snapshot, "confirmation_source") or "buyer_message",
+                        "confirmation_event_id": _pick(quote_snapshot, "confirmation_event_id"),
+                        "confirmed_ticket_count": quote_snapshot.get("confirmed_ticket_count"),
+                        "target_amount_cents": quote_snapshot.get("target_amount_cents"),
+                    })
+                    if quote_snapshot.get("fixed_switch") is True:
+                        updates.update({
+                            "fixed_switch_replacement_order_id": _pick(quote_snapshot, "order_id"),
+                            "fixed_switch_status": "confirmed",
+                            "fixed_switch_quote_confirmation_status": "confirmed",
+                        })
 
         try:
             updated = self._store.transition(
@@ -546,6 +809,89 @@ class RuleStateCoordinator:
                 state_before=current.flow_state, state_after=updated.flow_state,
                 transition_code="explicit_human_takeover", state_revision=updated.revision,
                 actions=[], handoff_reason="explicit_human_takeover",
+            )
+        if command_type == "cancel_failed_liangpiao_source_order":
+            if not order_id:
+                return None
+            current = self._store.find_by_order(tenant_id=tenant_id, order_id=order_id)
+            if current is None:
+                return None
+            if (
+                current.fixed_switch_source_platform_order_id != order_id
+                or current.fixed_switch_source_order_status not in {"refund_pending", "closed"}
+            ):
+                return None
+            source_out_order_no = _pick(result, "source_out_order_no")
+            if (
+                source_out_order_no
+                and current.fixed_switch_source_order_no
+                and source_out_order_no != current.fixed_switch_source_order_no
+            ):
+                return None
+            status = _pick(result, "status") or "unknown"
+            closed = status == "succeeded" and result.get("order_closed") is True
+            transition_code = (
+                "fixed_switch_source_order_closed"
+                if closed else "fixed_switch_source_order_refund_pending"
+            )
+            result_event_id = "result:" + hashlib.sha256(
+                f"{event_id}\0{action_id}".encode()
+            ).hexdigest()[:40]
+            updates: dict[str, object] = {
+                "fixed_switch_source_order_status": "closed" if closed else "refund_pending",
+                "order_status": "closed" if closed else "refund_pending",
+                "payment_status": "refunded" if closed else "refund_pending",
+            }
+            updated = self._store.transition(
+                tenant_id=current.tenant_id, shop_id=current.shop_id,
+                buyer_id=current.buyer_id, chat_id=current.chat_id,
+                expected_revision=current.revision, event_id=result_event_id,
+                transition_code=transition_code, flow_state="MANUAL_HOLD", updates=updates,
+            )
+            actions: list[dict[str, Any]] = []
+            if closed:
+                actions.append({
+                    "id": f"{event_id}:offer-fixed-after-source-closed",
+                    "type": "send_message",
+                    "order_id": order_id,
+                    "text": "原订单已确认关闭，款项将按闲鱼平台流程原路退回。是否需要按同场次的一口价继续出票？",
+                    "dedupe_key": f"{current.state_id}:offer-fixed-after-source-closed",
+                    "preserve_on_new_buyer_message": True,
+                    "rule_governed": True,
+                    "safety_notice": True,
+                })
+            return RuleDecision(
+                state_before=current.flow_state, state_after=updated.flow_state,
+                transition_code=transition_code, state_revision=updated.revision,
+                actions=actions, handoff_reason=None,
+            )
+        if command_type == "create_liangpiao_order":
+            if not order_id:
+                return None
+            current = self._store.find_by_order(tenant_id=tenant_id, order_id=order_id)
+            if current is None:
+                return None
+            result_event_id = "result:" + hashlib.sha256(f"{event_id}\\0{action_id}".encode()).hexdigest()[:40]
+            status = _pick(result, "status") or "unknown"
+            success = status == "succeeded" and _pick(result, "provider_order_no", "providerOrderNo", "order_no", "orderNo")
+            target_state = "FULFILLMENT_IN_PROGRESS" if success else "MANUAL_HOLD"
+            transition_code = "liangpiao_order_created" if success else f"liangpiao_order_create_{status}"
+            updates = {
+                "fulfillment_status": "claimed" if success else "none",
+                "provider_status": _pick(result, "provider_status", "providerStatus") or ("created" if success else status),
+                "provider_order_no": _pick(result, "provider_order_no", "providerOrderNo", "order_no", "orderNo"),
+                "out_order_no": _pick(result, "out_order_no", "outOrderNo"),
+            }
+            updated = self._store.transition(
+                tenant_id=current.tenant_id, shop_id=current.shop_id,
+                buyer_id=current.buyer_id, chat_id=current.chat_id,
+                expected_revision=current.revision, event_id=result_event_id,
+                transition_code=transition_code, flow_state=target_state, updates=updates,
+            )
+            return RuleDecision(
+                state_before=current.flow_state, state_after=updated.flow_state,
+                transition_code=transition_code, state_revision=updated.revision,
+                actions=[], handoff_reason=None if success else f"liangpiao_order_create_{status}",
             )
         if not action_id.endswith(":change-order-price"):
             return None

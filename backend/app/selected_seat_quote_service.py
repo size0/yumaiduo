@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping, Protocol
+from typing import Any, Literal, Mapping, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .models import PricingRulesUpdate
 from .rule_contracts import GateEvidence, ReplyPlan
 
 
@@ -46,9 +49,13 @@ class SelectedSeatQuoteRequest(BaseModel):
     show_date: str | None = Field(default=None, max_length=40)
     showtime_start: str | None = Field(default=None, max_length=20)
     hall_name: str | None = Field(default=None, max_length=120)
-    seats: list[SelectedSeat] = Field(min_length=1, max_length=20)
-    ticket_mode: str = Field(default="STANDARD", min_length=1, max_length=40)
-    price_mode: str = Field(default="FIXED", min_length=1, max_length=40)
+    seats: list[SelectedSeat] = Field(min_length=1, max_length=6)
+    ticket_mode: Literal["STANDARD", "FAST", "FLASH"] = "STANDARD"
+    price_mode: Literal["FIXED", "LIMIT"] = "FIXED"
+    # Liangpiao area pricing strategy.  Keep this optional so existing shops
+    # continue to use the provider default, while allowing preflight and
+    # order/create to carry an explicit, auditable choice.
+    area_quote_strategy: Literal["AVERAGE", "HIGHEST", "LOWEST"] | None = None
     generation: int = Field(default=1, ge=1)
     trace_id: str = Field(default_factory=lambda: uuid4().hex, min_length=1, max_length=120)
 
@@ -61,9 +68,13 @@ class SelectedSeatQuoteResult(BaseModel):
     quote_id: str = Field(min_length=1, max_length=160)
     quote_hash: str = Field(min_length=64, max_length=64)
     show_id: str = Field(min_length=1, max_length=120)
-    seats: list[SelectedSeat] = Field(min_length=1, max_length=20)
+    price_mode: Literal["FIXED", "LIMIT"] = "FIXED"
+    seats: list[SelectedSeat] = Field(min_length=1, max_length=6)
     provider_amount_fen: int = Field(gt=0)
     buyer_amount_fen: int = Field(gt=0)
+    max_price_fen: int | None = Field(default=None, gt=0)
+    operator_pricing_applied: bool = False
+    operator_markup_percent: float | None = None
     pricing_rule_version: str = Field(min_length=1, max_length=120)
     expires_at: datetime
     preflight_verified: bool = True
@@ -144,11 +155,13 @@ class SelectedSeatQuoteService:
     """Resolve an exact official show/seat set, preflight it and persist a snapshot."""
 
     def __init__(self, client: LiangpiaoQuoteClient, *, quote_store: object | None = None,
-                 ttl_seconds: int = 600, pricing_rule_version: str = "liangpiao-server") -> None:
+                 ttl_seconds: int = 600, pricing_rule_version: str = "liangpiao-server",
+                 pricing_rules: object | None = None) -> None:
         self._client = client
         self._quote_store = quote_store
         self._ttl_seconds = max(60, min(int(ttl_seconds), 1800))
         self._pricing_rule_version = pricing_rule_version
+        self._pricing_rules_provider = pricing_rules
 
     async def quote(self, request: SelectedSeatQuoteRequest | Mapping[str, Any]) -> SelectedSeatQuoteResult:
         req = request if isinstance(request, SelectedSeatQuoteRequest) else SelectedSeatQuoteRequest.model_validate(request)
@@ -157,11 +170,17 @@ class SelectedSeatQuoteService:
         show_id = req.show_id
         show = None
         if not show_id:
+            if not req.show_date:
+                raise QuoteServiceError(
+                    "LIANGPIAO_SHOW_DATE_MISSING", "良票精确报价需要可核验的场次日期。",
+                )
+            # Liangpiao's show/list contract only accepts cinemaId, showDate,
+            # and optional movieId. Movie name, start time, and hall are
+            # verified locally against the authoritative response below.
             show_data = await self._client.show_list(
-                cinema_id=req.cinema_id, movie_name=req.movie_name,
-                show_date=req.show_date, showtime_start=req.showtime_start,
+                cinema_id=req.cinema_id, show_date=req.show_date,
             )
-            matches = self._match_shows(_items(show_data, "shows", "items", "data"), req)
+            matches = self._match_shows(_items(show_data, "list", "shows", "items", "data"), req)
             if len(matches) != 1:
                 code = "LIANGPIAO_SHOW_NOT_FOUND" if not matches else "LIANGPIAO_SHOW_AMBIGUOUS"
                 raise QuoteServiceError(code, "无法唯一确认当前影片场次。")
@@ -170,14 +189,19 @@ class SelectedSeatQuoteService:
         if not show_id:
             raise QuoteServiceError("LIANGPIAO_SHOW_ID_MISSING", "场次缺少官方 showId。")
 
-        seat_data = await self._client.seat_list(cinema_id=req.cinema_id, show_id=show_id)
+        # The seat/list contract is keyed by the provider show ID only. The
+        # Liangpiao cinema ID was used to resolve the show, but must not be
+        # sent to this endpoint as a second identifier.
+        seat_data = await self._client.seat_list(show_id=show_id)
         provider_seats = [_seat(item) for item in _items(seat_data, "seats", "seatList", "items", "data")]
         provider_seats = [item for item in provider_seats if item is not None]
         selected: list[SelectedSeat] = []
         for wanted in req.seats:
+            # Providers may label the same column as “座” or “列”. The
+            # numeric row/column coordinates are the stable identity; a
+            # display-label spelling difference must not make an available
+            # seat look unavailable.
             matches = [item for item in provider_seats if item.row_no == wanted.row_no and item.col_no == wanted.col_no]
-            if wanted.seat_no:
-                matches = [item for item in matches if item.seat_no in {wanted.seat_no, None}]
             if wanted.area_id:
                 matches = [item for item in matches if item.area_id == wanted.area_id]
             if len(matches) != 1:
@@ -189,27 +213,72 @@ class SelectedSeatQuoteService:
                 raise QuoteServiceError("LIANGPIAO_SEAT_UNAVAILABLE", "已选座位当前不可售。")
             selected.append(matches[0])
 
+        # Keep the provider request limited to the documented preflight
+        # contract. Generation and trace ID remain internal audit facts in the
+        # snapshot/result; cinemaId is intentionally not accepted here.
         preflight_payload = {
-            "cinemaId": req.cinema_id, "showId": show_id,
+            "show_id": show_id,
             "seats": [self._seat_payload(item) for item in selected],
-            "ticketMode": req.ticket_mode, "priceMode": req.price_mode,
-            "generation": req.generation, "traceId": req.trace_id,
+            "ticket_mode": req.ticket_mode, "price_mode": req.price_mode,
         }
+        if req.area_quote_strategy is not None:
+            preflight_payload["area_quote_strategy"] = req.area_quote_strategy
         preflight = await self._client.order_preflight(**preflight_payload)
-        provider_amount = _fen(_value(preflight, "providerAmountFen", "provider_amount_fen", "providerAmount", "supplierAmountFen"))
-        buyer_amount = _fen(_value(preflight, "buyerAmountFen", "buyer_amount_fen", "buyerAmount", "totalPayPriceFen", "totalPayPrice"))
-        if provider_amount is None or buyer_amount is None:
-            raise QuoteServiceError("LIANGPIAO_PREFLIGHT_INVALID", "良票预检未返回有效金额。")
+        available = _value(preflight, "available")
+        if available is not True:
+            reason = _text(_value(preflight, "reason", "message", "msg"))
+            raise QuoteServiceError(
+                "LIANGPIAO_PREFLIGHT_FAILED",
+                reason or "良票官方预检未确认所选座位可售。",
+            )
         if _value(preflight, "ok", "success") is False or str(_value(preflight, "status") or "").lower() in {"failed", "error"}:
             raise QuoteServiceError("LIANGPIAO_PREFLIGHT_FAILED", "良票预检未通过。")
+        estimated = _value(preflight, "estimated")
+        total_amount = _fen(_value(preflight, "totalAmount", "total_amount_fen", "totalAmountFen"))
+        estimate_amount = _fen(_value(
+            preflight, "estimateAmount", "estimate_amount_fen", "estimateAmountFen",
+        ))
+        # FIXED uses totalAmount as the payable one-price amount. LIMIT shows
+        # estimateAmount to the buyer while retaining totalAmount as the
+        # provider-side upper limit for order/create.
+        if req.price_mode == "FIXED":
+            buyer_amount = total_amount or _fen(_value(
+                preflight, "buyerAmountFen", "buyer_amount_fen", "buyerAmount",
+                "totalPayPriceFen", "totalPayPrice",
+            ))
+            max_price = buyer_amount
+            if estimated is True:
+                raise QuoteServiceError("LIANGPIAO_PREFLIGHT_INVALID", "良票预检只返回预估金额，无法确认固定报价。")
+        else:
+            buyer_amount = estimate_amount
+            max_price = total_amount or estimate_amount
+            if buyer_amount is None:
+                raise QuoteServiceError("LIANGPIAO_PREFLIGHT_INVALID", "良票预检未返回有效预估金额。")
+        provider_base_amount = buyer_amount
+        market_amount = _fen(_value(preflight, "marketAmount", "market_amount_fen", "marketAmountFen"))
+        buyer_amount, operator_markup_percent = self._apply_operator_pricing(
+            buyer_amount, market_amount, req.price_mode,
+        )
+        provider_amount = _fen(_value(
+            preflight, "providerAmountFen", "provider_amount_fen", "providerAmount",
+            "supplierAmountFen",
+        )) or provider_base_amount
+        if provider_amount is None or buyer_amount is None:
+            raise QuoteServiceError("LIANGPIAO_PREFLIGHT_INVALID", "良票预检未返回有效金额。")
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._ttl_seconds)
         snapshot = {
             "tenant_id": req.tenant_id, "conversation_id": req.conversation_id,
             "cinema_id": req.cinema_id, "show_id": show_id,
             "seats": [self._seat_payload(item) for item in selected],
             "ticket_mode": req.ticket_mode, "price_mode": req.price_mode,
+            "area_quote_strategy": req.area_quote_strategy,
             "preflight_request": preflight_payload, "preflight_response": dict(preflight),
             "provider_amount_fen": provider_amount, "buyer_amount_fen": buyer_amount,
+            "provider_base_amount_fen": provider_base_amount,
+            "market_amount_fen": market_amount,
+            "max_price_fen": max_price,
+            "operator_pricing_applied": operator_markup_percent is not None,
+            "operator_markup_percent": operator_markup_percent,
             "pricing_rule_version": _text(_value(preflight, "pricingRuleVersion", "pricing_rule_version")) or self._pricing_rule_version,
             "generation": req.generation, "trace_id": req.trace_id, "expires_at": expires_at.isoformat(),
         }
@@ -230,7 +299,9 @@ class SelectedSeatQuoteService:
         )
         result = SelectedSeatQuoteResult(
             quote_id=quote_id, quote_hash=quote_hash, show_id=show_id,
-            seats=selected, provider_amount_fen=provider_amount, buyer_amount_fen=buyer_amount,
+            price_mode=req.price_mode, seats=selected, provider_amount_fen=provider_amount, buyer_amount_fen=buyer_amount,
+            max_price_fen=max_price, operator_pricing_applied=operator_markup_percent is not None,
+            operator_markup_percent=operator_markup_percent,
             pricing_rule_version=snapshot["pricing_rule_version"], expires_at=expires_at,
             generation=req.generation, trace_id=req.trace_id, snapshot=snapshot,
             reply_plan=plan.model_dump(mode="json"),
@@ -241,19 +312,74 @@ class SelectedSeatQuoteService:
                   "conversation_id": req.conversation_id})
         return result
 
+    def _apply_operator_pricing(
+        self, base_amount: int | None, market_amount: int | None, price_mode: str = "LIMIT",
+    ) -> tuple[int | None, float | None]:
+        if base_amount is None or self._pricing_rules_provider is None:
+            return base_amount, None
+        source = self._pricing_rules_provider() if callable(self._pricing_rules_provider) else self._pricing_rules_provider
+        rules = PricingRulesUpdate.model_validate(source)
+        bands = rules.liangpiao_rules
+        if str(price_mode).upper() == "FIXED":
+            # ``model_fields_set`` distinguishes an explicit empty fixed
+            # policy from an old caller that does not know this field yet.
+            bands = (
+                rules.liangpiao_fixed_rules
+                if "liangpiao_fixed_rules" in rules.model_fields_set
+                else rules.liangpiao_rules
+            )
+        if not rules.enabled or not bands:
+            return base_amount, None
+        if market_amount is None or market_amount <= 0:
+            raise QuoteServiceError("LIANGPIAO_PRICING_BASE_MISSING", "良票预检缺少原价，无法按后台规则计算报价。")
+        discount_percent = Decimal(base_amount * 100) / Decimal(market_amount)
+        selected = None
+        for index, band in enumerate(bands):
+            maximum = Decimal(str(band.max_discount_percent))
+            if Decimal(str(band.min_discount_percent)) <= discount_percent < maximum or (
+                index == len(bands) - 1 and discount_percent <= maximum
+            ):
+                selected = band
+                break
+        if selected is None:
+            raise QuoteServiceError("LIANGPIAO_PRICING_BAND_MISSING", "良票预估价未匹配后台报价区间。")
+        multiplier = Decimal(100 + selected.markup_percent) / Decimal(100)
+        raw = Decimal(base_amount) * multiplier
+        increment = Decimal(rules.rounding_increment_cents)
+        rounded = int((raw / increment).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * increment)
+        if rounded <= 0:
+            raise QuoteServiceError("LIANGPIAO_PRICING_RESULT_INVALID", "良票后台规则计算结果无效。")
+        return rounded, float(selected.markup_percent)
+
     @staticmethod
     def _seat_payload(seat: SelectedSeat) -> dict[str, Any]:
         return {"rowNo": seat.row_no, "colNo": seat.col_no, "seatNo": seat.seat_no, "areaId": seat.area_id}
 
     @staticmethod
-    def _match_shows(values: list[Any], request: SelectedSeatQuoteRequest) -> list[Any]:
+    def _show_date(value: object) -> str | None:
+        raw = _text(_value(value, "date", "showDate", "show_date", "startTime"))
+        if not raw:
+            return None
+        date_match = re.match(r"(\d{4}-\d{2}-\d{2})", raw)
+        return date_match.group(1) if date_match else raw
+
+    @staticmethod
+    def _show_start_time(value: object) -> str | None:
+        raw = _text(_value(value, "startTime", "showtimeStart", "showtime_start", "time"))
+        if not raw:
+            return None
+        time_match = re.search(r"(?:T|\s|^)(\d{1,2}):(\d{2})", raw)
+        return f"{int(time_match.group(1)):02d}:{time_match.group(2)}" if time_match else raw
+
+    @classmethod
+    def _match_shows(cls, values: list[Any], request: SelectedSeatQuoteRequest) -> list[Any]:
         matches = []
         for value in values:
             if request.movie_name and _text(_value(value, "film", "movieName", "movie_name", "movie")) != request.movie_name:
                 continue
-            if request.show_date and _text(_value(value, "date", "showDate", "show_date")) != request.show_date:
+            if request.show_date and cls._show_date(value) != request.show_date:
                 continue
-            if request.showtime_start and _text(_value(value, "startTime", "showtimeStart", "showtime_start", "time")) != request.showtime_start:
+            if request.showtime_start and cls._show_start_time(value) != request.showtime_start:
                 continue
             if request.hall_name and _text(_value(value, "hall", "hallName", "hall_name")) != request.hall_name:
                 continue

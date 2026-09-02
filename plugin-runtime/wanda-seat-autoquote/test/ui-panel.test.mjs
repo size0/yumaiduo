@@ -23,6 +23,7 @@ async function withServer(run, {
   getOrder = async () => ({ orderId: 'order-1' }),
   fulfillOrder = async () => ({ status: 'submitted' }),
   fulfillmentEnabled = false,
+  agentHarnessReadOnly = false,
   orderApiKey = '',
   orderApiTenantId = '',
 } = {}) {
@@ -38,6 +39,7 @@ async function withServer(run, {
       orderApiKey,
       orderApiTenantId,
       fulfillmentEnabled,
+      agentHarnessReadOnly,
       manifest: {
         id: 'wanda-seat-autoquote',
         name: '万达电影票 AI 客服 V4',
@@ -82,6 +84,8 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     const pageHtml = await page.text();
     assert.match(pageHtml, /客服工作台/u);
     assert.match(pageHtml, /报价记录/u);
+    assert.match(pageHtml, /万达报价/u);
+    assert.match(pageHtml, /良票报价/u);
     assert.match(pageHtml, /订单管理/u);
     assert.ok(pageHtml.indexOf('店铺开关') < pageHtml.indexOf('运营报价'));
     assert.ok(pageHtml.indexOf('运营报价') < pageHtml.indexOf('报价记录'));
@@ -94,6 +98,8 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(pageHtml, /万达报价规则/u);
     assert.match(pageHtml, /(?:官方价格基准 \+ 固定加\/减价|按折扣率匹配区间)/u);
     assert.match(pageHtml, /id="(?:wplusDiscount|wandaRuleList)"/u);
+    assert.match(pageHtml, /id="liangpiaoQuoteRecordList"/u);
+    assert.match(pageHtml, /良票实时选座预检/u);
     assert.match(pageHtml, /class="pricing-rule-card liangpiao-pricing-card"[\s\S]*class="pricing-rule-card pricing-rule-wplus"/u);
     assert.match(pageHtml, /id="pricingEnabled"/u);
     assert.match(pageHtml, /id="roundingIncrement"/u);
@@ -135,11 +141,49 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(styles, /\.knowledge-entry summary small \{ font-size:11px; \}/u);
     assert.match(styles, /\.order-table \{ font-size:13px; \}/u);
     assert.match(styles, /\.order-table th \{ font-size:12px; \}/u);
+    assert.match(styles, /\.order-source-cell strong, \.order-source-cell small \{ display:block; /u);
 
     const appAsset = await fetch(`${baseUrl}/ui/app.js`, { headers: signedHeaders() });
     const appSource = await appAsset.text();
     assert.match(appSource, /api\/settings\/knowledge/u);
+    assert.match(pageHtml, /data-workspace="agent-audit"/u);
+    assert.match(pageHtml, /id="agentAuditEntries"/u);
+    assert.match(pageHtml, /id="agentAuditSearch"/u);
+    assert.match(appSource, /api\/rules-first\/agent-tool-calls/u);
+    assert.match(appSource, /api\/rules-first\/event-audits/u);
+    assert.match(appSource, /事件路由与规则结果/u);
+    assert.match(pageHtml, /data-workspace="manual-tasks"/u);
+    assert.match(pageHtml, /id="manualTaskEntries"/u);
+    assert.match(pageHtml, /id="manualTaskSearch"/u);
+    assert.match(pageHtml, /页面不会自动刷新/u);
+    assert.match(appSource, /api\/rules-first\/manual-tasks/u);
+    assert.match(pageHtml, /领取只用于防止多人重复处理/u);
+    assert.match(appSource, /claimManualTask/u);
+    assert.match(appSource, /completeManualTask/u);
+    assert.match(appSource, /恢复后自动化会从 ORDER_UNVERIFIED 状态继续/u);
+    assert.match(appSource, /状态已更新，关闭任务/u);
+    assert.match(appSource, /消息发送失败，请人工联系买家/u);
+    assert.match(appSource, /已付款，但付款金额尚未核验/u);
+    assert.match(appSource, /买家昵称/u);
+    assert.match(appSource, /店铺名称/u);
+    assert.match(appSource, /该按钮本身不会改订单/u);
+    assert.match(pageHtml, /id="conversationAutomationMode"/u);
+    assert.match(pageHtml, /id="clearConversationMode"/u);
+    assert.match(appSource, /api\/plugin\/conversations/u);
+    assert.match(appSource, /method:'DELETE'/u);
+    assert.match(appSource, /selected-offer/u);
+    assert.match(pageHtml, /id="showWandaQuotes"/u);
+    assert.match(pageHtml, /id="showLiangpiaoQuotes"/u);
+    assert.match(appSource, /showQuoteSource/u);
+    assert.match(appSource, /确认买家选择/u);
+    assert.match(appSource, /多档报价必须明确选择后才能改价或出票/u);
+    assert.match(appSource, /已完成权威重新预检/u);
+    assert.match(appSource, /等待买家确认最终金额/u);
     assert.match(appSource, /loadOperations/u);
+    assert.match(appSource, /liangpiao_rules/u);
+    assert.match(appSource, /wanda_rules/u);
+    assert.match(appSource, /collectLiangpiaoRules/u);
+    assert.match(appSource, /collectWandaRules/u);
     assert.match(appSource, /initWandaRules/u);
     assert.match(pageHtml, /id="orderSearch"/u);
     assert.match(pageHtml, /id="orderDetailDialog"/u);
@@ -148,7 +192,12 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /order-ticket-viewer/u);
     assert.match(appSource, /取票信息/u);
     assert.match(appSource, /良票订单暂不可用/u);
-    for (const label of ['影片','城市','影院','场次','座位','出票方式','票面价','报价','成交价','状态','下单时间','咸鱼买家','操作']) assert.match(appSource, new RegExp(label, 'u'));
+    assert.match(appSource, /TEMPLATE_MESSAGE_SEPARATOR/u);
+    assert.match(appSource, /insertMessageSeparator/u);
+    assert.match(pageHtml, /id="insertMessageSeparator"/u);
+    for (const label of ['来源店铺','影片','城市','影院','场次','座位','出票方式','票面价','报价','成交价','状态','下单时间','咸鱼买家','操作']) assert.match(appSource, new RegExp(label, 'u'));
+    assert.match(appSource, /shopNameMap/u);
+    assert.match(appSource, /v4Fetch\('\/api\/plugin\/shops'\)/u);
     assert.match(pageHtml, /id="reminderEnabled"/u);
     assert.match(pageHtml, /散场后提醒收货/u);
     assert.match(appSource, /saveReminderSettings/u);
@@ -167,6 +216,10 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(appSource, /name==='orders'/u);
     assert.doesNotMatch(appSource, /activeWorkspace==='orders'\)void loadOrders\(\)/u);
     assert.doesNotMatch(appSource, /activeWorkspace==='orders'\)void loadOrders\(\),15000/u);
+    assert.doesNotMatch(appSource, /setInterval\(\(\)=>\{if\(!document\.hidden&&activeWorkspace==='orders'\)/u);
+    assert.doesNotMatch(appSource, /activeWorkspace==='agent-audit'\)loadAgentAudit/u);
+    assert.doesNotMatch(appSource, /activeWorkspace==='manual-tasks'\)loadManualTasks/u);
+    assert.match(appSource, /ui\/api\/orders\?limit=25/u);
     assert.doesNotMatch(appSource, /orderModal/u);
     assert.match(appSource, /wandaOrderRow/u);
     assert.match(appSource, /良票订单/u);
@@ -269,6 +322,28 @@ test('Wanda fulfillment API requires idempotency and delegates authoritative tic
   }]);
 });
 
+test('read-only Agent Harness blocks direct Wanda fulfillment writes', async () => {
+  const calls = [];
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/__plugin__/api/wanda/orders/order-1/fulfillment`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer wanda-secret',
+        'content-type': 'application/json',
+        'idempotency-key': 'fulfillment-read-only',
+      },
+      body: JSON.stringify({ ticket_codes: ['WANDA-001'] }),
+    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { ok: false, error: 'agent_harness_read_only' });
+  }, {
+    orderApiKey: 'wanda-secret', orderApiTenantId: 'tenant-wanda', fulfillmentEnabled: true,
+    agentHarnessReadOnly: true,
+    fulfillOrder: async (...args) => { calls.push(args); return { status: 'submitted' }; },
+  });
+  assert.deepEqual(calls, []);
+});
+
 test('V4 panel API is signed at the gateway and proxied only to the loopback backend', async () => {
   const calls = [];
   await withServer(async (baseUrl) => {
@@ -277,11 +352,11 @@ test('V4 panel API is signed at the gateway and proxied only to the loopback bac
     assert.deepEqual(await response.json(), { model: 'qwen-v4' });
   }, {
     fetchImpl: async (url, options) => {
-      calls.push({ url, method: options.method, tenantId: options.headers['x-wanda-tenant-id'] });
+      calls.push({ url, method: options.method, tenantId: options.headers['x-wanda-tenant-id'], operatorId: options.headers['x-wanda-operator-id'] });
       return new Response(JSON.stringify({ model: 'qwen-v4' }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
   });
-  assert.deepEqual(calls, [{ url: 'http://127.0.0.1:8012/api/settings/vision', method: 'GET', tenantId: 'tenant-test' }]);
+  assert.deepEqual(calls, [{ url: 'http://127.0.0.1:8012/api/settings/vision', method: 'GET', tenantId: 'tenant-test', operatorId: 'user-test' }]);
 });
 
 test('slow image recognition runs as a tenant-bound background job beyond the gateway timeout', async () => {

@@ -7,6 +7,7 @@ from typing import Any, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .errors import ProviderError
 from .selected_seat_quote_service import SelectedSeat, SelectedSeatQuoteResult
 
 
@@ -102,7 +103,9 @@ class LiangpiaoOrderService:
             raise OrderServiceError("LIANGPIAO_QUOTE_EXPIRED", "报价已过期，请重新获取实时报价。")
         if int(values.get("generation") or 0) != req.generation:
             raise OrderServiceError("LIANGPIAO_QUOTE_GENERATION_MISMATCH", "报价已失效，请重新确认。")
-        if not req.buyer_confirmed or not _is_explicit_confirmation(req.latest_buyer_message):
+        # The rule engine supplies the authoritative confirmation flag. Do not
+        # re-guess buyer intent from free-form text at the order boundary.
+        if not req.buyer_confirmed:
             raise OrderServiceError("LIANGPIAO_CONFIRMATION_REQUIRED", "需要买家明确确认后才能下单。")
         if not re.fullmatch(r"1[3-9]\d{9}", req.buyer_phone):
             raise OrderServiceError("LIANGPIAO_PHONE_INVALID", "买家手机号格式不合法。")
@@ -133,22 +136,30 @@ class LiangpiaoOrderService:
             "priceMode": values.get("price_mode", "FIXED"),
             "outOrderNo": out_order_no,
             "tel": req.buyer_phone,
-            "maxPrice": int(values.get("buyer_amount_fen") or 0),
+            "maxPrice": int(values.get("max_price_fen") or values.get("buyer_amount_fen") or 0),
             "allowSeatChange": bool(req.allow_seat_change),
             "attach": req.confirmation_id,
             "traceId": req.trace_id,
         }
+        area_strategy = values.get("area_quote_strategy")
+        if area_strategy in {"AVERAGE", "HIGHEST", "LOWEST"}:
+            payload["areaQuoteStrategy"] = area_strategy
         try:
             response = await self._client.order_create(**payload)
         except Exception as error:
-            # A transport timeout is not safe to retry blindly. Reconcile first.
+            if not _is_unknown_create_result(error):
+                raise _order_create_rejected(error) from error
+            # Liangpiao documents order/create as idempotent on outOrderNo.
+            # order/detail accepts only the provider orderNo, which is not
+            # available when the first create response is lost.  Replaying the
+            # exact same create payload is therefore the only documented way
+            # to reconcile an unknown create result without creating a second
+            # order.
             try:
-                detail = await self._client.order_detail(out_order_no=out_order_no, show_id=values.get("show_id"))
-            except Exception:
-                detail = {}
-            if _provider_order_id(detail):
-                response = detail
-            else:
+                response = await self._client.order_create(**payload)
+            except Exception as retry_error:
+                if not _is_unknown_create_result(retry_error):
+                    raise _order_create_rejected(retry_error) from retry_error
                 raise OrderServiceError("LIANGPIAO_PROVIDER_UNKNOWN", "良票下单结果未知，已转人工核对。") from error
         provider_order_no = _provider_order_id(response)
         if not provider_order_no:
@@ -182,10 +193,6 @@ class LiangpiaoOrderService:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def _is_explicit_confirmation(text: str) -> bool:
-    return bool(re.search(r"(?:确认|确定|可以下单|要了|下单吧|同意).*(?:下单|出票|购买)?|下单|出票", text.strip(), re.I))
-
-
 def _seat_payload(value: object) -> dict[str, Any]:
     if isinstance(value, SelectedSeat):
         return {"rowNo": value.row_no, "colNo": value.col_no, "seatNo": value.seat_no, "areaId": value.area_id}
@@ -204,3 +211,20 @@ def _provider_order_id(value: Mapping[str, Any] | None) -> str | None:
         if text:
             return text
     return None
+
+
+def _is_unknown_create_result(error: Exception) -> bool:
+    return (
+        isinstance(error, (TimeoutError, ConnectionError))
+        or isinstance(error, ProviderError)
+        and error.code == "liangpiao_network_error"
+    )
+
+
+def _order_create_rejected(error: Exception) -> OrderServiceError:
+    message = str(getattr(error, "message", "") or "").strip()
+    return OrderServiceError(
+        "LIANGPIAO_ORDER_CREATE_REJECTED",
+        message[:200] or "良票下单未受理，请重新核对场次、座位和渠道。",
+        manual_hold=False,
+    )

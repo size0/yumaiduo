@@ -6,7 +6,7 @@ from app.chat import build_recognition_reply
 import pytest
 from pydantic import ValidationError
 
-from app.models import MovieImageInfo, PriceZone, RealQuote, SelectedSeat
+from app.models import CinemaCandidate, MovieImageInfo, PriceZone, RealQuote, SelectedSeat
 from app.reply_template_store import ReplyTemplates
 
 
@@ -26,6 +26,23 @@ def test_specific_bottom_seat_cards_take_priority() -> None:
     reply = build_recognition_reply(recognition)
     assert "可见已选座：11排16座、11排14座" in reply
     assert "座位：W+座位" not in reply
+
+
+def test_liangpiao_exact_quote_without_per_seat_prices_still_shows_authoritative_total() -> None:
+    recognition = MovieImageInfo(
+        movie_name="测试片", cinema_name="CGV影城（测试店）", selected_count_visible=2,
+        selected_seats=[{"seat_number": "5排6座"}, {"seat_number": "5排7座"}],
+    )
+    quote = RealQuote(
+        quote_scope="exact_seats", seat_zone_type="LIANGPIAO", seat_type="mixed",
+        total_quote_cents=5200, ticket_count=2, needs_ticket_count=False,
+        price_source="liangpiao_realtime_preflight", pricing_source="良票实时选座预检",
+    )
+
+    reply = build_recognition_reply(recognition, quote=quote)
+
+    assert "报价合计：52.00" in reply
+    assert "最终支付金额仍以正式下单和支付结果为准" in reply
 
 
 def test_reply_hides_language_format_and_screenshot_amount() -> None:
@@ -66,6 +83,23 @@ def test_missing_field_reply_never_exposes_optional_internal_schema_names() -> N
     assert "影厅" not in reply
 
 
+def test_candidate_reply_shows_only_cinema_names_without_addresses() -> None:
+    recognition = MovieImageInfo(
+        match_level="CANDIDATE",
+        candidate_cinemas=[
+            CinemaCandidate(cinema_id=1, name="万达影城（任丘店）", city_name="沧州", address="任丘市某某路万达广场三层"),
+            CinemaCandidate(cinema_id=2, name="西城万达IMAX店", city_name="东营", address="东营区某某路万达广场四层"),
+        ],
+    )
+
+    reply = build_recognition_reply(recognition)
+
+    assert reply == "识别到多个可能的影院，请回复序号确认：\n1、万达影城（任丘店）\n2、西城万达IMAX店\n请回复对应序号（如“1”），确认后我再重新获取当前场次和座位报价。"
+    assert "沧州" not in reply
+    assert "任丘市某某路" not in reply
+    assert "东营区某某路" not in reply
+
+
 def test_reply_supports_editable_templates_with_chinese_variables() -> None:
     recognition = MovieImageInfo(movie_name="奥德赛", city="成都", cinema_name="成都蜀都万达广场店", selected_count_visible=0)
     templates = ReplyTemplates(recognition_template="电影：{影片}\n城市：{城市}\n门店：{影院}\n{座位}\n{报价内容}")
@@ -89,7 +123,25 @@ def test_safe_supplement_templates_classify_cinema_and_showtime_failures() -> No
 
     assert "城市＋影院全名" in build_recognition_reply(cinema, quote_error="影院无法唯一匹配")
     assert build_recognition_reply(cinema, quote_error="场次未匹配") == ReplyTemplates().showtime_changed_template
-    assert build_recognition_reply(other, quote_error="影院无法匹配") == ReplyTemplates().unsupported_cinema_template
+    reply = build_recognition_reply(other, quote_error="影院无法匹配")
+    assert reply == ReplyTemplates().cinema_match_failure_template.replace("{影院}", "其他影院")
+    assert "目前仅支持万达影城" not in reply
+    assert "明确座位" in build_recognition_reply(other, quote_error="非万达影院需要明确座位后才能精确报价")
+
+
+def test_wanda_no_selected_seat_error_explains_hand_drawn_circle_is_not_selected() -> None:
+    wanda = MovieImageInfo(
+        cinema_name="巴彦淖尔万达影城摩尔城店", movie_name="欢迎来龙餐馆", city="巴彦淖尔",
+        date_text="2026-08-30", showtime_start="16:55", confidence=0.95,
+    )
+
+    reply = build_recognition_reply(
+        wanda,
+        quote_error="当前场次会员区域无可选座位",
+    )
+
+    assert "官方已选的具体座位" in reply
+    assert "手绘圈选不等于已选座" in reply
 
 
 def test_recognition_template_can_use_safe_global_quote_total() -> None:
@@ -156,16 +208,15 @@ def test_unavailable_selected_seat_exposes_only_safe_same_type_reference_price()
     reply = build_recognition_reply(
         recognition,
         quote_error=(
-            "10排16座、10排15座当前不可选，不能按原座位下单；"
-            "同座位类型当前参考价：42.00一张，按2张参考合计84.00元；"
-            "请重新选择同类型可售座位并发送最新截图。"
+            "10排16座、10排15座不可选，同类型参考价42.00元/张"
+            "（2张约84.00元）。请换座后发最新截图。"
         ),
     )
 
-    assert "10排16座、10排15座当前不可选" in reply
-    assert "同座位类型当前参考价：42.00一张" in reply
-    assert "按2张参考合计84.00元" in reply
-    assert "不能按原座位下单" in reply
+    assert reply == (
+        "10排16座、10排15座不可选，同类型参考价42.00元/张"
+        "（2张约84.00元）。请换座后发最新截图。"
+    )
 
 
 def test_recognition_template_can_show_authoritative_quote_unit_directly() -> None:

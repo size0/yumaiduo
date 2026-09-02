@@ -16,13 +16,20 @@ from app.selected_seat_quote_service import SelectedSeatQuoteService
 
 class Sandbox:
     async def show_list(self, **_: object) -> dict[str, object]:
-        return {"items": [{"showId": "show-1", "movieName": "电影", "showDate": "2026-08-29", "startTime": "20:00"}]}
+        return {"list": [{
+            "showId": "show-1", "cinemaId": 1, "movieName": "电影",
+            "hallName": "5号厅", "startTime": "2026-08-29T20:00:00+08:00",
+            "endTime": "2026-08-29T22:00:00+08:00",
+        }]}
 
     async def seat_list(self, **_: object) -> dict[str, object]:
         return {"items": [{"rowNo": 5, "colNo": 8, "seatNo": "5排8座", "areaId": "A", "status": "AVAILABLE"}]}
 
     async def order_preflight(self, **_: object) -> dict[str, object]:
-        return {"providerAmountFen": 8000, "buyerAmountFen": 8800, "pricingRuleVersion": "sandbox", "ok": True}
+        return {
+            "available": True, "totalAmount": "8800", "estimateAmount": "8800",
+            "marketAmount": "8000", "estimated": False, "pricingRuleVersion": "sandbox",
+        }
 
     async def order_create(self, **_: object) -> dict[str, object]:
         return {"providerOrderNo": "provider-1", "status": "created"}

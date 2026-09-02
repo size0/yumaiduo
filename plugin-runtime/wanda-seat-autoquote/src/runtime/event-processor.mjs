@@ -6,8 +6,8 @@ import {
   fulfillmentIdentity,
   fulfillmentRequestFromTicketImage,
   normalizeFulfillmentRequest,
-  ticketImageUrl,
   sameFulfillmentFingerprint,
+  ticketImageUrl,
 } from '../actions/fulfillment.mjs';
 import { normalizeAuthoritativeOrder, orderChangeability } from '../actions/contracts.mjs';
 import { V2EventStore } from './event-store.mjs';
@@ -15,6 +15,15 @@ import { V2EventStore } from './event-store.mjs';
 function text(value) { const result = String(value ?? '').trim(); return result || null; }
 function wait(delayMs) { return new Promise((resolve) => setTimeout(resolve, delayMs)); }
 function objectPayload(payload) { return payload && typeof payload === 'object' ? payload : {}; }
+function isPlatformRateLimited(error) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status);
+  const message = String(error?.message ?? error?.code ?? '').toLowerCase();
+  return status === 429 || /rate.?limit|too many|限流|流控|调用过于频繁|50000/.test(message);
+}
+function platformReadCooldownMs(error) {
+  const message = String(error?.message ?? error?.code ?? '');
+  return /每日|50000/.test(message) ? 30 * 60_000 : 30_000;
+}
 const BACKEND_EVENT_PAYLOAD_FIELDS = new Set([
   'accountUnb', 'account_unb', 'chatId', 'chat_id', 'peerUnb', 'peer_unb',
   'buyerUnb', 'buyer_unb', 'orderId', 'order_id', 'platformOrderId', 'platform_order_id',
@@ -208,6 +217,13 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
   const priceChangeReceiptStore = store.createPriceChangeReceiptStore();
   const sentAgentMessageIds = new Set();
   const keywordImageUploadCache = new Map();
+  const wandaOrderListCache = new Map();
+  const wandaOrderListInflight = new Map();
+  const wandaOrderReadCooldown = new Map();
+  const shopSyncCache = new Map();
+  const shopSyncInflight = new Map();
+  const WANDA_ORDER_LIST_CACHE_TTL_MS = 5 * 60_000;
+  const SHOP_SYNC_CACHE_TTL_MS = 10 * 60_000;
   let running = 0;
   const inFlight = new Set();
   let draining = false;
@@ -274,10 +290,19 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
         let result;
         try {
           if (!commandId || !leaseToken || !tenantId || !eventId || !action || !envelope) throw new Error('durable_command_invalid');
-          const record = await store.getEvent(`${tenantId}:${eventId}`);
+          const commandSession = context.session && typeof context.session === 'object'
+            ? context.session : sessionFromPayload(envelope.payload);
+          let record = await store.getEvent(`${tenantId}:${eventId}`);
+          if (!record && context.system_event === true && envelope) {
+            await store.enqueue({
+              ...envelope, system_event: true,
+              session: commandSession, recent_messages: [],
+            });
+            record = await store.getEvent(`${tenantId}:${eventId}`);
+          }
           if (!record) throw new Error('durable_command_source_event_missing');
           const client = platform.createClient(tenantId);
-          let session = context.session && typeof context.session === 'object' ? context.session : sessionFromPayload(envelope.payload);
+          let session = commandSession;
           let order = context.order && typeof context.order === 'object' ? context.order : null;
           if ((!session || !order) && (orderIdFromPayload(envelope.payload) || action?.quote_snapshot?.order_id || action?.order_id)) {
             const official = await resolveOrderContext(client, executorEnvelope(envelope, session, order, action.quote_snapshot));
@@ -285,7 +310,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
             order = official.order ?? order;
           }
           result = await executeAction({
-            client, mode: 'auto', session, order, action, envelope, record,
+            client, backend, mode: 'auto', session, order, action, envelope, record,
             completedActionResult: action._completed_action_result ?? null,
             baselineMessages: Array.isArray(context.recent_messages) ? context.recent_messages : [],
             baselineAvailable: Array.isArray(context.recent_messages),
@@ -379,23 +404,41 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     return { processed };
   }
 
-  async function syncShops(client, tenantId) {
-    // Shops are platform truth; a failed event-time sync never blocks event handling.
-    try {
-      const shops = await client.shops.list();
-      const normalized = Array.isArray(shops) ? shops : [];
-      await backend.syncShops(tenantId, normalized);
-      return { ok: true, count: normalized.length };
-    } catch (error) {
-      logger.warn('v2 shop sync deferred', { tenantId, error });
-      return { ok: false, count: 0, error: 'platform_shop_sync_failed' };
-    }
+  async function syncShops(client, tenantId, { force = false } = {}) {
+    const normalizedTenant = text(tenantId);
+    if (!normalizedTenant) return { ok: false, count: 0, error: 'tenant_required' };
+    const cached = shopSyncCache.get(normalizedTenant);
+    if (!force && cached && Date.now() - cached.createdAt < SHOP_SYNC_CACHE_TTL_MS) return cached.value;
+    const inflight = shopSyncInflight.get(normalizedTenant);
+    if (!force && inflight) return inflight;
+    const refresh = (async () => {
+      // Shops are platform truth, but synchronizing them for every message
+      // needlessly consumes the shared platform read quota.
+      try {
+        const shops = await client.shops.list();
+        const normalized = Array.isArray(shops) ? shops : [];
+        await backend.syncShops(normalizedTenant, normalized);
+        const value = { ok: true, count: normalized.length };
+        shopSyncCache.set(normalizedTenant, { createdAt: Date.now(), value });
+        return value;
+      } catch (error) {
+        if (isPlatformRateLimited(error)) {
+          const until = Date.now() + platformReadCooldownMs(error);
+          wandaOrderReadCooldown.set(normalizedTenant, Math.max(wandaOrderReadCooldown.get(normalizedTenant) ?? 0, until));
+        }
+        logger.warn('v2 shop sync deferred', { tenantId: normalizedTenant, error });
+        return { ok: false, count: 0, error: 'platform_shop_sync_failed' };
+      }
+    })();
+    shopSyncInflight.set(normalizedTenant, refresh);
+    try { return await refresh; }
+    finally { if (shopSyncInflight.get(normalizedTenant) === refresh) shopSyncInflight.delete(normalizedTenant); }
   }
 
   async function syncTenantShops(tenantId) {
     const normalizedTenant = text(tenantId);
     if (!normalizedTenant) throw Object.assign(new Error('tenant_required'), { status: 401 });
-    const result = await syncShops(platform.createClient(normalizedTenant), normalizedTenant);
+    const result = await syncShops(platform.createClient(normalizedTenant), normalizedTenant, { force: true });
     if (!result.ok) throw Object.assign(new Error(result.error), { status: 503 });
     return result;
   }
@@ -404,38 +447,78 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     const normalizedTenant = text(tenantId);
     if (!normalizedTenant) throw Object.assign(new Error('tenant_required'), { status: 401 });
     const boundedLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
-    const references = await store.listOrderReferences(normalizedTenant, boundedLimit);
-    const client = platform.createClient(normalizedTenant);
-    const orders = [];
-    for (let offset = 0; offset < references.length; offset += 5) {
-      const batch = references.slice(offset, offset + 5);
-      const settled = await Promise.allSettled(batch.map((reference) => client.orders.get(reference.orderId)));
-      for (const [index, result] of settled.entries()) {
-        if (result.status !== 'fulfilled' || !result.value) continue;
-        const order = result.value;
-        const resolvedOrderId = text(order.orderId) ?? batch[index].orderId;
-        orders.push({
-          orderId: resolvedOrderId,
-          accountUnb: text(order.accountUnb) ?? batch[index].accountUnb,
-          orderStatus: Number.isInteger(order.orderStatus) ? order.orderStatus : null,
-          orderStatusText: text(order.orderStatusText),
-          itemId: text(order.itemId),
-          productTitle: text(order.productTitle),
-          sku: text(order.sku),
-          quantity: Number.isInteger(order.quantity) ? order.quantity : null,
-          payment: text(order.payment),
-          postFee: text(order.postFee),
-          buyerNick: text(order.buyerNick),
-          payTime: text(order.payTime),
-          createTime: text(order.createTime),
-          observedAt: batch[index].observedAt,
-          lastEvent: batch[index].event,
-          fulfillment: await store.getWandaFulfillment(normalizedTenant, resolvedOrderId),
-        });
-      }
+    const cacheKey = `${normalizedTenant}:${boundedLimit}`;
+    const cached = wandaOrderListCache.get(cacheKey);
+    if (cached && Date.now() - cached.createdAt < WANDA_ORDER_LIST_CACHE_TTL_MS) return cached.value;
+    const cooldownUntil = wandaOrderReadCooldown.get(normalizedTenant) ?? 0;
+    if (cooldownUntil > Date.now()) {
+      if (cached) return { ...cached.value, stale: true };
+      throw Object.assign(new Error('platform_read_rate_limited'), { status: 429, code: 'platform_read_rate_limited' });
     }
-    orders.sort((left, right) => String(right.createTime ?? right.observedAt).localeCompare(String(left.createTime ?? left.observedAt)));
-    return { orders, count: orders.length, observedCount: references.length };
+    const inflight = wandaOrderListInflight.get(cacheKey);
+    if (inflight) return inflight;
+    const refresh = (async () => {
+      const references = await store.listOrderReferences(normalizedTenant, boundedLimit);
+      const client = platform.createClient(normalizedTenant);
+      const orders = [];
+      const failures = [];
+      let successfulReads = 0;
+      let rateLimited = false;
+      // FishMore rate-limits platform reads. Ten concurrent reads are enough
+      // to keep the panel responsive without turning a refresh into a burst.
+      for (let offset = 0; offset < references.length; offset += 10) {
+        const batch = references.slice(offset, offset + 10);
+        const settled = await Promise.allSettled(batch.map((reference) => client.orders.get(reference.orderId)));
+        for (const [index, result] of settled.entries()) {
+          if (result.status !== 'fulfilled') {
+            failures.push(result.reason);
+            if (isPlatformRateLimited(result.reason)) rateLimited = true;
+            continue;
+          }
+          if (!result.value) continue;
+          successfulReads += 1;
+          const order = result.value;
+          const resolvedOrderId = text(order.orderId) ?? batch[index].orderId;
+          orders.push({
+            orderId: resolvedOrderId,
+            accountUnb: text(order.accountUnb) ?? batch[index].accountUnb,
+            orderStatus: Number.isInteger(order.orderStatus) ? order.orderStatus : null,
+            orderStatusText: text(order.orderStatusText),
+            itemId: text(order.itemId),
+            productTitle: text(order.productTitle),
+            sku: text(order.sku),
+            quantity: Number.isInteger(order.quantity) ? order.quantity : null,
+            payment: text(order.payment),
+            postFee: text(order.postFee),
+            buyerNick: text(order.buyerNick),
+            payTime: text(order.payTime),
+            createTime: text(order.createTime),
+            observedAt: batch[index].observedAt,
+            lastEvent: batch[index].event,
+            fulfillment: await store.getWandaFulfillment(normalizedTenant, resolvedOrderId),
+          });
+        }
+        if (rateLimited) break;
+      }
+      if (rateLimited) {
+        const error = failures.find((item) => isPlatformRateLimited(item)) ?? new Error('platform_read_rate_limited');
+        const until = Date.now() + platformReadCooldownMs(error);
+        wandaOrderReadCooldown.set(normalizedTenant, Math.max(wandaOrderReadCooldown.get(normalizedTenant) ?? 0, until));
+        if (cached) return { ...cached.value, stale: true };
+        throw error;
+      }
+      if (successfulReads === 0 && references.length > 0) {
+        if (cached) return { ...cached.value, stale: true };
+        if (failures[0]) throw failures[0];
+      }
+      orders.sort((left, right) => String(right.createTime ?? right.observedAt).localeCompare(String(left.createTime ?? left.observedAt)));
+      const value = { orders, count: orders.length, observedCount: references.length };
+      wandaOrderListCache.set(cacheKey, { createdAt: Date.now(), value });
+      return value;
+    })();
+    wandaOrderListInflight.set(cacheKey, refresh);
+    try { return await refresh; }
+    finally { if (wandaOrderListInflight.get(cacheKey) === refresh) wandaOrderListInflight.delete(cacheKey); }
   }
 
   async function getTenantOrder(tenantId, orderId) {
@@ -575,19 +658,20 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     return { status: 'submitted', order: await client.orders.get(normalizedOrderId), fulfillment: completed };
   }
 
-
   async function readRecentMessages(client, session) {
     if (!session) return { available: false, messages: [] };
     try {
       const page = await client.im.listMessages({ ...session, pageSize: 50 });
-      return { available: true, messages: pageItems(page).slice(0, 50) };
+      return { available: true, messages: pageItems(page).slice(0, 50), error: null };
     } catch (error) {
       logger.warn('v2 im history sync deferred', { error });
-      return { available: false, messages: [] };
+      return { available: false, messages: [], error };
     }
   }
 
-  async function sendMessageWithReconciliation(client, session, message, { eventId, actionId }) {
+  const MESSAGE_SEPARATOR_PATTERN = /\n---\n|---分隔符---/u;
+
+  async function sendSingleMessageWithReconciliation(client, session, message, { eventId, actionId }) {
     const startedAt = Date.now();
     try {
       return await client.im.sendMessage({ ...session, text: message });
@@ -613,6 +697,20 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       }
       throw error;
     }
+  }
+
+  async function sendMessageWithReconciliation(client, session, message, { eventId, actionId }) {
+    const parts = String(message ?? '').split(MESSAGE_SEPARATOR_PATTERN).map((part) => part.trim()).filter(Boolean);
+    const messages = parts.length ? parts : [String(message ?? '').trim()];
+    const sent = [];
+    for (const [index, part] of messages.entries()) {
+      if (index > 0) await wait(300);
+      sent.push(await sendSingleMessageWithReconciliation(client, session, part, {
+        eventId, actionId: `${actionId}:part-${index + 1}`,
+      }));
+    }
+    const last = sent.at(-1) ?? {};
+    return { ...last, messageIds: sent.map((item) => platformMessageId(item)).filter(Boolean), messageCount: sent.length };
   }
 
   async function conversationPreflight(
@@ -723,12 +821,48 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
   async function process(record) {
     const { envelope } = record;
     try {
-      const client = platform.createClient(envelope.tenantId);
-      await syncShops(client, envelope.tenantId);
+      // Give a short burst of buyer messages time to settle. The newest event
+      // will receive the complete platform snapshot; older events are marked
+      // complete without model work so they cannot emit stale replies.
+      const coalesceDelayMs = Number(config.messageCoalesceDelayMs ?? 0);
+      if (envelope.event === 'im.message.received' && coalesceDelayMs > 0) {
+        await wait(coalesceDelayMs);
+        if (typeof store.hasNewerSessionEvent === 'function' && await store.hasNewerSessionEvent(record.id)) {
+          await store.complete(record.id, record.lease, {
+            accepted: true, coalesced: true, reason: 'newer_session_event_already_queued',
+          });
+          return;
+        }
+      }
+      const tenantId = text(envelope.tenantId);
+      const cooldownUntil = wandaOrderReadCooldown.get(tenantId) ?? 0;
+      if (cooldownUntil > Date.now()) {
+        const delayMs = cooldownUntil - Date.now();
+        await store.defer(record.id, record.lease, 'platform_read_rate_limited', delayMs);
+        requestDrain(delayMs);
+        return;
+      }
+      const client = platform.createClient(tenantId);
+      await syncShops(client, tenantId);
+      const postSyncCooldownUntil = wandaOrderReadCooldown.get(tenantId) ?? 0;
+      if (postSyncCooldownUntil > Date.now()) {
+        const delayMs = postSyncCooldownUntil - Date.now();
+        await store.defer(record.id, record.lease, 'platform_read_rate_limited', delayMs);
+        requestDrain(delayMs);
+        return;
+      }
       const resolved = await resolveOrderContext(client, envelope);
       const { session } = resolved;
       let { order } = resolved;
       const recent = await readRecentMessages(client, session);
+      if (!recent.available && isPlatformRateLimited(recent.error)) {
+        const until = Date.now() + platformReadCooldownMs(recent.error);
+        wandaOrderReadCooldown.set(tenantId, Math.max(wandaOrderReadCooldown.get(tenantId) ?? 0, until));
+        const delayMs = Math.max(5_000, (wandaOrderReadCooldown.get(tenantId) ?? 0) - Date.now());
+        await store.defer(record.id, record.lease, 'conversation_snapshot_unavailable', delayMs);
+        requestDrain(delayMs);
+        return;
+      }
       if (!order) {
         const recentOrderId = latestOrderIdFromMessages(recent.messages);
         if (recentOrderId) {
@@ -761,12 +895,14 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     }
   }
 
-  async function executeAction({ client, mode, session, order, action, envelope, record, completedActionResult = null, baselineMessages = [], baselineAvailable = false }) {
+  async function executeAction({ client, backend, mode, session, order, action, envelope, record, completedActionResult = null, baselineMessages = [], baselineAvailable = false }) {
     const actionId = text(action?.id) ?? `${envelope.id}:action`;
     const receipt = await store.beginAction(record.id, actionId);
     const isPriceChange = action?.type === 'change_order_price';
     const isPaidMismatchCancellation = action?.type === 'cancel_paid_amount_mismatch';
-    const isRecoverableMutation = isPriceChange || isPaidMismatchCancellation;
+    const isLiangpiaoSourceCancellation = action?.type === 'cancel_failed_liangpiao_source_order';
+    const isLiangpiaoOrder = action?.type === 'create_liangpiao_order';
+    const isRecoverableMutation = isPriceChange || isPaidMismatchCancellation || isLiangpiaoSourceCancellation || isLiangpiaoOrder;
     if (receipt.status === 'started' && !receipt.newlyStarted && !isRecoverableMutation) return { actionId, status: 'unknown', reason: 'previous_platform_action_result_unknown', nextActions: [] };
     if (receipt.status === 'finished' && (!isRecoverableMutation || receipt.result?.status !== 'unknown')) return { actionId, ...receipt.result, nextActions: [] };
 
@@ -786,7 +922,115 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
 
     let result;
     try {
-      if (isPriceChange) {
+      if (action?.type === 'create_liangpiao_order') {
+        if (mode !== 'auto' || typeof backend?.createLiangpiaoOrder !== 'function') result = { status: 'failed', reason: 'liangpiao_order_executor_unavailable' };
+        else if (!action.quote_id || !action.quote_hash || !action.confirmation_id || !action.buyer_phone || !action.generation) result = { status: 'failed', reason: 'liangpiao_order_request_incomplete' };
+        else {
+          // A seat correction or a newer screenshot must supersede a stale
+          // create command.  Re-read the conversation immediately before the
+          // write so a buyer message that arrived while the Agent was working
+          // cannot create an order for the previous seats/quantity.
+          const preflight = await conversationPreflight(
+            client, session, baselineMessages, baselineAvailable,
+            {
+              allowNewBuyerMessages: false,
+              blockNewBuyerImages: true,
+              blockBuyerQuoteChanges: true,
+              expectedTicketCount: Number.isInteger(Number(action.ticket_count))
+                ? Number(action.ticket_count) : null,
+              allowHumanSellerMessages: false,
+            },
+          );
+          if (!preflight.allowed) result = { status: 'skipped', reason: preflight.reason };
+          else {
+            try {
+              const response = await backend.createLiangpiaoOrder({
+                tenantId: envelope.tenantId,
+                request: {
+                  tenant_id: envelope.tenantId,
+                  conversation_id: `${envelope.tenantId}:${action.shop_id}:${action.chat_id}`,
+                  shop_id: action.shop_id, buyer_id: action.buyer_id, chat_id: action.chat_id,
+                  confirmation_id: action.confirmation_id, quote_id: action.quote_id, quote_hash: action.quote_hash,
+                  latest_buyer_message: action.latest_buyer_message || '确认下单', buyer_phone: action.buyer_phone,
+                  generation: action.generation, trace_id: action.trace_id || action.id,
+                  buyer_confirmed: action.buyer_confirmed === true, allow_seat_change: action.allow_seat_change === true,
+                },
+              });
+              result = { ...response, status: 'succeeded' };
+            } catch (error) {
+              result = { status: 'failed', reason: 'liangpiao_order_create_rejected', error_code: error?.code || null };
+            }
+          }
+        }
+      } else if (isLiangpiaoSourceCancellation) {
+        const actionOrderId = text(action.order_id);
+        const actionSession = {
+          accountUnb: text(action.shop_id), peerUnb: text(action.buyer_id),
+          chatId: text(action.chat_id),
+        };
+        const sourceOutOrderNo = text(action.source_out_order_no);
+        const sourceGeneration = Number(action.source_generation);
+        const authorizationValid = (
+          mode === 'auto'
+          && envelope?.event === 'liangpiao.callback'
+          && record?.envelope?.system_event === true
+          && action.callback_verified === true
+          && text(action.tenant_id) === text(envelope.tenantId)
+          && action.source_provider_status === 'failed'
+          && action.source_price_mode === 'LIMIT'
+          && action.refund_authorization === 'verified_current_limit_failure'
+          && Number.isSafeInteger(sourceGeneration) && sourceGeneration > 0
+          && Boolean(actionOrderId && sourceOutOrderNo)
+          && Boolean(session && sameSession(actionSession, session))
+        );
+        if (!authorizationValid) {
+          result = { status: 'skipped', reason: 'liangpiao_source_cancel_authorization_invalid' };
+        } else {
+          let currentOrder;
+          try { currentOrder = await readBoundOrder(actionOrderId); }
+          catch { currentOrder = null; }
+          if (!currentOrder) {
+            result = { status: 'skipped', reason: 'liangpiao_source_order_binding_invalid' };
+          } else if (closedOrder(currentOrder)) {
+            result = {
+              status: 'succeeded', order_id: actionOrderId,
+              source_out_order_no: sourceOutOrderNo, cancel_attempted: false,
+              order_closed: true,
+            };
+          } else if (!paidOrder(currentOrder)) {
+            result = { status: 'skipped', reason: 'liangpiao_source_order_not_paid' };
+          } else {
+            let cancelAttempted = false;
+            if (receipt.newlyStarted) {
+              try {
+                await client.orders.cancel(actionOrderId, {
+                  reason: '特惠渠道出票失败，关闭原订单并按平台流程退款',
+                  idempotencyKey: `${actionId}:cancel`,
+                });
+                cancelAttempted = true;
+              } catch {
+                // A provider timeout is ambiguous.  Reconcile authoritative
+                // order state below and never submit a second cancel from the
+                // same durable action receipt.
+                cancelAttempted = true;
+              }
+            }
+            let orderClosed = false;
+            for (const delayMs of [250, 750, 1_500]) {
+              await wait(delayMs);
+              try { currentOrder = await readBoundOrder(actionOrderId); }
+              catch { currentOrder = null; }
+              if (closedOrder(currentOrder)) { orderClosed = true; break; }
+            }
+            result = {
+              status: orderClosed ? 'succeeded' : 'unknown',
+              order_id: actionOrderId, source_out_order_no: sourceOutOrderNo,
+              cancel_attempted: cancelAttempted, order_closed: orderClosed,
+              ...(!orderClosed ? { reason: 'liangpiao_source_order_close_unverified' } : {}),
+            };
+          }
+        }
+      } else if (isPriceChange) {
         if (mode !== 'auto') result = { status: 'skipped', reason: `mode_${mode}` };
         else {
           const preflight = await conversationPreflight(
@@ -988,7 +1232,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       else if (mode !== 'auto') result = { status: 'skipped', reason: `mode_${mode}` };
       else {
         const message = text(action.text);
-        if (!session || !message || message.length > 1_000) result = { status: 'skipped', reason: 'invalid_reply_address_or_text' };
+        if (!session || !message || message.length > 3_000) result = { status: 'skipped', reason: 'invalid_reply_address_or_text' };
         else {
           const preserveOnNewBuyer = action.preserve_on_new_buyer_message === true;
           const suppressOnNewerImage = action.suppress_on_newer_image === true;

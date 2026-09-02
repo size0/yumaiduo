@@ -27,7 +27,14 @@ SUPPORTED_IMAGE_SIGNATURES = {
     "image/webp": lambda content: len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP",
 }
 
-_PROVIDER_FIELDS = frozenset(MovieImageInfo.model_fields)
+# Only the signed Liangpiao adapter may populate lossless provider envelopes
+# and transport metadata. The fallback vision model is untrusted and must not
+# be able to forge those fields inside its JSON response.
+_PROVIDER_FIELDS = frozenset(MovieImageInfo.model_fields) - {
+    "provider_match_level", "provider_no_match_reason", "recognition_blocker",
+    "provider_request_id", "trace_id", "raw_results", "final_results",
+    "raw_response",
+}
 _OPTIONAL_TEXT_FIELDS = (
     "platform", "cinema_name", "city", "movie_name", "date_text",
     "showtime_start", "showtime_end", "hall_name", "language", "format",
@@ -55,10 +62,19 @@ def _normalize_provider_result(value: object) -> tuple[dict[str, Any], list[str]
                 source = nested
                 break
 
+    alias_changes: list[str] = []
+    if "cinema_id" not in source and "cinemaId" in source:
+        # Liangpiao uses camelCase while the internal MovieImageInfo contract
+        # is snake_case. Preserve the provider fact under the canonical field
+        # before strict validation instead of silently dropping the ID.
+        source = {**source, "cinema_id": source["cinemaId"]}
+        alias_changes.append("aliased:cinemaId->cinema_id")
+
     normalized = {key: item for key, item in source.items() if key in _PROVIDER_FIELDS}
-    changes: list[str] = [
-        f"dropped_top_level_fields:{','.join(sorted(set(source) - _PROVIDER_FIELDS))}"
-    ] if set(source) - _PROVIDER_FIELDS else []
+    changes: list[str] = [*alias_changes]
+    unknown_fields = set(source) - _PROVIDER_FIELDS
+    if unknown_fields:
+        changes.append(f"dropped_top_level_fields:{','.join(sorted(unknown_fields))}")
 
     for field in _OPTIONAL_TEXT_FIELDS:
         if field in normalized and isinstance(normalized[field], str):
@@ -183,7 +199,11 @@ class MovieImageRecognitionService:
             self._liangpiao_config = config
         return self._liangpiao_client
 
-    async def recognize_from_url(self, image_url: str, *, city_name: str | None = None, ticket_image: bool = False) -> MovieImageInfo:
+    async def recognize_from_url(
+        self, image_url: str, *, city_name: str | None = None,
+        buyer_message: str = "", out_trade_no: str | None = None,
+        ticket_image: bool = False,
+    ) -> MovieImageInfo:
         """Prefer Liangpiao URL recognition and fall back to Qwen on failure.
 
         A successful Liangpiao candidate is not a failure: it must remain in the
@@ -195,10 +215,14 @@ class MovieImageRecognitionService:
         liangpiao_error: str | None = None
         if not ticket_image and settings.liangpiao_app_key.strip() and settings.liangpiao_app_secret.strip():
             try:
-                recognition = await self._configured_liangpiao_client(settings).recognize_url(
-                    image_url, city_name=city_name,
-                )
-                if recognition.match_level not in {"NONE", "SHOW_EXPIRED"}:
+                client = self._configured_liangpiao_client(settings)
+                if out_trade_no:
+                    recognition = await client.recognize_url(
+                        image_url, city_name=city_name, out_trade_no=out_trade_no,
+                    )
+                else:
+                    recognition = await client.recognize_url(image_url, city_name=city_name)
+                if recognition.match_level is not None:
                     self._diagnostics.add(
                         "liangpiao_recognition_completed",
                         match_level=recognition.match_level,
@@ -221,7 +245,7 @@ class MovieImageRecognitionService:
         )
         image, content_type = await self._download_image_url(image_url, settings)
         return await self.recognize(
-            image, content_type, buyer_message=city_name or "",
+            image, content_type, buyer_message=buyer_message or city_name or "",
         )
 
     async def _download_image_url(
@@ -266,10 +290,15 @@ class MovieImageRecognitionService:
             if owns_client:
                 await client.aclose()
 
-    async def confirm_recognition_candidate(self, recognition_id: str, cinema_id: int) -> MovieImageInfo:
-        """Confirm the buyer's numbered cinema choice before repricing."""
+    async def confirm_recognition_candidate(
+        self, recognition_id: str, cinema_id: int | None = None, *,
+        movie_id: int | None = None, show_id: str | None = None,
+        city_name: str | None = None,
+    ) -> MovieImageInfo:
+        """Confirm one or more provider-returned candidates before repricing."""
         return await self._configured_liangpiao_client(self._settings_provider()).confirm(
-            recognition_id, cinema_id,
+            recognition_id, cinema_id, movie_id=movie_id, show_id=show_id,
+            city_name=city_name,
         )
 
     async def aclose(self) -> None:

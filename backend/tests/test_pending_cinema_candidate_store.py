@@ -30,6 +30,26 @@ def test_candidate_store_round_trips_recognition(tmp_path) -> None:
     assert loaded.candidate_cinemas[0].cinema_id == 10036
 
 
+def test_show_candidates_round_trip_with_public_allowlist(tmp_path) -> None:
+    store = PendingCinemaCandidateStore(tmp_path / "candidates.json")
+    store.save("key", _recognition())
+    store.save_show_candidates("key", [
+        {
+            "show_id": "show-1", "showtime_start": "19:30", "hall_name": "1号厅",
+            "movie_name": "奥德赛", "token": "must-not-persist", "raw_response": {"x": 1},
+        },
+        {"showId": "unsupported-alias"},
+    ])
+
+    loaded = store.get_show_candidates("key")
+
+    assert loaded == [{
+        "show_id": "show-1", "showtime_start": "19:30",
+        "hall_name": "1号厅", "movie_name": "奥德赛",
+    }]
+    assert store.get("key") is not None
+
+
 def test_candidate_store_delete_removes_context(tmp_path) -> None:
     store = PendingCinemaCandidateStore(tmp_path / "candidates.json")
     store.save("key", _recognition())

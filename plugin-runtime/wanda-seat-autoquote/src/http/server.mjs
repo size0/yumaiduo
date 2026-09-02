@@ -100,11 +100,14 @@ function decodeV4FormData(rawBody) {
   return form;
 }
 
-async function requestV4({ method, pathname, rawBody, contentType, config, fetchImpl, tenantId }) {
+async function requestV4({ method, pathname, rawBody, contentType, config, fetchImpl, tenantId, userId }) {
   const targetPath = pathname.slice('/ui/v4'.length);
   if (!targetPath.startsWith('/api/')) return null;
   let requestBody = rawBody || undefined;
-  const headers = { 'x-wanda-tenant-id': String(tenantId) };
+  const headers = {
+    'x-wanda-tenant-id': String(tenantId),
+    'x-wanda-operator-id': String(userId ?? ''),
+  };
   if (rawBody && /^application\/json(?:\s*;|$)/i.test(contentType ?? '')) {
     const form = decodeV4FormData(rawBody);
     if (form) requestBody = form;
@@ -127,9 +130,9 @@ function sendV4Result(res, result) {
   res.writeHead(result.status, { ...securityHeaders(), 'content-type': result.contentType, 'content-length': result.body.length });
   res.end(result.body);
 }
-async function proxyV4(req, res, pathname, rawBody, config, fetchImpl, tenantId) {
+async function proxyV4(req, res, pathname, rawBody, config, fetchImpl, tenantId, userId) {
   return sendV4Result(res, await requestV4({
-    method: req.method, pathname, rawBody, contentType: header(req, 'content-type'), config, fetchImpl, tenantId,
+    method: req.method, pathname, rawBody, contentType: header(req, 'content-type'), config, fetchImpl, tenantId, userId,
   }));
 }
 
@@ -243,6 +246,7 @@ export function createV2HttpServer({
         if (!orderId || orderId.includes('/')) return json(res, 400, { ok: false, error: 'order_id_invalid' });
         if (wandaFulfillment) {
           if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'method_not_allowed' });
+          if (config.agentHarnessReadOnly === true) return json(res, 503, { ok: false, error: 'agent_harness_read_only' });
           if (config.fulfillmentEnabled !== true) return json(res, 503, { ok: false, error: 'wanda_fulfillment_disabled' });
           if (typeof fulfillOrder !== 'function') return json(res, 503, { ok: false, error: 'wanda_fulfillment_unavailable' });
           if (!/^application\/json(?:\s*;|$)/i.test(header(req, 'content-type') ?? '')) return json(res, 415, { ok: false, error: 'json_required' });
@@ -274,7 +278,7 @@ export function createV2HttpServer({
         }
         if (isV4Api) return proxyV4(
           req, res, normalizedUiPath, rawBody, config, fetchImpl,
-          header(req, 'x-yumaiduo-tenant-id'),
+          header(req, 'x-yumaiduo-tenant-id'), header(req, 'x-yumaiduo-user-id'),
         );
         if (isV4Job && req.method === 'POST' && normalizedUiPath === '/ui/v4/jobs/image-message') {
           const id = await startImageJob(rawBody, header(req, 'content-type'), header(req, 'x-yumaiduo-tenant-id'), header(req, 'x-yumaiduo-user-id'));

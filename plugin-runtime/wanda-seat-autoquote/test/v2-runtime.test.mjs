@@ -327,7 +327,7 @@ test('durable verified price confirmation uses backend result binding and custom
           tenant_id: 'tenant-1', event_id: source.id,
           action: {
             id: `${source.id}:confirm-price-change`, type: 'send_price_change_confirmation',
-            order_id: 'order-1', text: '后台自定义：金额29.00元已核验，可以付款。',
+            order_id: 'order-1', text: '后台自定义：金额29.00元已核验，可以付款。---分隔符---请在订单页核对金额后完成支付。',
             _completed_action_result: {
               order_id: 'order-1', target_amount_cents: 2_900, verified_amount_cents: 2_900,
             },
@@ -349,7 +349,10 @@ test('durable verified price confirmation uses backend result binding and custom
   await waitFor(() => calls.reported.length === 1);
   await runtime.stop();
 
-  assert.deepEqual(calls.sent, ['后台自定义：金额29.00元已核验，可以付款。']);
+  assert.deepEqual(calls.sent, [
+    '后台自定义：金额29.00元已核验，可以付款。',
+    '请在订单页核对金额后完成支付。',
+  ]);
   assert.equal(calls.reported[0].result.status, 'succeeded');
   assert.equal(calls.reported[0].result.message_id, 'confirmation-sent');
 });
@@ -678,6 +681,63 @@ test('recent platform messages are passed to backend before AI processing', asyn
   await runtime.stop();
 });
 
+test('rate-limited conversation history keeps the event queued without invoking the backend', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-history-rate-limit-'));
+  const calls = { process: 0, history: 0 };
+  const client = {
+    shops: { list: async () => [] },
+    im: {
+      listMessages: async () => {
+        calls.history += 1;
+        throw Object.assign(new Error('daily rate limit'), { status: 429 });
+      },
+    },
+  };
+  const runtime = createV2Runtime({
+    config: { dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1 },
+    platform: { createClient: () => client },
+    backend: {
+      syncShops: async () => {},
+      processEvent: async () => { calls.process += 1; return { decision: { mode: 'auto', actions: [] } }; },
+      reportAction: async () => ({}),
+    },
+    logger: silent,
+  });
+  await runtime.start();
+  await runtime.enqueue(envelope('evt-history-rate-limit'));
+  await waitFor(() => calls.history > 0, 1_000);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(calls.process, 0);
+  assert.equal((await runtime.health()).counts.queued, 1);
+  await runtime.stop();
+});
+
+test('rate-limited shop sync prevents the redundant history read', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-shop-rate-limit-'));
+  const calls = { process: 0, history: 0 };
+  const client = {
+    shops: { list: async () => { throw Object.assign(new Error('daily rate limit'), { status: 429 }); } },
+    im: { listMessages: async () => { calls.history += 1; return { items: [] }; } },
+  };
+  const runtime = createV2Runtime({
+    config: { dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1 },
+    platform: { createClient: () => client },
+    backend: {
+      syncShops: async () => {},
+      processEvent: async () => { calls.process += 1; return { decision: { mode: 'auto', actions: [] } }; },
+      reportAction: async () => ({}),
+    },
+    logger: silent,
+  });
+  await runtime.start();
+  await runtime.enqueue(envelope('evt-shop-rate-limit'));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(calls.history, 0);
+  assert.equal(calls.process, 0);
+  assert.equal((await runtime.health()).counts.queued, 1);
+  await runtime.stop();
+});
+
 test('a seller reply arriving while the Agent runs cancels the stale AI quote before send', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-human-race-'));
   const calls = { listMessages: 0, sent: 0, reports: [] };
@@ -761,6 +821,34 @@ test('an agent warning arriving during order pricing does not cancel the price c
   assert.equal(calls.changed, 1);
   assert.equal(calls.reports.at(-1).status, 'succeeded');
   assert.notEqual(calls.reports.at(-1).reason, 'human_message_arrived_before_send');
+});
+
+test('a queued buyer burst coalesces before model work and keeps the newest context', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-coalesce-'));
+  const calls = { processed: [] };
+  const client = {
+    shops: { list: async () => [] },
+    im: { listMessages: async () => ({ items: [] }) },
+  };
+  const runtime = createV2Runtime({
+    config: { dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1, messageCoalesceDelayMs: 25 },
+    platform: { createClient: () => client },
+    backend: {
+      syncShops: async () => {},
+      processEvent: async ({ envelope: current }) => {
+        calls.processed.push(current.id);
+        return { decision: { mode: 'auto', actions: [] } };
+      },
+    },
+    logger: silent,
+  });
+  await runtime.start();
+  await runtime.enqueue(envelope('burst-old'));
+  await runtime.enqueue(envelope('burst-new'));
+  await waitFor(async () => (await runtime.health()).counts.completed === 2);
+  await runtime.stop();
+
+  assert.deepEqual(calls.processed, ['burst-new']);
 });
 
 test('a newer buyer message cancels a reply planned from the older conversation snapshot', async () => {
@@ -1389,6 +1477,138 @@ test('verified paid amount mismatch cancels once and sends a recovery message af
   assert.equal(calls.cancelRequest.idempotencyKey, 'paid-mismatch:cancel-paid-amount-mismatch:cancel');
   assert.equal(calls.sent, 1);
   assert.equal(calls.reports[0].cancel_confirmed, true);
+});
+
+test('verified Liangpiao LIMIT failure durable command cancels only the bound paid Xianyu order', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-liangpiao-source-cancel-'));
+  const calls = { cancelled: 0, reports: [], cancelRequest: null };
+  let closed = false;
+  const sourceEnvelope = {
+    id: 'liangpiao-callback-1-2', tenantId: 'tenant-1', event: 'liangpiao.callback',
+    ts: Date.now(), payload: {},
+  };
+  const action = {
+    id: 'liangpiao:out-limit:cancel-source-order',
+    type: 'cancel_failed_liangpiao_source_order',
+    order_id: 'order-1', tenant_id: 'tenant-1', shop_id: 'shop-1',
+    buyer_id: 'buyer-1', chat_id: 'chat-1', source_out_order_no: 'out-limit',
+    source_generation: 2, source_provider_status: 'failed', source_price_mode: 'LIMIT',
+    callback_verified: true, refund_authorization: 'verified_current_limit_failure',
+  };
+  const client = {
+    shops: { list: async () => [] },
+    orders: {
+      get: async () => providerOrder({
+        chatId: 'chat-1', orderStatus: closed ? 'closed' : 2,
+        payTime: '2026-08-25T06:15:51Z',
+      }),
+      cancel: async (orderId, request) => {
+        assert.equal(orderId, 'order-1');
+        calls.cancelled += 1;
+        calls.cancelRequest = structuredClone(request);
+        closed = true;
+        return { ok: true };
+      },
+    },
+    im: {
+      getSessionByOrder: async () => ({ accountUnb: 'shop-1', peerUnb: 'buyer-1', chatId: 'chat-1' }),
+      listMessages: async () => ({ items: [] }),
+      sendMessage: async () => { throw new Error('cancel executor must not send buyer copy'); },
+    },
+  };
+  let offered = false;
+  const backend = {
+    syncShops: async () => {},
+    claimCommands: async () => {
+      if (offered) return { commands: [] };
+      offered = true;
+      return { commands: [{
+        command_id: 'cmd-liangpiao-cancel', lease_token: 'lease-liangpiao-cancel',
+        tenant_id: 'tenant-1', event_id: sourceEnvelope.id, action,
+        context: {
+          system_event: true, envelope: sourceEnvelope,
+          session: { accountUnb: 'shop-1', peerUnb: 'buyer-1', chatId: 'chat-1' },
+          recent_messages: [],
+        },
+      }] };
+    },
+    reportCommand: async ({ result }) => { calls.reports.push(structuredClone(result)); return { ok: true }; },
+  };
+  const runtime = createRulesFirstRuntime({
+    config: { dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1 },
+    platform: { createClient: () => client }, backend, logger: silent,
+  });
+
+  await runtime.start();
+  await waitFor(() => calls.reports.length === 1);
+  await runtime.stop();
+
+  assert.equal(calls.cancelled, 1);
+  assert.match(calls.cancelRequest.reason, /特惠渠道出票失败/u);
+  assert.equal(calls.cancelRequest.idempotencyKey, 'liangpiao:out-limit:cancel-source-order:cancel');
+  assert.equal(calls.reports[0].status, 'succeeded');
+  assert.equal(calls.reports[0].order_id, 'order-1');
+  assert.equal(calls.reports[0].source_out_order_no, 'out-limit');
+  assert.equal(calls.reports[0].cancel_attempted, true);
+  assert.equal(calls.reports[0].order_closed, true);
+});
+
+test('Liangpiao source cancellation rejects forged callback or mismatched session without platform write', async (t) => {
+  const cases = [
+    ['unverified callback', { callback_verified: false }],
+    ['wrong tenant', { tenant_id: 'tenant-2' }],
+    ['wrong buyer', { buyer_id: 'buyer-2' }],
+    ['provider refund marker', { refund_authorization: 'liangpiao_refund' }],
+  ];
+  for (const [name, override] of cases) {
+    await t.test(name, async () => {
+      const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-liangpiao-reject-'));
+      const calls = { cancelled: 0, reports: [] };
+      const client = {
+        shops: { list: async () => [] },
+        orders: {
+          get: async () => providerOrder({ orderStatus: 2, payTime: '2026-08-25T06:15:51Z' }),
+          cancel: async () => { calls.cancelled += 1; },
+        },
+        im: {
+          getSessionByOrder: async () => ({ accountUnb: 'shop-1', peerUnb: 'buyer-1', chatId: 'chat-1' }),
+          listMessages: async () => ({ items: [] }),
+        },
+      };
+      const sourceEnvelope = { id: `reject-${name}`, tenantId: 'tenant-1', event: 'liangpiao.callback', ts: Date.now(), payload: {} };
+      let offered = false;
+      const action = {
+        id: `liangpiao:out-limit:cancel-source-order:${name}`,
+        type: 'cancel_failed_liangpiao_source_order', order_id: 'order-1',
+        tenant_id: 'tenant-1', shop_id: 'shop-1', buyer_id: 'buyer-1', chat_id: 'chat-1',
+        source_out_order_no: 'out-limit', source_generation: 2,
+        source_provider_status: 'failed', source_price_mode: 'LIMIT', callback_verified: true,
+        refund_authorization: 'verified_current_limit_failure', ...override,
+      };
+      const runtime = createRulesFirstRuntime({
+        config: { dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1 },
+        platform: { createClient: () => client },
+        backend: {
+          syncShops: async () => {},
+          claimCommands: async () => {
+            if (offered) return { commands: [] };
+            offered = true;
+            return { commands: [{
+              command_id: `cmd-${name}`, lease_token: `lease-${name}`, tenant_id: 'tenant-1',
+              event_id: sourceEnvelope.id, action,
+              context: { system_event: true, envelope: sourceEnvelope, session: { accountUnb: 'shop-1', peerUnb: 'buyer-1', chatId: 'chat-1' }, recent_messages: [] },
+            }] };
+          },
+          reportCommand: async ({ result }) => { calls.reports.push(structuredClone(result)); return {}; },
+        }, logger: silent,
+      });
+      await runtime.start();
+      await waitFor(() => calls.reports.length === 1);
+      await runtime.stop();
+      assert.equal(calls.cancelled, 0);
+      assert.equal(calls.reports[0].status, 'skipped');
+    });
+  }
 });
 
 test('manual amount change blocks paid mismatch cancellation at the final write gate', async () => {

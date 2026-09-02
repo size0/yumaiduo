@@ -123,8 +123,6 @@ async def test_ticket_image_recognition_uses_qwen_and_extracts_codes() -> None:
     assert result.ticket_codes == ["20711100016790"]
 
 
-
-
 @pytest.mark.asyncio
 async def test_liangpiao_candidate_is_not_replaced_by_qwen_fallback() -> None:
     candidate = MovieImageInfo(
@@ -145,6 +143,36 @@ async def test_liangpiao_candidate_is_not_replaced_by_qwen_fallback() -> None:
         result = await service.recognize_from_url("https://img.alicdn.com/ticket.jpg")
 
     assert result is candidate
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("match_level", "no_match_reason"), [
+    ("NONE", "NOT_FOUND"),
+    ("SHOW_EXPIRED", "SHOW_EXPIRED"),
+])
+async def test_liangpiao_authoritative_no_match_is_not_replaced_by_qwen_fallback(
+    match_level: str, no_match_reason: str,
+) -> None:
+    expired = MovieImageInfo(
+        city="上海", cinema_name="时代国际影城", movie_name="奥德赛",
+        date_text="2026-09-01", showtime_start="15:10",
+        match_level=match_level, no_match_reason=no_match_reason,
+    )
+
+    class LiangpiaoExpired:
+        async def recognize_url(self, image_url: str, *, city_name: str | None = None) -> MovieImageInfo:
+            return expired
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"Qwen fallback should not replace SHOW_EXPIRED: {request.method}")
+
+    configured = settings().model_copy(update={"liangpiao_app_key": "app", "liangpiao_app_secret": "secret"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        service = MovieImageRecognitionService(configured, client=client)
+        service._configured_liangpiao_client = lambda _: LiangpiaoExpired()
+        result = await service.recognize_from_url("https://img.alicdn.com/expired.jpg")
+
+    assert result is expired
 
 
 @pytest.mark.asyncio
@@ -170,6 +198,24 @@ async def test_fast_path_returns_valid_qwen_schema_without_calling_gpt() -> None
     assert payloads[0]["response_format"] == {"type": "json_object"}
     assert payloads[0]["enable_thinking"] is False
     assert any(item["event"] == "vision_fast_path_completed" for item in diagnostics.recent())
+
+
+@pytest.mark.asyncio
+async def test_fast_path_normalizes_camel_case_cinema_id_before_model_validation() -> None:
+    provider_result = valid_model_result()
+    provider_result["cinemaId"] = 1267
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": json.dumps(provider_result, ensure_ascii=False)}}]
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await MovieImageRecognitionService(settings(), client=client).recognize(
+            JPEG, "image/jpeg",
+        )
+
+    assert result.cinema_id == 1267
 
 
 @pytest.mark.asyncio

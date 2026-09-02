@@ -106,7 +106,7 @@ export class V2EventStore {
     return this.#mutate((state) => {
       const id = key(envelope); if (state.events[id]) return { created: false, record: external(state.events[id], this.#key) };
       const now = new Date().toISOString();
-      state.events[id] = { id, event: seal(envelope, this.#key), sessionKey: chatKey(envelope), status: 'queued', createdAt: now, updatedAt: now, attempts: 0, lease: null, result: null, actions: {} };
+      state.events[id] = { id, event: seal(envelope, this.#key), sessionKey: chatKey(envelope), status: 'queued', createdAt: now, updatedAt: now, attempts: 0, lease: null, nextAttemptAt: null, result: null, actions: {} };
       // Preserve every buyer event. Rapid text often carries separate durable
       // facts (cinema, quantity, confirmation); platform history can lag the
       // webhook, so cancelling an older queued text can permanently lose it.
@@ -114,7 +114,20 @@ export class V2EventStore {
       return { created: true, record: external(state.events[id], this.#key) };
     });
   }
-  async claim(activeSessions) { return this.#mutate((state) => { const record = Object.values(state.events).find((item) => item.status === 'queued' && !activeSessions.has(item.sessionKey)); if (!record) return null; record.status = 'processing'; record.attempts += 1; record.lease = randomUUID(); record.updatedAt = new Date().toISOString(); return external(record, this.#key); }); }
+  async claim(activeSessions) { return this.#mutate((state) => { const now = Date.now(); const record = Object.values(state.events).find((item) => item.status === 'queued' && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now) && !activeSessions.has(item.sessionKey)); if (!record) return null; record.status = 'processing'; record.attempts += 1; record.lease = randomUUID(); record.nextAttemptAt = null; record.updatedAt = new Date().toISOString(); return external(record, this.#key); }); }
+  async defer(id, lease, reason, delayMs = 5_000) {
+    return this.#mutate((state) => {
+      const record = state.events[id];
+      if (!record || record.lease !== lease || record.status !== 'processing') throw new Error('event lease mismatch');
+      const delay = Math.max(1_000, Math.min(Number(delayMs) || 5_000, 30 * 60_000));
+      record.status = 'queued';
+      record.lease = null;
+      record.nextAttemptAt = new Date(Date.now() + delay).toISOString();
+      record.result = { accepted: false, deferred: true, reason: String(reason || 'event_deferred').slice(0, 160) };
+      record.updatedAt = new Date().toISOString();
+      return external(record, this.#key);
+    });
+  }
   async complete(id, lease, result) { return this.#finish(id, lease, 'completed', result); }
   async fail(id, lease, reason) { return this.#finish(id, lease, 'failed', { reason }); }
   async beginAction(eventId, actionId) {
@@ -300,7 +313,7 @@ export class V2EventStore {
     for (const report of Object.values(state.actionReports)) actionReportCounts[report.status] = (actionReportCounts[report.status] ?? 0) + 1;
     return { counts, actionReportCounts };
   }
-  async #finish(id, lease, status, result) { return this.#mutate((state) => { const record = state.events[id]; if (!record || record.lease !== lease) throw new Error('event lease mismatch'); record.status = status; record.lease = null; record.result = result; record.updatedAt = new Date().toISOString(); return external(record, this.#key); }); }
+  async #finish(id, lease, status, result) { return this.#mutate((state) => { const record = state.events[id]; if (!record || record.lease !== lease) throw new Error('event lease mismatch'); record.status = status; record.lease = null; record.nextAttemptAt = null; record.result = result; record.updatedAt = new Date().toISOString(); return external(record, this.#key); }); }
   async #claimPriceChangeReceipt(initialReceipt) {
     const idempotencyKey = receiptKey(initialReceipt);
     return this.#mutate((state) => {

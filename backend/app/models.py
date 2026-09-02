@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date as CalendarDate
 from decimal import Decimal, ROUND_HALF_UP
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
@@ -57,6 +57,11 @@ class SelectedSeat(BaseModel):
 
     seat_number: str = Field(min_length=1, max_length=40)
     displayed_price: float | None = Field(default=None, ge=0)
+    row_no: int | None = Field(default=None, ge=1, le=999)
+    col_no: int | None = Field(default=None, ge=1, le=999)
+    area_id: str | None = Field(default=None, max_length=80)
+    seat_no: str | None = Field(default=None, max_length=80)
+    status: str | None = Field(default=None, max_length=40)
 
     @field_validator("displayed_price", mode="before")
     @classmethod
@@ -92,15 +97,59 @@ class CinemaCandidate(BaseModel):
     score: float = Field(default=0, ge=0, le=1)
 
 
+class MovieCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    movie_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=240)
+    score: float = Field(default=0, ge=0, le=1)
+
+
+class ShowCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    show_id: str = Field(min_length=1, max_length=100)
+    cinema_id: int | None = Field(default=None, gt=0)
+    movie_id: int | None = Field(default=None, gt=0)
+    movie_name: str | None = Field(default=None, max_length=160)
+    hall_name: str | None = Field(default=None, max_length=120)
+    start_time: str | None = Field(default=None, max_length=50)
+    end_time: str | None = Field(default=None, max_length=50)
+    dimension: str | None = Field(default=None, max_length=40)
+    language: str | None = Field(default=None, max_length=40)
+    score: float = Field(default=0, ge=0, le=1)
+
+
+class ProviderPriceOption(BaseModel):
+    """Provider list-price metadata; never treated as a selected-seat sale price."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_mode: str = Field(min_length=1, max_length=40)
+    price_mode: str = Field(min_length=1, max_length=40)
+    price_cents: int | None = Field(default=None, ge=0)
+    max_price_cents: int | None = Field(default=None, ge=0)
+    original_price_cents: int | None = Field(default=None, ge=0)
+    stop_sale_time: str | None = Field(default=None, max_length=50)
+    available: bool = False
+
+
 class MovieImageInfo(BaseModel):
-    """Only facts visibly present in a screenshot; no inferred sale price or inventory."""
+    """Screenshot facts plus provider-matched IDs/candidates; never a final sale quote."""
 
     model_config = ConfigDict(extra="forbid")
 
     platform: str | None = Field(default=None, max_length=40)
+    is_seat_selection: bool | None = None
+    cinema_truncated: bool | None = None
+    cinema_id: int | None = Field(default=None, gt=0)
     cinema_name: str | None = Field(default=None, max_length=240)
+    cinema_address: str | None = Field(default=None, max_length=300)
+    brand_name: str | None = Field(default=None, max_length=80)
+    city_code: str | None = Field(default=None, max_length=20)
     city: str | None = Field(default=None, max_length=80)
     movie_name: str | None = Field(default=None, max_length=160)
+    movie_id: int | None = Field(default=None, gt=0)
     date_text: str | None = Field(default=None, max_length=80)
     date: CalendarDate | None = None
     showtime_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -118,9 +167,30 @@ class MovieImageInfo(BaseModel):
     missing_fields: list[str] = Field(default_factory=list, max_length=30)
     warnings: list[str] = Field(default_factory=list, max_length=20)
     recognition_id: str | None = Field(default=None, max_length=100)
-    match_level: Literal["EXACT", "CANDIDATE", "NONE", "SHOW_EXPIRED"] | None = None
+    recognition_cached: bool | None = None
+    # Keep the provider enum text open-ended. Liangpiao may add enum values;
+    # silently converting a future value to None would erase the reason why a
+    # recognition cannot continue.
+    match_level: str | None = Field(default=None, max_length=80)
+    no_match_reason: str | None = Field(default=None, max_length=100)
+    provider_match_level: str | None = Field(default=None, max_length=80)
+    provider_no_match_reason: str | None = Field(default=None, max_length=100)
+    recognition_blocker: str | None = Field(default=None, max_length=100)
+    provider_request_id: str | None = Field(default=None, max_length=160)
+    trace_id: str | None = Field(default=None, max_length=128)
+    # These three objects form the lossless provider observation. The stable
+    # fields above remain the normalized facts consumed by deterministic code.
+    raw_results: dict[str, Any] = Field(default_factory=dict)
+    final_results: dict[str, Any] = Field(default_factory=dict)
+    raw_response: dict[str, Any] = Field(default_factory=dict)
+    cinema_hit_count: int | None = Field(default=None, ge=0)
+    price_mismatch: bool | None = None
+    seat_matched: bool | None = None
     show_id: str | None = Field(default=None, max_length=100)
     candidate_cinemas: list[CinemaCandidate] = Field(default_factory=list, max_length=5)
+    candidate_movies: list[MovieCandidate] = Field(default_factory=list, max_length=5)
+    candidate_shows: list[ShowCandidate] = Field(default_factory=list, max_length=10)
+    provider_prices: list[ProviderPriceOption] = Field(default_factory=list, max_length=12)
 
     @field_validator("ticket_codes", mode="before")
     @classmethod
@@ -187,6 +257,9 @@ class ChatTextRequest(BaseModel):
 
     conversation_id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=2000)
+    # The plugin workbench uses an isolated simulation session. It is never
+    # enabled by platform webhook traffic.
+    simulation: bool = False
 
     @field_validator("conversation_id", "text")
     @classmethod
@@ -219,7 +292,12 @@ class RealQuote(BaseModel):
     seat_type: Literal["wplus", "regular", "mixed"] | None = None
     base_unit_cents: int | None = Field(default=None, gt=0)
     base_total_cents: int | None = Field(default=None, gt=0)
-    price_source: Literal["realtime_wplus_area", "realtime_regular_area", "realtime_mixed_area"] | None = None
+    price_source: Literal[
+        "realtime_wplus_area", "realtime_regular_area", "realtime_mixed_area",
+        "realtime_vip_area", "liangpiao_realtime_preflight",
+    ] | None = None
+    price_mode: Literal["FIXED", "LIMIT"] = "FIXED"
+    max_price_cents: int | None = Field(default=None, gt=0)
     unit_quote_cents: int | None = Field(default=None, gt=0)
     total_quote_cents: int | None = Field(default=None, gt=0)
     channel_fee_total_cents: int | None = Field(default=None, ge=0)
@@ -237,6 +315,11 @@ class RealQuote(BaseModel):
     matched_showtime_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     matched_hall_name: str | None = Field(default=None, max_length=300)
     buyer_app_purchase_recommended: bool = False
+    provider_quote_id: str | None = Field(default=None, max_length=160)
+    provider_quote_hash: str | None = Field(default=None, max_length=64)
+    # Provider quote generation is required to bind a paid event to the exact
+    # preflight snapshot that authorized the transaction.
+    quote_generation: int | None = Field(default=None, ge=1)
     reply_text: str | None = Field(default=None, max_length=500)
     timings_ms: dict[str, int] = Field(default_factory=dict)
 
@@ -247,10 +330,16 @@ class ChatAssistantMessage(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     conversation_id: str = Field(min_length=1, max_length=128)
     role: Literal["assistant"] = "assistant"
-    message_type: Literal["movie_recognition", "guidance", "ai_reply"]
+    message_type: Literal[
+        "movie_recognition", "guidance", "ai_reply", "ai_reply_simulation",
+    ]
     text: str = Field(min_length=1, max_length=2000)
     recognition: MovieImageInfo | None = None
     quote: RealQuote | None = None
+    # Public Agent execution trace for the isolated workbench.  Entries are
+    # bounded summaries (round/tool/result/final action), never chain-of-thought
+    # or raw provider responses.
+    agent_trace: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
 class ChatMessageResponse(BaseModel):
@@ -265,6 +354,8 @@ class VisionSettingsUpdate(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     chat_base_url: str | None = Field(default=None, max_length=500)
     chat_model: str | None = Field(default=None, max_length=200)
+    chat_max_completion_tokens: int | None = Field(default=None, ge=256, le=3000)
+    chat_context_messages: int | None = Field(default=None, ge=4, le=50)
     enable_thinking: bool = False
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "none"
     vision_prompt: str = Field(min_length=1, max_length=20_000)
@@ -323,6 +414,8 @@ class VisionSettingsView(BaseModel):
     model: str
     chat_base_url: str
     chat_model: str
+    chat_max_completion_tokens: int = 3000
+    chat_context_messages: int = 12
     enable_thinking: bool
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"]
     vision_prompt: str
@@ -334,8 +427,28 @@ class VisionSettingsView(BaseModel):
     updated_at: str | None = None
 
 
+class LiangpiaoPricingBand(BaseModel):
+    """One bounded percentage band for the Liangpiao pricing policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_discount_percent: float = Field(ge=0, le=100)
+    max_discount_percent: float = Field(gt=0, le=100)
+    markup_percent: float = Field(ge=-100, le=1000)
+
+
+class WandaPricingBand(BaseModel):
+    """One bounded percentage band for the Wanda W+ pricing policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_discount_percent: float = Field(ge=0, le=100)
+    max_discount_percent: float = Field(gt=0, le=100)
+    fixed_adjustment_cents: int = Field(ge=-100_000, le=100_000)
+
+
 class PricingRulesUpdate(BaseModel):
-    """Deterministic integer-cent quote policy; free-form formulas are forbidden."""
+    """Deterministic pricing policy; free-form formulas are forbidden."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -344,7 +457,41 @@ class PricingRulesUpdate(BaseModel):
     regular_adjustment_cents: int = Field(default=100, ge=-100_000, le=100_000)
     wplus_member_price_threshold_cents: int = Field(default=6_000, ge=1, le=200_000)
     wplus_adjustment_cents: int = Field(default=-290, ge=-100_000, le=100_000)
+    vip_fixed_cost_cents: int = Field(default=5_000, ge=1, le=200_000)
+    vip_discount_threshold_cents: int = Field(default=6_000, ge=1, le=200_000)
+    vip_high_price_discount_percent: int = Field(default=90, ge=1, le=100)
+    vip_low_price_discount_cents: int = Field(default=200, ge=0, le=100_000)
+    liangpiao_price_mode: Literal["FIXED", "LIMIT"] = "FIXED"
     rounding_increment_cents: Literal[1, 10, 100] = 10
+    # Empty lists retain the legacy fixed-rule behavior for old persisted files.
+    # The operations UI sends complete 0–100 bands when dynamic rules are used.
+    liangpiao_rules: list[LiangpiaoPricingBand] = Field(default_factory=list, max_length=30)
+    # Optional independent bands for the FIXED fallback channel.  When this
+    # field is absent in an old persisted policy, the store migrates the
+    # legacy Liangpiao bands into it; an explicit empty list disables the
+    # fixed-channel operator rule.
+    liangpiao_fixed_rules: list[LiangpiaoPricingBand] = Field(default_factory=list, max_length=30)
+    wanda_rules: list[WandaPricingBand] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_dynamic_bands(self) -> "PricingRulesUpdate":
+        for field_name, bands in (
+            ("liangpiao_rules", self.liangpiao_rules),
+            ("liangpiao_fixed_rules", self.liangpiao_fixed_rules),
+            ("wanda_rules", self.wanda_rules),
+        ):
+            if not bands:
+                continue
+            previous_max = 0.0
+            for band in bands:
+                if band.max_discount_percent <= band.min_discount_percent:
+                    raise ValueError(f"{field_name} bands must have increasing bounds")
+                if abs(band.min_discount_percent - previous_max) > 1e-9:
+                    raise ValueError(f"{field_name} bands must cover 0 to 100 without gaps")
+                previous_max = band.max_discount_percent
+            if abs(previous_max - 100.0) > 1e-9:
+                raise ValueError(f"{field_name} bands must cover 0 to 100 without gaps")
+        return self
 
 
 class PricingRulesView(PricingRulesUpdate):

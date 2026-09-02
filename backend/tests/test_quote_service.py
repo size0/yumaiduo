@@ -19,6 +19,7 @@ from app.errors import ProviderError
 from app.main import create_app
 from app.models import MovieImageInfo, PricingRulesUpdate, RealQuote
 from app.settings_store import PersistentSettingsStore
+from app.reply_template_store import ReplyTemplates
 from app.wanda_direct_quote import CINEMA_ORIGIN, H5_CHANNEL, MARKETING_ORIGIN, WandaDirectQuoteService
 
 
@@ -32,6 +33,35 @@ class ReversibleProtector:
 
     def unprotect(self, value: str) -> str:
         return value.removeprefix("enc:")[::-1]
+
+
+@pytest.mark.asyncio
+async def test_unavailable_same_type_reference_uses_editable_reply_template() -> None:
+    service = WandaDirectQuoteService(
+        Settings(),
+        pricing_rules=PricingRulesUpdate(enabled=True),
+        reply_templates=lambda: ReplyTemplates(
+            same_type_unavailable_template="{不可选座位}|{同类型参考价}|{张数}|{同类型参考总价}",
+        ),
+    )
+    result = await service._unavailable_same_type_reference(
+        selected=[
+            {
+                "area_id": "standard", "area_name": "普通座", "seat_type": "normal",
+                "price": 6900, "channel_fee": 0, "row": 9, "column": column,
+            }
+            for column in (5, 6, 7)
+        ],
+        unavailable=["9排7座", "9排6座", "9排5座"],
+        account={}, cinema_id="9107", showtime_id="show-1",
+        seats=[{
+            "area_id": "standard", "area_name": "普通座", "seat_type": "normal",
+            "price": 6900, "channel_fee": 0, "row": 9, "column": 8,
+            "seat_id": "seat-8", "available": True, "regular_member_price": 3690,
+        }],
+    )
+    await service.aclose()
+    assert result == "9排7座、9排6座、9排5座|37.90|3|113.70"
 
 
 def test_resolved_date_accepts_month_day_with_dash_separator() -> None:
@@ -238,6 +268,81 @@ async def test_truncated_huanying_platform_name_uses_official_address_district_t
     await service.aclose()
     assert matched["cinema_id"] == "679"
     assert matched["cinema_name"] == "北京寰映影城合生汇店"
+
+
+@pytest.mark.asyncio
+async def test_wanda_huanshi_platform_name_matches_local_wanda_cache(tmp_path: Path) -> None:
+    accounts, cache = _direct_files(tmp_path)
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO cinemas VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("7032", "city-wx", "无锡", "寰时影城（无锡万象城旗舰店）", "无锡市金石路88号无锡万象城L4层", "", "{}", 1),
+        )
+    settings = Settings(
+        wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
+        wanda_fixed_account_phone="13800009083",
+    )
+    service = WandaDirectQuoteService(settings, transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+
+    matched = await service._resolve_cinema(settings, MovieImageInfo(
+        cinema_name="寰時影城【无锡万象城旗舰店】", city="无锡",
+        movie_name="测试影片", date_text="今天 8月30日", showtime_start="16:20",
+        selected_count_visible=0, confidence=0.95,
+    ))
+
+    await service.aclose()
+    assert matched["cinema_id"] == "7032"
+    assert matched["cinema_name"] == "寰时影城（无锡万象城旗舰店）"
+
+
+@pytest.mark.asyncio
+async def test_cinity_giant_screen_platform_name_matches_local_wanda_cache(tmp_path: Path) -> None:
+    accounts, cache = _direct_files(tmp_path)
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO cinemas VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("651", "city-sz", "深圳", "深圳万达影城龙华汇海广场店", "深圳市龙华区龙华街道汇海广场B座301", "", "{}", 1),
+        )
+    settings = Settings(
+        wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
+        wanda_fixed_account_phone="13800009083",
+    )
+    service = WandaDirectQuoteService(settings, transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+
+    matched = await service._resolve_cinema(settings, MovieImageInfo(
+        cinema_name="万达影城（龙华汇海广场CINITY巨幕店）", city="深圳",
+        movie_name="欢迎来龙餐馆", date_text="今天 8月30日", showtime_start="15:55",
+        selected_count_visible=0, confidence=0.95,
+    ))
+
+    await service.aclose()
+    assert matched["cinema_id"] == "651"
+    assert matched["cinema_name"] == "深圳万达影城龙华汇海广场店"
+
+
+@pytest.mark.asyncio
+async def test_wanda_huanying_platform_name_matches_local_wanda_cache(tmp_path: Path) -> None:
+    accounts, cache = _direct_files(tmp_path)
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO cinemas VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("6578", "city-hh", "呼和浩特", "呼和浩特寰映影城振华广场店", "呼和浩特市回民区振华广场8楼寰映影城", "", "{}", 1),
+        )
+    settings = Settings(
+        wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
+        wanda_fixed_account_phone="13800009083",
+    )
+    service = WandaDirectQuoteService(settings, transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+
+    matched = await service._resolve_cinema(settings, MovieImageInfo(
+        cinema_name="万达寰映影城（振华广场杜比影院店）", city="呼和浩特",
+        movie_name="欢迎来龙餐馆", date_text="今天 8月30日", showtime_start="16:20",
+        selected_count_visible=0, confidence=0.95,
+    ))
+
+    await service.aclose()
+    assert matched["cinema_id"] == "6578"
+    assert matched["cinema_name"] == "呼和浩特寰映影城振华广场店"
 
 
 @pytest.mark.asyncio
@@ -1054,6 +1159,57 @@ async def test_unique_nearby_official_showtime_corrects_confident_vision_time_er
     assert movie == "奥德赛"
 
 
+@pytest.mark.parametrize(
+    ("original_cents", "expected_cents"),
+    [(5_790, 5_590), (6_000, 5_800), (6_100, 5_490), (8_000, 7_200)],
+)
+def test_vip_hall_configured_pricing_rule(original_cents: int, expected_cents: int) -> None:
+    rules = PricingRulesUpdate(
+        vip_fixed_cost_cents=5_000, vip_discount_threshold_cents=6_000,
+        vip_high_price_discount_percent=90, vip_low_price_discount_cents=200,
+    )
+    assert WandaDirectQuoteService._vip_priced_unit(original_cents, rules) == expected_cents
+
+
+@pytest.mark.asyncio
+async def test_vip_hall_uses_configured_vip_rule_without_a_member_price(tmp_path: Path) -> None:
+    accounts, cache = _direct_files(tmp_path)
+    settings = Settings(
+        wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
+        wanda_fixed_account_phone="13800009083",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/showtime/by_cinema.api":
+            payload = _showtime_response()
+            showtime = payload["data"]["showtimeFilmInf"][0]["showtimeFilmDateInf"][0]["showtimesInf"]["showtimeList"][0]
+            showtime.update({"hallName": "8号VIP免费按摩沙发厅", "hallType": "VIP厅", "wandaSign": "VIP厅"})
+            ordinary = showtime["areaPriceList"][0]
+            ordinary.update({"salesPrice": 5_790, "settlePrice": 3_500, "cinemaPrice": 3_800})
+            return httpx.Response(200, json=payload)
+        if request.url.path == "/order/real_time_seat.api":
+            return httpx.Response(200, json=_realtime_response())
+        return httpx.Response(404, json={})
+
+    service = WandaDirectQuoteService(
+        settings, transport=httpx.MockTransport(handler), now_provider=quote_test_now,
+        pricing_rules=PricingRulesUpdate(enabled=True),
+    )
+    quote = await service.quote(MovieImageInfo.model_validate({
+        "cinema_name": "昆明西山万达广场店", "city": "昆明", "movie_name": "奥德赛",
+        "date": "2026-08-25", "showtime_start": "16:20",
+        "selected_seats": [{"seat_number": "6排16座"}], "selected_count_visible": 1,
+    }))
+    await service.aclose()
+
+    assert quote.member_unit_price_cents is None
+    assert quote.base_unit_cents == 5_790
+    assert quote.unit_quote_cents == 5_590
+    assert quote.total_quote_cents == 5_590
+    assert quote.price_source == "realtime_vip_area"
+    assert "VIP厅报价规则" in quote.pricing_source
+
+
 @pytest.mark.asyncio
 async def test_selected_regular_seat_uses_its_exact_official_area_even_when_wplus_is_available(tmp_path: Path) -> None:
     accounts, cache = _direct_files(tmp_path)
@@ -1215,6 +1371,47 @@ async def test_enabled_friday_member_day_price_applies_to_area_activity_without_
 
 
 @pytest.mark.asyncio
+async def test_list_wplus_seats_returns_available_row_candidates_without_quoting(tmp_path: Path) -> None:
+    accounts, cache = _direct_files(tmp_path)
+    captured: list[dict[str, object]] = []
+    settings = Settings(
+        wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
+        wanda_fixed_account_phone="13800009083",
+    )
+    base_handler = _handler(captured)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = base_handler(request)
+        if request.url.path == "/order/real_time_seat.api":
+            payload = response.json()
+            payload["data"]["realtimeSeats"]["area"][1]["seat"].extend([
+                _seat("8排11座", "w-8-11", "36", 8, 11, wplus=True),
+                _seat("8排12座", "w-8-12", "36", 8, 12, wplus=True),
+            ])
+            return httpx.Response(200, json=payload)
+        return response
+
+    service = WandaDirectQuoteService(
+        settings, transport=httpx.MockTransport(handler), now_provider=quote_test_now,
+    )
+    result = await service.list_wplus_seats(
+        MovieImageInfo(
+            cinema_name="昆明西山万达广场店", city="昆明", movie_name="奥德赛",
+            date="2026-08-25", showtime_start="16:20", selected_count_visible=0,
+        ), row_no=8, seat_preference="第八排中间",
+    )
+    await service.aclose()
+
+    assert result["seat_zone_type"] == "W+"
+    assert [seat["seat_number"] for seat in result["available_seats"]] == ["8排11座", "8排12座"]
+    assert "8排11座、8排12座" in result["buyer_guidance"]
+    assert all("price" not in seat and "price_cents" not in seat for seat in result["available_seats"])
+    assert [item["path"] for item in captured] == [
+        "/showtime/by_cinema.api", "/order/real_time_seat.api",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_no_selected_seat_prefers_realtime_wplus_member_activity_price(tmp_path: Path) -> None:
     accounts, cache = _direct_files(tmp_path)
     captured: list[dict[str, object]] = []
@@ -1346,10 +1543,10 @@ async def test_unavailable_selected_regular_seat_returns_same_type_reference_wit
 
     error = captured_error.value
     assert error.code == "wanda_selected_seat_unavailable_same_type_reference"
-    assert "6排16座当前不可选" in error.message
-    assert "同座位类型当前参考价：61.90一张" in error.message
-    assert "按1张参考合计61.90元" in error.message
-    assert "不能按原座位下单" in error.message
+    assert "6排16座不可选" in error.message
+    assert "同类型参考价61.90元/张" in error.message
+    assert "（1张约61.90元）" in error.message
+    assert "请换座后发最新截图" in error.message
     assert "6排15座" not in error.message
     assert [item["path"] for item in captured] == [
         "/showtime/by_cinema.api", "/order/real_time_seat.api",
@@ -1384,8 +1581,8 @@ async def test_unavailable_selected_wplus_seat_returns_same_wplus_type_reference
 
     error = captured_error.value
     assert error.code == "wanda_selected_seat_unavailable_same_type_reference"
-    assert "5排2座当前不可选" in error.message
-    assert "同座位类型当前参考价：62.90一张" in error.message
+    assert "5排2座不可选" in error.message
+    assert "同类型参考价62.90元/张" in error.message
     assert "9排14座" not in error.message
     assert [item["path"] for item in captured] == [
         "/showtime/by_cinema.api", "/order/real_time_seat.api",

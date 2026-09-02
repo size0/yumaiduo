@@ -64,6 +64,7 @@ export function loadV2Config({ env, manifest }) {
     maxWebhookBodyBytes: integer(env, 'MAX_WEBHOOK_BODY_BYTES', 1_048_576, 1_024, 10_485_760),
     maxUiBodyBytes: integer(env, 'WANDA_V4_UI_MAX_BODY_BYTES', 30_000_000, 1_024, 40_000_000),
     maxConcurrentRuns: integer(env, 'WANDA_AI_V2_MAX_CONCURRENT_RUNS', 12, 1, 100),
+    messageCoalesceDelayMs: integer(env, 'WANDA_AI_V2_MESSAGE_COALESCE_DELAY_MS', 350, 0, 2_000),
     dataDir,
     encryptionKey: encryptionKey(env),
     logLevel: ['debug', 'info', 'warn', 'error'].includes(env.LOG_LEVEL) ? env.LOG_LEVEL : 'info',
@@ -71,6 +72,9 @@ export function loadV2Config({ env, manifest }) {
     orderApiKey: optional(env, 'WANDA_ORDER_API_KEY'),
     orderApiTenantId: optional(env, 'WANDA_ORDER_API_TENANT_ID'),
     fulfillmentEnabled: ['1', 'true', 'yes', 'on'].includes(String(env.WANDA_ORDER_FULFILLMENT_ENABLED ?? '').trim().toLowerCase()),
+    // Reset phase: direct transaction writes stay disabled while the new
+    // Agent Harness is read-only. Chat messages and read operations remain available.
+    agentHarnessReadOnly: !['0', 'false', 'no', 'off'].includes(String(env.AGENT_HARNESS_READ_ONLY ?? 'true').trim().toLowerCase()),
     backend: Object.freeze({
       baseUrl: url(env, 'WANDA_AI_V2_BACKEND_URL'),
       sharedSecret: required(env, 'WANDA_AI_V2_BRIDGE_KEY'),

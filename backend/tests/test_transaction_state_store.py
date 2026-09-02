@@ -84,6 +84,22 @@ def test_state_store_rejects_illegal_transition_and_unapproved_fields(tmp_path: 
     )
     assert bootstrapped.flow_state == "PAID_WAITING_FULFILLMENT"
 
+    recoverable = TransactionStateStore(tmp_path / "recoverable-states.json", protector=Protector())
+    current = recoverable.get_or_create(**identity())
+    current = recoverable.transition(
+        **identity(), expected_revision=current.revision, event_id="event-collect",
+        transition_code="collect", flow_state="COLLECTING", updates={},
+    )
+    current = recoverable.transition(
+        **identity(), expected_revision=current.revision, event_id="event-quote",
+        transition_code="quote", flow_state="QUOTED", updates={"quote_status": "ready"},
+    )
+    current = recoverable.transition(
+        **identity(), expected_revision=current.revision, event_id="event-quote-failed",
+        transition_code="quote_input_incomplete", flow_state="COLLECTING", updates={"quote_status": "collecting"},
+    )
+    assert current.flow_state == "COLLECTING"
+
     second_store = TransactionStateStore(tmp_path / "other-states.json", protector=Protector())
     second_store.get_or_create(**identity())
     with pytest.raises(ValueError, match="transaction_state_update_field_invalid"):

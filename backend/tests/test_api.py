@@ -5,15 +5,142 @@ from time import sleep
 
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.conversation_policy_store import ConversationPolicyStore
 from app.keyword_image_store import KeywordImageStore
-from app.main import FixedWindowRateLimiter, create_app
+from app.main import FixedWindowRateLimiter, _execute_agent_recognition_tool, create_app
 from app.models import MovieImageInfo
+from app.pending_cinema_candidate_store import PendingCinemaCandidateStore
+from app.quote_record_store import QuoteRecordStore
 from app.reply_template_store import ReplyTemplateStore
 from app.rules_first_store import RulesFirstStore
+from app.settings_store import PersistentSettingsStore
 from app.shop_automation_store import ShopAutomationStore
 from app.transaction_state_store import TransactionStateStore
 JPEG = b"\xff\xd8\xff\xe0" + b"test-jpeg-content"
+
+
+def _recognition_fixture(movie: str) -> MovieImageInfo:
+    return MovieImageInfo(
+        is_seat_selection=True,
+        city="北京", cinema_name="万达影城", movie_name=movie,
+        showtime_start="19:30", selected_seats=[],
+    )
+
+
+def test_agent_recognition_tool_accepts_bounded_multi_image_batch() -> None:
+    import asyncio
+
+    calls: list[str] = []
+
+    class Recognition:
+        async def recognize_from_url(self, image_url: str, *, buyer_message: str = "") -> MovieImageInfo:
+            assert buyer_message == "两张图"
+            calls.append(image_url)
+            return _recognition_fixture(f"影片-{len(calls)}")
+
+    result = asyncio.run(_execute_agent_recognition_tool(
+        Recognition(), {
+            "image_urls": [
+                "https://img.alicdn.com/one.png",
+                "https://img.alicdn.com/two.png",
+            ],
+            "buyer_message": "两张图",
+        },
+    ))
+
+    assert result["ok"] is True
+    assert result["image_count"] == 2
+    assert result["recognized_image_count"] == 2
+    assert result["partial_failure"] is False
+    assert len(result["recognitions"]) == 2
+    assert calls == [
+        "https://img.alicdn.com/one.png",
+        "https://img.alicdn.com/two.png",
+    ]
+
+
+def test_agent_recognition_tool_rejects_single_and_batch_arguments_together() -> None:
+    import asyncio
+
+    result = asyncio.run(_execute_agent_recognition_tool(
+        object(), {
+            "image_url": "https://img.alicdn.com/one.png",
+            "image_urls": ["https://img.alicdn.com/two.png"],
+        },
+    ))
+    assert result == {"ok": False, "error": "image_arguments_conflict"}
+
+
+def test_direct_liangpiao_order_api_is_disabled_even_when_legacy_write_flags_are_enabled(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-key")
+    settings = PersistentSettingsStore(
+        tmp_path / "settings.json",
+        protector=PlainProtector(),
+        environment=Settings(
+            chat_api_key="chat-key",
+            liangpiao_order_create_enabled=True,
+            external_writes_enabled=True,
+        ),
+    )
+    app = create_app(
+        service=StubRecognitionService(),
+        settings_store=settings,
+        liangpiao_client=object(),
+    )
+
+    response = TestClient(app).post(
+        "/api/liangpiao/order/create",
+        headers={
+            "x-wanda-ai-v2-bridge-key": "bridge-test-key",
+            "x-yumaiduo-tenant-id": "tenant-1",
+        },
+        json={"tenant_id": "tenant-1", "quote_id": "quote-1"},
+    )
+
+    assert response.status_code == 410
+    assert response.json()["detail"] == "liangpiao_direct_order_api_disabled"
+
+
+def test_create_app_advertises_one_quote_tool_and_bound_order_state(monkeypatch, tmp_path: Path) -> None:
+    import app.main as main_module
+
+    captured: dict[str, object] = {}
+
+    class CapturingChat:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        async def reply(self, text: str, conversation_id: str, runtime_context=None) -> str:
+            del text, conversation_id, runtime_context
+            return "ok"
+
+        def remember_image_context(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    monkeypatch.setattr(main_module, "CustomerServiceChatService", CapturingChat)
+    store = PersistentSettingsStore(
+        tmp_path / "settings.json",
+        protector=PlainProtector(),
+        environment=Settings(chat_api_key="chat-key"),
+    )
+    create_app(settings_store=store, liangpiao_client=object())
+
+    schemas = captured["tool_schemas"]
+    names = [item["function"]["name"] for item in schemas]
+    assert names.count("quote.preflight_current") == 1
+    assert "get_quote" not in names
+    assert "get_authoritative_quote" not in names
+    assert "order.preflight" not in names
+    assert "reprice_seats" not in names
+    assert "order.detail" not in names
+    assert "recognition.resolve_seats" in names
+    recognition_schema = next(item for item in schemas if item["function"]["name"] == "recognize_screenshot")
+    assert "oneOf" in recognition_schema["function"]["parameters"]
+    assert "anyOf" not in recognition_schema["function"]["parameters"]
+    state_schema = next(item for item in schemas if item["function"]["name"] == "get_order_state")
+    assert state_schema["function"]["parameters"]["properties"] == {}
+    assert "required" not in state_schema["function"]["parameters"]
 
 
 class PlainProtector:
@@ -53,6 +180,38 @@ class StubRecognitionService:
         )
 
 
+def test_create_app_injects_durable_pending_candidate_store(monkeypatch, tmp_path: Path) -> None:
+    import app.main as main_module
+
+    captured: dict[str, object] = {}
+
+    class QuoteStub:
+        async def quote(self, _: MovieImageInfo) -> None:
+            return None
+
+    class RuntimeStub:
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    def build_engine(*_: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    store = PendingCinemaCandidateStore(tmp_path / "pending-candidates.json")
+    monkeypatch.setattr(main_module, "RulesFirstDecisionEngine", build_engine)
+
+    create_app(
+        quote_service=QuoteStub(),
+        pending_cinema_candidate_store=store,
+        rules_first_runtime=RuntimeStub(),
+    )
+
+    assert captured["pending_cinema_candidate_store"] is store
+
+
 def test_liangpiao_order_list_and_detail_are_tenant_scoped_and_read_only(tmp_path: Path) -> None:
     store = RulesFirstStore(tmp_path / "rules.sqlite3", protector=PlainProtector())
     store.save_liangpiao_order({
@@ -84,6 +243,106 @@ def test_liangpiao_order_list_and_detail_are_tenant_scoped_and_read_only(tmp_pat
     assert detail.status_code == 200
     assert detail.json()["order"]["tickets"][0]["version"] == 2
     assert client.get("/api/plugin/liangpiao-orders/provider-1", headers={"x-wanda-tenant-id": "tenant-2"}).status_code == 404
+
+
+def test_verified_limit_failure_callback_enqueues_platform_cancel_before_fixed_offer(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("LIANGPIAO_CALLBACK_ENABLED", "true")
+    store = RulesFirstStore(tmp_path / "rules.sqlite3", protector=PlainProtector())
+    store.save_liangpiao_order({
+        "out_order_no": "out-limit", "provider_order_no": "provider-limit",
+        "tenant_id": "tenant-1", "shop_id": "shop-1", "buyer_id": "buyer-1",
+        "chat_id": "chat-1", "quote_id": "quote-1", "quote_hash": "a" * 64,
+        "payload_hash": "b" * 64, "provider_status": "processing",
+        "payload": {"priceMode": "LIMIT"},
+    })
+
+    class CallbackStub:
+        async def handle(self, *_: object, **__: object) -> dict[str, object]:
+            return {
+                "status": "ok", "code": "LIANGPIAO_CALLBACK_APPLIED",
+                "state_after": "MANUAL_HOLD", "state_revision": 3,
+                "out_order_no": "out-limit", "provider_order_no": "provider-limit",
+                "reply_dedupe_key": "liangpiao:out-limit:failed",
+                "reply_plan": {
+                    "template_key": "flow.fulfillment.liangpiao_limit_refund_pending",
+                    "variables": {"失败原因": "供应商无座"},
+                },
+                "platform_actions": [{
+                    "id": "liangpiao:out-limit:cancel-source-order",
+                    "type": "cancel_failed_liangpiao_source_order",
+                    "order_id": "fish-paid-1", "tenant_id": "tenant-1",
+                    "shop_id": "shop-1", "buyer_id": "buyer-1", "chat_id": "chat-1",
+                    "source_out_order_no": "out-limit", "source_generation": 1,
+                    "source_provider_status": "failed", "source_price_mode": "LIMIT",
+                    "callback_verified": True,
+                    "refund_authorization": "verified_current_limit_failure",
+                    "dedupe_key": "liangpiao:out-limit:fish-paid-1:cancel-source-order:g1",
+                }],
+            }
+
+    with TestClient(create_app(
+        service=StubRecognitionService(), rules_first_store=store,
+        liangpiao_callback_handler=CallbackStub(),
+    )) as client:
+        response = client.post(
+            "/api/liangpiao/callback", content=b'{"outOrderNo":"out-limit"}',
+            headers={
+                "x-liangpiao-sign": "verified-by-stub", "x-liangpiao-timestamp": "1",
+                "x-liangpiao-nonce": "nonce-1",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["platform_actions_enqueued"] == 1
+    commands = store.claim_commands(limit=10)
+    assert {item["command_type"] for item in commands} == {
+        "cancel_failed_liangpiao_source_order", "send_message",
+    }
+    cancel = next(item for item in commands if item["command_type"] == "cancel_failed_liangpiao_source_order")
+    assert cancel["action"]["refund_authorization"] == "verified_current_limit_failure"
+    reply = next(item for item in commands if item["command_type"] == "send_message")
+    assert "正在为您关闭原订单" in reply["action"]["text"]
+    assert "是否需要按同场次的一口价继续出票" not in reply["action"]["text"]
+
+
+def test_quote_records_api_separates_wanda_and_liangpiao_quotes(tmp_path: Path) -> None:
+    rules_store = RulesFirstStore(tmp_path / "rules.sqlite3", protector=PlainProtector())
+    rules_store.save_selected_seat_quote({
+        "quote_id": "lpq-1", "tenant_id": "tenant-1", "conversation_id": "tenant-1:shop-1:chat-1",
+        "quote_hash": "c" * 64, "generation": 1, "expires_at": "2099-01-01T00:00:00+00:00",
+        "show_id": "show-1", "seats": [{"seat_no": "3排4座"}],
+        "provider_amount_fen": 1200, "buyer_amount_fen": 1300,
+        "snapshot": {
+            "cinema_id": "cinema-1", "price_mode": "LIMIT", "market_amount_fen": 1800,
+            "provider_base_amount_fen": 1200, "preflight_response": {
+                "marketAmount": "1800", "estimateAmount": "1200", "totalAmount": "1500",
+            },
+        },
+    })
+    legacy = QuoteRecordStore(tmp_path / "quote-records.json", protector=PlainProtector())
+    legacy.save({
+        "record_id": "wanda-1", "tenant_id": "tenant-1", "shop_id": "shop-1",
+        "buyer_id": "buyer-1", "chat_id": "chat-1", "created_at": "2099-01-01T00:00:00+00:00",
+        "status": "succeeded", "city": "深圳", "cinema": "万达影城", "movie": "测试电影",
+        "provider_quote_id": "lpq-1",
+    })
+    client = TestClient(create_app(
+        service=StubRecognitionService(), rules_first_store=rules_store,
+        quote_record_store=legacy,
+    ))
+
+    response = client.get("/api/plugin/quote-records", headers={"x-wanda-tenant-id": "tenant-1"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["records"][0]["cinema"] == "万达影城"
+    assert body["liangpiao_records"][0]["source"] == "liangpiao"
+    assert body["liangpiao_records"][0]["buyer_id"] == "buyer-1"
+    assert body["liangpiao_records"][0]["market_amount_fen"] == 1800
+    assert body["liangpiao_records"][0]["provider_base_amount_fen"] == 1200
+    assert "raw_response" not in body["liangpiao_records"][0]
 
 
 def test_health_does_not_expose_secrets() -> None:
@@ -130,6 +389,9 @@ def test_v4_plugin_bridge_persists_before_accepting_and_is_authenticated(monkeyp
 def test_plugin_event_and_action_result_persist_authoritative_rule_state(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
     monkeypatch.setenv("WANDA_EXTERNAL_WRITES_ENABLED", "true")
+    # This legacy integration test explicitly opts out of the reset-phase
+    # transaction write fuse; production keeps the default read-only mode.
+    monkeypatch.setenv("AGENT_HARNESS_READ_ONLY", "false")
 
     class Automation:
         async def process_event(self, _: object) -> dict[str, object]:
@@ -237,7 +499,7 @@ def test_normal_fulfillment_does_not_require_claim_or_ticket_upload(monkeypatch,
     claimed = client.post(
         f"/api/rules-first/manual-tasks/{task['task_id']}/claim",
         json={"expected_revision": current.revision, "operator_id": "seller-1"},
-        headers={"X-Wanda-Tenant-Id": "tenant-1"},
+        headers={"X-Wanda-Tenant-Id": "tenant-1", "X-Wanda-Operator-Id": "seller-1"},
     )
     assert claimed.status_code == 409
     assert claimed.json()["detail"] == "fulfillment_task_waits_for_official_shipment"
@@ -321,7 +583,10 @@ def test_shop_switches_are_tenant_scoped_and_bridge_authenticated(monkeypatch, t
     other = client.get("/api/plugin/shops", headers={"X-Wanda-Tenant-Id": "tenant-b"})
 
     assert synced.json() == {"accepted": 1}
-    assert listed.json() == {"shops": [{"shop_id": "shop-1", "shop_name": "一号店", "enabled": True}]}
+    assert listed.json() == {"shops": [{
+        "shop_id": "shop-1", "shop_name": "一号店", "enabled": True,
+        "automation_mode": "hybrid",
+    }]}
     assert updated.json()["shop"]["enabled"] is False
     assert other.json() == {"shops": []}
     assert client.get("/api/plugin/shops").status_code == 401
@@ -373,7 +638,6 @@ def test_ticket_image_recognition_endpoint_uses_ticket_contract() -> None:
     assert response.status_code == 200
     assert response.json()["data"]["ticket_codes"] == ["20711100016790"]
     assert response.json()["data"]["showtime_start"] == "15:30"
-
 
 
 def test_chat_image_message_returns_left_side_assistant_reply() -> None:

@@ -17,7 +17,7 @@ QuoteStatus = Literal["none", "collecting", "ready", "expired", "invalidated"]
 ConfirmationStatus = Literal["none", "pending", "confirmed", "invalidated"]
 OrderStatus = Literal[
     "none", "unverified", "bound", "pending_payment", "paid", "shipped",
-    "completed", "closed", "refund_pending", "refunded",
+    "completed", "closed", "failed", "cancelled", "refund_pending", "refunded",
 ]
 PriceChangeStatus = Literal[
     "none", "pending", "submitted", "succeeded", "unknown", "failed",
@@ -26,8 +26,16 @@ PriceChangeStatus = Literal[
 PaymentStatus = Literal[
     "unpaid", "verification_required", "verified_paid", "mismatch", "refund_pending", "refunded",
 ]
-FulfillmentStatus = Literal["none", "pending", "claimed", "ticket_issued", "shipped", "completed"]
+FulfillmentStatus = Literal[
+    "none", "pending", "claimed", "ticket_issued", "shipped", "completed",
+    "failed", "cancelled",
+]
 AutomationControl = Literal["active", "human_hold", "safety_hold"]
+FixedSwitchStatus = Literal[
+    "none", "pending", "confirmed", "rejected", "expired", "failed",
+]
+FixedSwitchQuoteConfirmationStatus = Literal["none", "pending", "confirmed"]
+FixedSwitchSourceOrderStatus = Literal["none", "failed", "refund_pending", "closed"]
 
 
 class StateRevisionConflict(RuntimeError):
@@ -52,6 +60,17 @@ class TransactionState(BaseModel):
     price_change_status: PriceChangeStatus = "none"
     payment_status: PaymentStatus = "unpaid"
     fulfillment_status: FulfillmentStatus = "none"
+    fixed_switch_status: FixedSwitchStatus = "none"
+    fixed_switch_expires_at: str | None = Field(default=None, max_length=80)
+    fixed_switch_source_order_no: str | None = Field(default=None, max_length=240)
+    fixed_switch_source_order_status: FixedSwitchSourceOrderStatus = "none"
+    fixed_switch_source_platform_order_id: str | None = Field(default=None, max_length=240)
+    fixed_switch_replacement_order_id: str | None = Field(default=None, max_length=240)
+    fixed_switch_confirmation_event_id: str | None = Field(default=None, max_length=240)
+    fixed_switch_quote_id: str | None = Field(default=None, max_length=160)
+    fixed_switch_quote_hash: str | None = Field(default=None, max_length=64)
+    fixed_switch_quote_generation: int | None = Field(default=None, ge=1)
+    fixed_switch_quote_confirmation_status: FixedSwitchQuoteConfirmationStatus = "none"
     active_quote_record_id: str | None = Field(default=None, max_length=240)
     confirmed_quote_record_id: str | None = Field(default=None, max_length=240)
     confirmation_version: str | None = Field(default=None, max_length=240)
@@ -62,6 +81,11 @@ class TransactionState(BaseModel):
     target_amount_cents: int | None = Field(default=None, ge=1, le=200_000)
     price_change_command_id: str | None = Field(default=None, max_length=240)
     fulfillment_task_id: str | None = Field(default=None, max_length=240)
+    provider_status: str | None = Field(default=None, max_length=80)
+    provider_order_no: str | None = Field(default=None, max_length=240)
+    out_order_no: str | None = Field(default=None, max_length=240)
+    ticket_codes: list[str] = Field(default_factory=list, max_length=20)
+    pickup_url: str | None = Field(default=None, max_length=1_000)
     expected_inputs: list[str] = Field(default_factory=list, max_length=20)
     last_transition_code: str = Field(default="initialized", min_length=1, max_length=120)
     processed_event_ids: list[str] = Field(default_factory=list)
@@ -72,10 +96,13 @@ _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "NEW": frozenset({"NEW", "COLLECTING", "MANUAL_HOLD"}),
     "COLLECTING": frozenset({"COLLECTING", "FACTS_READY", "QUOTED", "PRICE_CHANGING", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
     "FACTS_READY": frozenset({"FACTS_READY", "QUOTED", "COLLECTING", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD"}),
-    "QUOTED": frozenset({"QUOTED", "CONFIRMED", "PRICE_CHANGING", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
-    "CONFIRMED": frozenset({"CONFIRMED", "ORDER_BOUND", "PRICE_CHANGING", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
+    # A new screenshot can invalidate an earlier quote before a replacement
+    # quote is available; keep the conversation recoverable instead of
+    # rejecting the event at the state-machine boundary.
+    "QUOTED": frozenset({"QUOTED", "COLLECTING", "CONFIRMED", "PRICE_CHANGING", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
+    "CONFIRMED": frozenset({"CONFIRMED", "ORDER_BOUND", "PRICE_CHANGING", "WAITING_PAYMENT", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
     "ORDER_BOUND": frozenset({"ORDER_BOUND", "PRICE_CHANGING", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "ORDER_UNVERIFIED", "MANUAL_HOLD", "CANCELLED"}),
-    "PRICE_CHANGING": frozenset({"PRICE_CHANGING", "WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "ORDER_UNVERIFIED", "CANCELLED"}),
+    "PRICE_CHANGING": frozenset({"PRICE_CHANGING", "WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "ORDER_UNVERIFIED", "CANCELLED", "REFUNDED"}),
     "WAITING_PAYMENT": frozenset({"WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED", "REFUND_PENDING"}),
     "PAID_WAITING_FULFILLMENT": frozenset({"PAID_WAITING_FULFILLMENT", "FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
     "FULFILLMENT_IN_PROGRESS": frozenset({"FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
@@ -86,11 +113,13 @@ _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "MANUAL_HOLD": frozenset({
         "MANUAL_HOLD", "COLLECTING", "QUOTED", "CONFIRMED", "ORDER_BOUND",
         "PRICE_CHANGING", "WAITING_PAYMENT", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT",
-        "TICKET_SENT", "COMPLETED", "CANCELLED", "REFUND_PENDING",
+        "TICKET_SENT", "COMPLETED", "CANCELLED", "REFUND_PENDING", "REFUNDED",
     }),
     "CANCELLED": frozenset({"CANCELLED", "REFUND_PENDING", "REFUNDED"}),
     "REFUND_PENDING": frozenset({"REFUND_PENDING", "REFUNDED", "MANUAL_HOLD"}),
-    "REFUNDED": frozenset({"REFUNDED"}),
+    # A failed LIMIT order may be refunded first and then continue as a new
+    # FIXED quote in the same durable recovery handshake.
+    "REFUNDED": frozenset({"REFUNDED", "QUOTED", "MANUAL_HOLD"}),
 }
 
 _MUTABLE_FIELDS = frozenset(TransactionState.model_fields) - {
