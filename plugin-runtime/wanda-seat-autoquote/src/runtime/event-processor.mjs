@@ -639,6 +639,31 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     }
   }
 
+  // Agent context is built from the authoritative IM history, not the small
+  // preflight window. The SDK may expose a continuation cursor; older SDKs
+  // return one complete list and simply omit it.
+  async function readConversationMessages(client, session) {
+    if (!session) return { available: false, messages: [] };
+    const messages = [];
+    let cursor = null;
+    try {
+      for (let pageNumber = 0; pageNumber < 50; pageNumber += 1) {
+        const query = { ...session, pageSize: 500 };
+        if (cursor) query.cursor = cursor;
+        const page = await client.im.listMessages(query);
+        const items = pageItems(page);
+        messages.push(...items);
+        const next = text(page?.nextCursor ?? page?.next_cursor ?? page?.cursor);
+        if (!next || next === cursor || items.length === 0) break;
+        cursor = next;
+      }
+      return { available: true, messages };
+    } catch (error) {
+      logger.warn('canonical agent IM history unavailable', { error });
+      return { available: false, messages: [] };
+    }
+  }
+
   async function sendMessageWithReconciliation(client, session, message, { eventId, actionId, preflight }) {
     const gateReason = actionGateReason(config, 'send_message');
     if (gateReason) throw fulfillmentError(gateReason, 503);
@@ -791,7 +816,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       const resolved = await resolveOrderContext(client, envelope);
       const { session } = resolved;
       let { order } = resolved;
-      const recent = await readRecentMessages(client, session);
+      const recent = await readConversationMessages(client, session);
       if (!order) {
         const recentOrderId = latestOrderIdFromMessages(recent.messages);
         if (recentOrderId) {
@@ -814,6 +839,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
         : null;
       const accepted = await backend.processEvent({
         envelope: backendEnvelope(envelope), session, order: backendOrder, recentMessages,
+        authoritative_history_available: recent.available,
       });
       if (accepted?.accepted !== true || !text(accepted?.event_id)) throw new Error('rules_first_event_not_accepted');
       await store.complete(record.id, record.lease, { accepted: true, duplicate: accepted.duplicate === true });

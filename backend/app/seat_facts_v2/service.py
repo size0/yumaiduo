@@ -70,6 +70,70 @@ class SeatFactsV2Service:
         return _resolve_wplus(store_id, show_id, mark, areas)
 
 
+def select_same_type_available_reference(
+    selected: list[Mapping[str, Any]],
+    seats: list[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Select one nearby available seat in the exact same pricing group.
+
+    This deterministic primitive is shared with the legacy service only for
+    candidate selection. It never changes requested seats or computes a price.
+    """
+    if not selected:
+        return None
+    selected_keys = {_same_type_key(item) for item in selected}
+    if len(selected_keys) != 1 or None in selected_keys:
+        return None
+    wanted_ids = {_text(item.get("wanda_seat_id") or item.get("seat_id")) for item in selected}
+    wanted_key = next(iter(selected_keys))
+    candidates = [
+        dict(item) for item in seats
+        if _seat_is_available(item)
+        and _text(item.get("wanda_seat_id") or item.get("seat_id")) not in wanted_ids
+        and _same_type_key(item) == wanted_key
+    ]
+    if not candidates:
+        return None
+    reference = selected[0]
+    reference_row = _positive_int(reference.get("row"))
+    reference_col = _positive_int(reference.get("col"))
+
+    def distance(item: Mapping[str, Any]) -> tuple[int, str]:
+        row = _positive_int(item.get("row"))
+        col = _positive_int(item.get("col"))
+        value = (
+            abs(row - reference_row) + abs(col - reference_col)
+            if reference_row is not None and reference_col is not None and row is not None and col is not None
+            else 10**9
+        )
+        return value, _text(item.get("wanda_seat_id") or item.get("seat_id")) or ""
+
+    candidates.sort(key=distance)
+    return candidates[0]
+
+
+def _same_type_key(seat: Mapping[str, Any]) -> tuple[str, str, str, str, bool] | None:
+    area_code = _text(seat.get("area_code") or seat.get("area_id"))
+    zone_type = _text(seat.get("zone_type") or seat.get("zone"))
+    seat_type = _text(seat.get("seat_type") or seat.get("seat_kind")) or ""
+    member_group = _text(seat.get("member_price_group"))
+    if not member_group:
+        member_group = ":".join(str(value or "") for value in (
+            seat.get("area_member_activity_code_hint"),
+            seat.get("area_original_price_fen"),
+            seat.get("area_member_price_fen"),
+        )).strip(":") or None
+    if not area_code or not zone_type or not member_group:
+        return None
+    return area_code, zone_type, seat_type, member_group, bool(seat.get("is_wplus_exclusive"))
+
+
+def _seat_is_available(seat: Mapping[str, Any]) -> bool:
+    return seat.get("available") is True or str(seat.get("status") or "").strip().upper() in {
+        "AVAILABLE", "可选", "1",
+    }
+
+
 def _resolve_exact(
     store_id: str,
     show_id: str,
@@ -88,9 +152,14 @@ def _resolve_exact(
             )
         facts.append(_seat_fact(matches[0]))
     if any(fact.status != "AVAILABLE" for fact in facts):
+        reference = select_same_type_available_reference(
+            [fact.model_dump(mode="json") for fact in facts], all_seats,
+        )
         return _result(
             "SEAT_UNAVAILABLE", "EXACT_SEATS", store_id, show_id, mark,
-            "TARGET_SEAT_NOT_AVAILABLE", exact_seats=facts,
+            "TARGET_SEAT_NOT_AVAILABLE_SAME_TYPE_REFERENCE" if reference else "TARGET_SEAT_NOT_AVAILABLE",
+            exact_seats=facts,
+            same_type_reference=_seat_fact(reference) if reference else None,
         )
     return _result(
         "EXACT_SEATS_RESOLVED", "EXACT_SEATS", store_id, show_id, mark,
@@ -171,6 +240,11 @@ def _flatten_areas(response: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "col": col or parsed_col,
                 "area_code": area_code,
                 "zone_type": _first(raw_seat, "zoneType", "zone", "areaName", "seatTypeStr") or area_zone_type,
+                "seat_type": _first(raw_seat, "seatTypeCode", "seatType", "seatKind", "seat_kind") or "",
+                "member_price_group": _member_price_group(
+                    raw_seat, area_member_activity_code_hint,
+                    area_original_price_fen, area_member_price_fen,
+                ),
                 "status": _seat_status(raw_seat),
                 "is_wplus_exclusive": _is_wplus_seat(raw_seat),
                 "area_original_price_fen": area_original_price_fen,
@@ -206,6 +280,8 @@ def _seat_fact(value: Mapping[str, Any]) -> ExactSeatFact:
         col=value.get("col"),
         area_code=value.get("area_code"),
         zone_type=value.get("zone_type"),
+        seat_type=value.get("seat_type"),
+        member_price_group=value.get("member_price_group"),
         status=value["status"],
         is_wplus_exclusive=value.get("is_wplus_exclusive", False),
         area_original_price_fen=value.get("area_original_price_fen"),
@@ -279,6 +355,16 @@ def _extract_area_member_price(area: Mapping[str, Any], area_price: Any) -> int 
     return None
 
 
+def _member_price_group(
+    seat: Mapping[str, Any], activity_code: str | None,
+    original_price: int | None, member_price: int | None,
+) -> str | None:
+    explicit = _first(seat, "memberPriceGroup", "member_price_group", "priceGroup", "priceGroupId")
+    return _text(explicit) or ":".join(str(value or "") for value in (
+        activity_code, original_price, member_price,
+    )).strip(":") or None
+
+
 def _extract_activity_code(area: Mapping[str, Any]) -> str | None:
     activity = area.get("wPlusActivity") or area.get("wplusActivity")
     return _first(activity, "activityCode") if isinstance(activity, Mapping) else None
@@ -342,6 +428,7 @@ def _result(
     *,
     exact_seats: list[ExactSeatFact] | None = None,
     wplus_areas: list[WplusAreaFact] | None = None,
+    same_type_reference: ExactSeatFact | None = None,
 ) -> SeatFactsResult:
     return SeatFactsResult(
         status=status,
@@ -351,5 +438,6 @@ def _result(
         has_manual_mark=mark,
         exact_seats=exact_seats or [],
         wplus_areas=wplus_areas or [],
+        same_type_reference=same_type_reference,
         resolution_reason=reason,
     )

@@ -90,9 +90,11 @@ class WandaPricingV2Service:
         seat_facts: SeatFactsResult,
         rules: PricingRulesSnapshot,
     ) -> WandaPricingResult:
-        if len(cost_facts.cost_items) != len(seat_facts.exact_seats) or not cost_facts.cost_items:
+        reference_only = seat_facts.status == "SEAT_UNAVAILABLE" and seat_facts.same_type_reference is not None
+        source_seats = [seat_facts.same_type_reference] if reference_only else list(seat_facts.exact_seats)
+        if len(cost_facts.cost_items) != len(source_seats) or not cost_facts.cost_items:
             return _incomplete("EXACT_COST_SEAT_COUNT_MISMATCH", cost_facts)
-        seat_by_label = {seat.seat_label: seat for seat in seat_facts.exact_seats}
+        seat_by_label = {seat.seat_label: seat for seat in source_seats if seat is not None}
         pricing_seats: list[PricingSeatFact] = []
         for item in cost_facts.cost_items:
             if item.cost_fen is None or item.cost_source not in _ALLOWED_COST_SOURCES:
@@ -122,7 +124,9 @@ class WandaPricingV2Service:
             quote_scope="exact_seats",
             seats=tuple(pricing_seats),
         )
-        return self._run_engine(facts, rules, cost_facts, request_type="EXACT_SEATS")
+        return self._run_engine(
+            facts, rules, cost_facts, request_type="EXACT_SEATS", reference_only=reference_only,
+        )
 
     def _run_engine(
         self,
@@ -131,6 +135,7 @@ class WandaPricingV2Service:
         cost_facts: WandaCostFacts,
         *,
         request_type: str,
+        reference_only: bool = False,
     ) -> WandaPricingResult:
         try:
             priced = self._engine.quote(facts, rules)

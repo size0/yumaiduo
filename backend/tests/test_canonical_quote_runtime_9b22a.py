@@ -145,9 +145,9 @@ IDENTITY = {
 
 
 @pytest.mark.asyncio
-async def test_price_mismatch_fails_closed_before_wanda_facts_or_quote_persistence(tmp_path: Path):
+async def test_price_mismatch_still_fails_closed_when_target_seats_are_available(tmp_path: Path):
     result = await runtime(tmp_path).quote_recognition(
-        recognition(selected_seats=["8排9座"], price_mismatch=True), identity=IDENTITY,
+        recognition(selected_seats=["8排9座"], has_manual_mark=False, price_mismatch=True), identity=IDENTITY,
     )
     assert result["status"] == "RECOGNITION_QUALITY_UNAVAILABLE"
     assert result["reason"] == "PRICE_MISMATCH"

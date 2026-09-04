@@ -109,6 +109,45 @@ def test_ai_reply_switch_can_be_read_and_changed_without_restart(tmp_path: Path)
     assert policies.current().ai_reply_enabled is False
 
 
+def test_canonical_text_is_terminal_and_never_enters_legacy(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
+    shops = ShopAutomationStore(tmp_path / "shops.json")
+    shops.sync("107", [{"accountUnb": "2313315754", "shopName": "test"}])
+    shops.set_settings("107", "2313315754", enabled=True, canonical_quote_enabled=True)
+
+    class AgentStub:
+        calls: list[dict[str, object]] = []
+
+        async def process(self, body):
+            self.calls.append(body)
+            return {"status": "AGENT_REPLY_READY", "reply": "已读取当前会话。", "actions": []}
+
+    agent = AgentStub()
+    client = TestClient(create_app(
+        service=StubRecognitionService(), shop_automation_store=shops,
+        canonical_conversation_agent=agent,
+    ))
+    response = client.post(
+        "/api/wanda-ai-v2/plugin/events/process",
+        json={
+            "envelope": {
+                "id": "canonical-text-1", "tenantId": "107", "event": "im.message.received",
+                "payload": {
+                    "accountUnb": "2313315754", "peerUnb": "2217098857081",
+                    "chatId": "66166718230", "remoteMessageId": "buyer-text-1",
+                    "messageType": 1, "content": {"text": "价钱多少"},
+                },
+            },
+            "session": {"accountUnb": "2313315754", "peerUnb": "2217098857081", "chatId": "66166718230"},
+            "recentMessages": [],
+        },
+        headers={"X-Wanda-AI-V2-Bridge-Key": "bridge-test-secret"},
+    )
+    assert response.status_code == 202
+    assert response.json()["canonical_agent_status"] == "AGENT_REPLY_READY"
+    assert len(agent.calls) == 1
+
+
 def test_v4_plugin_bridge_persists_before_accepting_and_is_authenticated(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
     inbox = RulesFirstStore(tmp_path / "rules.sqlite3", protector=PlainProtector())

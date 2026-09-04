@@ -57,6 +57,8 @@ class RulesFirstRuntime:
 
     def accept_canonical_result(
         self, body: Mapping[str, Any], result: Mapping[str, Any],
+        *, source: str = "canonical_quote_runtime",
+        decision_reason: str = "canonical_quote_reply_ready",
     ) -> dict[str, object]:
         """Durably commit a synchronously produced canonical reply.
 
@@ -95,7 +97,7 @@ class RulesFirstRuntime:
                     "type": "send_message",
                     "text": text,
                     "rule_governed": True,
-                    "source": "canonical_quote_runtime",
+                    "source": source,
                     "canonical_reply_kind": f"{result.get('canonical_reply_kind') or ''}:{kind}",
                     "canonical_reply_sequence": index,
                     "dedupe_key": f"canonical-reply:{event_id}:{suffix}",
@@ -106,14 +108,14 @@ class RulesFirstRuntime:
                 "type": "send_message",
                 "text": rendered_text,
                 "rule_governed": True,
-                "source": "canonical_quote_runtime",
+                "source": source,
                 "canonical_reply_kind": str(result.get("canonical_reply_kind") or ""),
                 "dedupe_key": f"canonical-reply:{event_id}",
             })
         canonical_result = dict(result)
         canonical_result["decision"] = {
             "mode": "canonical",
-            "reason": "canonical_quote_reply_ready",
+            "reason": decision_reason,
             "actions": actions,
         }
         try:
@@ -139,6 +141,18 @@ class RulesFirstRuntime:
         except Exception as error:
             self._store.fail_event(claimed["inbox_id"], claimed["lease_token"], str(error))
             raise
+
+    def accept_agent_result(
+        self, body: Mapping[str, Any], result: Mapping[str, Any],
+    ) -> dict[str, object]:
+        """Commit an agent reply through the same inbox/outbox path as quotes."""
+        normalized = dict(result)
+        normalized["current_runtime_reply"] = str(result.get("reply") or "").strip()
+        normalized.setdefault("canonical_reply_kind", "canonical_conversation_agent")
+        return self.accept_canonical_result(
+            body, normalized, source="canonical_conversation_agent",
+            decision_reason="canonical_agent_reply_ready",
+        )
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():

@@ -20,6 +20,8 @@ class ExactSeatFact(BaseModel):
     col: int | None = Field(default=None, ge=1, le=999)
     area_code: str | None = Field(default=None, max_length=100)
     zone_type: str | None = Field(default=None, max_length=100)
+    seat_type: str | None = Field(default=None, max_length=100)
+    member_price_group: str | None = Field(default=None, max_length=160)
     status: SeatFactStatus
     is_wplus_exclusive: bool = False
     area_original_price_fen: int | None = Field(default=None, ge=0)
@@ -62,4 +64,5 @@ class SeatFactsResult(BaseModel):
     authoritative_wplus_price_fen: None = None
     exact_seats: list[ExactSeatFact] = Field(default_factory=list, max_length=30)
     wplus_areas: list[WplusAreaFact] = Field(default_factory=list, max_length=100)
+    same_type_reference: ExactSeatFact | None = None
     resolution_reason: str | None = Field(default=None, max_length=160)

@@ -94,7 +94,8 @@ class QuoteRecordStore:
             )
             normalized["provider_preflight_verified"] = provider_preflight_verified
             transaction_ready = bool(
-                not normalized.get("needs_ticket_count")
+                normalized.get("same_type_reference_only") is not True
+                and not normalized.get("needs_ticket_count")
                 and normalized.get("ticket_count") is not None
                 and normalized.get("total_sell_price_fen") is not None
                 and provider_preflight_verified

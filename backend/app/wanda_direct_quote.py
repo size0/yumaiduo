@@ -27,6 +27,7 @@ from .reply_template_store import ReplyTemplates, render_template
 from .observability import LOGGER
 from .probe.errors import ProbeError
 from .probe.policy import ProbePolicy
+from .seat_facts_v2.service import select_same_type_available_reference
 
 
 CINEMA_ORIGIN: Final = "https://cinema-api-prd-mx.wandafilm.com"
@@ -1672,31 +1673,29 @@ class WandaDirectQuoteService:
         reference: Mapping[str, Any],
         seats: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        type_key = cls._seat_type_key(reference)
-        candidates = [
-            seat for seat in seats
-            if seat.get("available")
-            and seat.get("seat_id")
-            and seat.get("price")
-            and cls._seat_type_key(seat) == type_key
-        ]
-        reference_row = reference.get("row")
-        reference_column = reference.get("column")
+        """Compatibility wrapper around the shared deterministic selector.
 
-        def distance(seat: Mapping[str, Any]) -> tuple[float, str]:
-            if (
-                reference_row is not None and reference_column is not None
-                and seat.get("row") is not None and seat.get("column") is not None
-            ):
-                value = abs(int(seat["row"]) - int(reference_row)) + abs(
-                    int(seat["column"]) - int(reference_column)
-                )
-            else:
-                value = float("inf")
-            return value, str(seat.get("seat_id") or "")
+        The caller still owns the legacy pricing behavior; this method shares
+        only candidate selection with the canonical V2 reference path.
+        """
+        selected = [cls._same_type_reference_payload(reference)]
+        payloads = [cls._same_type_reference_payload(seat) for seat in seats]
+        chosen = select_same_type_available_reference(selected, payloads)
+        if chosen is None:
+            return []
+        chosen_id = str(chosen.get("seat_id") or "")
+        return [seat for seat in seats if str(seat.get("seat_id") or "") == chosen_id]
 
-        candidates.sort(key=distance)
-        return candidates
+    @staticmethod
+    def _same_type_reference_payload(seat: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "seat_id": seat.get("seat_id"), "area_code": seat.get("area_id"),
+            "zone_type": seat.get("area_name"), "seat_type": seat.get("seat_type"),
+            "member_price_group": f'{seat.get("price") or ""}:{seat.get("channel_fee") or ""}',
+            "is_wplus_exclusive": bool(seat.get("wplus_pricing_eligible", seat.get("wplus"))),
+            "available": seat.get("available") is True,
+            "row": seat.get("row"), "col": seat.get("column"),
+        }
 
     @classmethod
     def _seat_type_key(cls, seat: Mapping[str, Any]) -> tuple[str, str, bool, str, int, int]:

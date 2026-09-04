@@ -17,6 +17,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from .chat import build_guidance_reply, build_recognition_reply
 from .chat_service import CustomerServiceChatService
 from .canonical_buyer_reply import CanonicalBuyerReplyRenderer
+from .canonical_conversation_agent import (
+    AgentContextBuilder,
+    CanonicalConversationAgent,
+    OpenAICompatibleAgentModel,
+)
 from .cinema_route_v2.service import CinemaRouteV2Service
 from .conversation_policy_store import ConversationPolicyStore
 from .diagnostics import DiagnosticsStore
@@ -293,6 +298,7 @@ def create_app(
     wplus_fulfillment_mark_service: WplusFulfillmentMarkService | None = None,
     wplus_mark_detector: object | None = None,
     payment_validation_service: AuthoritativePaymentValidationService | None = None,
+    canonical_conversation_agent: CanonicalConversationAgent | None = None,
 ) -> FastAPI:
     settings_path = Path(os.getenv("WANDA_VISION_SETTINGS_PATH", "data/vision-settings.json"))
     pricing_path = Path(os.getenv("WANDA_PRICING_RULES_PATH", "data/pricing-rules.json"))
@@ -451,9 +457,6 @@ def create_app(
             if configured_canonical_quote_runtime is not None else None
         ),
     )
-    recognition_context = conversation_store or ConversationRecognitionStore(
-        policy_provider=persistent_conversation_policy.current,
-    )
     automated_plugin = plugin_automation or (
         RulesFirstDecisionEngine(
             recognition_service,
@@ -494,6 +497,30 @@ def create_app(
         )
         if automated_plugin is not None else None
     )
+    recognition_context = conversation_store or ConversationRecognitionStore(
+        policy_provider=persistent_conversation_policy.current,
+    )
+    canonical_conversation_agent_enabled = (
+        canonical_conversation_agent is not None
+        or os.getenv("CANONICAL_CONVERSATION_AGENT_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    configured_conversation_agent = canonical_conversation_agent
+    if configured_conversation_agent is None and canonical_conversation_agent_enabled:
+        configured_agent_model = OpenAICompatibleAgentModel(
+            api_key=runtime_settings.chat_api_key,
+            base_url=runtime_settings.chat_base_url,
+            model=runtime_settings.chat_model,
+            timeout_seconds=runtime_settings.request_timeout_seconds,
+        )
+        configured_conversation_agent = CanonicalConversationAgent(
+            AgentContextBuilder(
+                quote_store=persistent_quote_records,
+                transaction_store=persistent_transaction_states,
+                recognition_store=recognition_context,
+            ),
+            configured_agent_model,
+        )
     limiter = rate_limiter or FixedWindowRateLimiter(
         limit=int(os.getenv("RECOGNITION_RATE_LIMIT_PER_MINUTE", "20")),
     )
@@ -541,6 +568,8 @@ def create_app(
     app.state.wplus_fulfillment_mark_service = configured_wplus_mark_service
     app.state.payment_validation_service = configured_payment_validation
     app.state.rules_first_runtime = durable_runtime
+    app.state.canonical_conversation_agent = configured_conversation_agent
+    app.state.canonical_conversation_agent_enabled = canonical_conversation_agent_enabled
 
     @app.middleware("http")
     async def observe_and_secure_request(request: Request, call_next):
@@ -848,6 +877,17 @@ def create_app(
         )
         return {"shop": shop}
 
+    def canonical_conversation_scope(body: Mapping[str, object]) -> bool:
+        envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
+        payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
+        session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
+        tenant_id = str(envelope.get("tenantId") or envelope.get("tenant_id") or "").strip()
+        shop_id = str(
+            payload.get("accountUnb") or payload.get("account_unb") or session.get("accountUnb")
+            or session.get("account_unb") or ""
+        ).strip()
+        return tenant_id == "107" and shop_id == "2313315754"
+
     def canonical_shop_canary_enabled(body: Mapping[str, object]) -> bool:
         envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
@@ -878,6 +918,43 @@ def create_app(
             envelope.get("event") == "im.message.received"
             and isinstance(image_urls, list) and bool(image_urls)
         )
+        canonical_text_event = (
+            envelope.get("event") == "im.message.received"
+            and not canonical_image_event
+            and configured_conversation_agent is not None
+            and canonical_conversation_agent_enabled
+            and canonical_conversation_scope(body)
+            and canonical_shop_canary_enabled(body)
+        )
+        if canonical_text_event:
+            # Once a shop is canonical-enabled, related text is terminal here;
+            # it must never be reinterpreted by the Legacy authority.
+            try:
+                result = await configured_conversation_agent.process(body)
+            except Exception as error:
+                LOGGER.warning(
+                    "event=canonical_agent_failed error_type=%s", type(error).__name__,
+                )
+                result = {"status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_provider_unavailable", "reply": "", "actions": []}
+            if durable_runtime is not None:
+                durable = durable_runtime.accept_agent_result(body, result)
+                accepted = {
+                    **durable,
+                    "canonical_agent_status": result.get("status"),
+                    "canonical_agent_reply": result.get("reply"),
+                    "durable_reply_command_count": len(durable.get("commands", [])),
+                }
+            else:
+                accepted = {
+                    "event_id": str(envelope.get("id") or ""), "accepted": True,
+                    "duplicate": False, "canonical_agent_status": result.get("status"),
+                    "canonical_agent_reply": result.get("reply"), "durable_reply_command_count": 0,
+                }
+            LOGGER.info(
+                "event=canonical_agent_event_processed event_id=%s status=%s reply_command_count=%s",
+                accepted["event_id"], result.get("status"), accepted.get("durable_reply_command_count"),
+            )
+            return accepted
         if canonical_image_event and configured_wplus_mark_service.should_handle_event(body):
             # An explicit WAITING_WPLUS_MARK state takes precedence over both
             # quote entry paths. It is still durable: the existing RulesFirst
@@ -907,6 +984,16 @@ def create_app(
                 else {"status": "CANONICAL_COMPOSITION_UNAVAILABLE"}
             )
             configured_wplus_mark_service.record_quote_context(body, result)
+            canonical_recognition = result.get("recognition")
+            canonical_session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
+            canonical_chat_id = str(
+                canonical_session.get("chatId") or canonical_session.get("chat_id")
+                or payload.get("chatId") or payload.get("chat_id") or ""
+            ).strip()
+            if isinstance(canonical_recognition, Mapping) and canonical_chat_id:
+                # Reuse the existing bounded recognition context; the Agent
+                # receives this as candidate evidence, never as confirmed facts.
+                recognition_context.add(canonical_chat_id, dict(canonical_recognition))
             if durable_runtime is not None:
                 durable = durable_runtime.accept_canonical_result(body, result)
                 accepted = {

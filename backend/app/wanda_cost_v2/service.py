@@ -27,6 +27,9 @@ class WandaCostResolutionService:
         if seat_facts.status == "MANUAL_MARK_REQUIRED" or seat_facts.has_manual_mark is None:
             return _incomplete("MANUAL_MARK_FACT_REQUIRED")
 
+        if seat_facts.status == "SEAT_UNAVAILABLE":
+            return self._resolve_same_type_reference(seat_facts)
+
         exact_seats = list(seat_facts.exact_seats)
         if seat_facts.has_manual_mark or not exact_seats:
             return self._resolve_wplus_area(show_facts, seat_facts)
@@ -71,6 +74,30 @@ class WandaCostResolutionService:
             request_type="WPLUS_AREA",
             probe_required=True,
             reason="AVAILABLE_WPLUS_REPRESENTATIVE_MISSING",
+        )
+
+    def _resolve_same_type_reference(self, seat_facts: SeatFactsResult) -> WandaCostFacts:
+        reference = seat_facts.same_type_reference
+        if reference is None or reference.status != "AVAILABLE":
+            return _facts(
+                status="COST_UNAVAILABLE", request_type="EXACT_SEATS",
+                reason="SAME_TYPE_REFERENCE_MISSING",
+            )
+        member_price = _positive(reference.area_member_price_fen)
+        if not reference.has_valid_area_member_price or member_price is None:
+            return _facts(
+                status="COST_UNAVAILABLE", request_type="EXACT_SEATS",
+                reason="SAME_TYPE_REFERENCE_MEMBER_PRICE_MISSING",
+            )
+        return _facts(
+            status="COST_READY", request_type="EXACT_SEATS",
+            cost_items=[WandaCostItem(
+                seat_label=reference.seat_label,
+                area_code=reference.area_code,
+                zone_type=reference.zone_type,
+                cost_fen=member_price,
+                cost_source="REALTIME_AREA_WPLUS",
+            )],
         )
 
     def _resolve_exact(self, exact_seats: list[object]) -> WandaCostFacts:

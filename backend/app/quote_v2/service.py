@@ -136,6 +136,8 @@ class QuoteV2Service:
         has_manual_mark: bool | None = None,
         mark_image_reference: str | None = None,
         mark_message_id: str | None = None,
+        original_selected_seats: list[Any] | None = None,
+        same_type_reference: Any | None = None,
         created_at: datetime | None = None,
     ) -> dict[str, Any] | None:
         """Persist one immutable pricing snapshot; return None when no quote exists."""
@@ -160,6 +162,9 @@ class QuoteV2Service:
             recognition_id=recognition_id, message_id=message_id,
             has_manual_mark=has_manual_mark, mark_image_reference=mark_image_reference,
             mark_message_id=mark_message_id,
+            original_selected_seats=original_selected_seats,
+            same_type_reference=same_type_reference,
+            reference_only=same_type_reference is not None,
             quote_id=quote_id, record_id=record_id, created=created,
         )
         return _project(self.store.save_quote(
@@ -390,6 +395,9 @@ class QuoteV2Service:
         has_manual_mark: bool | None,
         mark_image_reference: str | None,
         mark_message_id: str | None,
+        original_selected_seats: list[Any] | None,
+        same_type_reference: Any | None,
+        reference_only: bool,
         quote_id: str,
         record_id: str,
         created: datetime,
@@ -404,6 +412,11 @@ class QuoteV2Service:
             }
             for quote in pricing.seat_quotes
         ]
+        if reference_only and original_selected_seats:
+            selected = [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
+                for item in original_selected_seats
+            ]
         seat_display = "、".join(item["seat_label"] for item in selected) or "W+区域"
         costs = [item.model_dump(mode="json") for item in pricing.cost_items]
         first_cost = costs[0] if costs else {}
@@ -436,12 +449,21 @@ class QuoteV2Service:
             "showtime_start": _required(show.start_time, "start_time"),
             "hall": _required(show.hall_name, "hall"),
             "request_type": pricing.request_type,
-            "quote_scope": "exact_seats" if pricing.request_type == "EXACT_SEATS" else "area_preview",
+            "quote_scope": (
+                "same_type_reference_preview" if reference_only
+                else "exact_seats" if pricing.request_type == "EXACT_SEATS" else "area_preview"
+            ),
             "seat_zone_type": seat_zone_type or "W+",
             "selected_seats": selected,
             "seat_display": seat_display,
-            "ticket_count": pricing.ticket_count,
-            "needs_ticket_count": pricing.needs_ticket_count,
+            "ticket_count": None if reference_only else pricing.ticket_count,
+            "needs_ticket_count": False if reference_only else pricing.needs_ticket_count,
+            "same_type_reference_only": reference_only,
+            "same_type_reference": (
+                same_type_reference.model_dump(mode="json")
+                if reference_only and hasattr(same_type_reference, "model_dump") else
+                dict(same_type_reference) if reference_only and isinstance(same_type_reference, Mapping) else None
+            ),
             "cost_source": first_cost.get("cost_source"),
             "cost_fen": first_cost.get("cost_fen"),
             "cost_items": costs,
@@ -449,9 +471,9 @@ class QuoteV2Service:
             "pricing_rule_revision": pricing.pricing_rule_revision,
             "pricing_rule_version": pricing.pricing_rule_version,
             "unit_sell_price_fen": pricing.unit_sell_price_fen,
-            "total_sell_price_fen": pricing.total_sell_price_fen,
+            "total_sell_price_fen": None if reference_only else pricing.total_sell_price_fen,
             "unit_quote_cents": pricing.unit_sell_price_fen,
-            "total_quote_cents": pricing.total_sell_price_fen,
+            "total_quote_cents": None if reference_only else pricing.total_sell_price_fen,
             "seat_quotes": [quote.model_dump(mode="json") for quote in pricing.seat_quotes],
             # QuoteRecordStore assigns every lifecycle field, including the
             # terms fingerprint and quote hash.
@@ -674,23 +696,27 @@ class CanonicalQuoteRuntime:
         ticket_count: int | None = None, ticket_mode: str = "STANDARD",
         area_quote_strategy: str | None = None,
     ) -> dict[str, Any]:
-        # Recognition quality is a gate before cinema/show/seat/pricing facts.
-        # A screenshot total is never used to fill missing seats or authorize
-        # a transaction-ready quote.
+        # Recognition quality is normally a fail-closed gate. For a Wanda
+        # exact-seat request we still read authoritative SeatFacts once: an
+        # unavailable target may qualify for a single same-type reference
+        # price, while an available target remains blocked until confirmed.
         quality_reasons = list(getattr(recognition, "seat_confirm_reasons", []) or [])
-        if getattr(recognition, "price_mismatch", False) or "PRICE_MISMATCH" in quality_reasons:
+        quality_blocked = bool(
+            getattr(recognition, "seat_confirm_required", False)
+            or getattr(recognition, "price_mismatch", False)
+            or "PRICE_MISMATCH" in quality_reasons
+        )
+        route = await self._route.resolve(recognition)
+        if quality_blocked and route.route != "WANDA_SELF":
             result = {
-                "status": "RECOGNITION_QUALITY_UNAVAILABLE",
-                "reason": "PRICE_MISMATCH",
-                "recognition_quality_status": "PRICE_MISMATCH",
-                "quote": None,
+                "status": "RECOGNITION_QUALITY_UNAVAILABLE", "reason": "PRICE_MISMATCH",
+                "recognition_quality_status": "PRICE_MISMATCH", "quote": None,
                 "route": "RECOGNITION_QUALITY",
                 "recognition": recognition.model_dump(
                     mode="json", exclude={"raw_provider_result"},
                 ) if hasattr(recognition, "model_dump") else None,
             }
             return self._render_buyer_reply(result, recognition=recognition)
-        route = await self._route.resolve(recognition)
         if route.route == "UNRESOLVED":
             result = {"status": "ROUTE_UNRESOLVED", "reason": route.resolution_reason}
         else:
@@ -698,6 +724,7 @@ class CanonicalQuoteRuntime:
             if route.route == "WANDA_SELF":
                 result = await self._quote_wanda(
                     recognition, route, identity, image_url, rules, ticket_count=ticket_count,
+                    recognition_quality_blocked=quality_blocked,
                 )
             elif route.route == "LIANGPIAO":
                 result = await self._quote_liangpiao(
@@ -735,6 +762,7 @@ class CanonicalQuoteRuntime:
     async def _quote_wanda(
         self, recognition: Any, route: Any, identity: dict[str, str],
         image_url: str | None, rules: PricingRulesSnapshot, *, ticket_count: int | None = None,
+        recognition_quality_blocked: bool = False,
     ) -> dict[str, Any]:
         show = await self._show.resolve({
             "route": "WANDA_SELF", "wanda_store_id": route.wanda_store_id,
@@ -773,7 +801,19 @@ class CanonicalQuoteRuntime:
                 "seat_facts_status": seat_facts.status,
                 "seat_facts": seat_facts.model_dump(mode="json"),
             }
-        if seat_facts.status not in {"EXACT_SEATS_RESOLVED", "WPLUS_AREA_RESOLVED"}:
+        same_type_reference = (
+            seat_facts.status == "SEAT_UNAVAILABLE"
+            and seat_facts.same_type_reference is not None
+        )
+        if recognition_quality_blocked and not same_type_reference:
+            return {
+                "status": "RECOGNITION_QUALITY_UNAVAILABLE", "reason": "PRICE_MISMATCH",
+                "recognition_quality_status": "PRICE_MISMATCH", "quote": None,
+                "manual_mark_result": seat_facts.has_manual_mark,
+                "seat_facts_status": seat_facts.status,
+                "seat_facts": seat_facts.model_dump(mode="json"),
+            }
+        if seat_facts.status not in {"EXACT_SEATS_RESOLVED", "WPLUS_AREA_RESOLVED", "SEAT_UNAVAILABLE"}:
             return {
                 "status": "SEAT_FACTS_UNAVAILABLE", "reason": seat_facts.resolution_reason,
                 "manual_mark_result": seat_facts.has_manual_mark,
@@ -814,6 +854,8 @@ class CanonicalQuoteRuntime:
             has_manual_mark=seat_facts.has_manual_mark if selected_seats else None,
             mark_image_reference=image_url if manual_mark is True else None,
             mark_message_id=identity.get("message_id") if manual_mark is True else None,
+            original_selected_seats=seat_facts.exact_seats if same_type_reference else None,
+            same_type_reference=seat_facts.same_type_reference if same_type_reference else None,
         )
         return {
             "status": "QUOTED", "route": "WANDA_SELF", "quote": record,

@@ -83,6 +83,13 @@ class CanonicalBuyerReplyRenderer:
             provider_route = _text(quote.get("provider_route"))
             request_type = _text(quote.get("request_type"))
             summary = _purchase_summary(quote)
+            if quote.get("same_type_reference_only") is True:
+                unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
+                if unit:
+                    return {
+                        "kind": "SAME_TYPE_REFERENCE_PREVIEW",
+                        "text": f"你刚选的这几个座位现在没了，同类型座位{unit}一张，可以重新选一下座位发我哈",
+                    }
             if request_type == "WPLUS_AREA":
                 unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
                 count = quote.get("ticket_count")
