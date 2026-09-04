@@ -1,6 +1,6 @@
 {
   "fixture_version": "agent-acceptance-v1",
-  "purpose": "脱敏验证 Canonical 图片事实与 Legacy 文字上下文未连接；不实现 Agent 或关键词规则。",
+  "purpose": "脱敏验证 Canonical 图片事实与后续文字进入同一聚合上下文；不引入关键词规则。",
   "identity": {
     "tenant_id": "fixture-tenant",
     "shop_id": "fixture-shop",
@@ -24,18 +24,19 @@
       "direction": "inbound",
       "kind": "text",
       "text": "还可以买吗",
-      "flow": "legacy",
-      "legacy_context": {
+      "flow": "canonical_agent",
+      "agent_context": {
         "canonical_facts_consumed": false,
         "structured_quote_consumed": false,
-        "fallback_reason": "text_runtime_has_no_canonical_context_adapter"
+        "agent_context_consumed": true,
+        "fallback_reason": null
       }
     }
   ],
   "expected": {
-    "canonical_image_legacy_text": true,
-    "context_gap_is_reported": true,
-    "agent_implementation_present": false,
+    "canonical_image_legacy_text": false,
+    "context_gap_is_reported": false,
+    "agent_implementation_present": true,
     "keyword_rule_present": false
   }
 }
