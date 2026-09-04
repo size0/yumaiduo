@@ -117,9 +117,9 @@ async function harness({ mode = 'auto', event = 'im.message.received', listMessa
     orders: { get: async () => ({ orderId: 'order-1', orderStatus: 1, payment: '0', payTime: null }) },
     im: {
       getSessionByOrder: async () => { calls.getSessionByOrder += 1; return { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1' }; },
-      listMessages: async () => {
+      listMessages: async (query) => {
         calls.listMessages += 1;
-        if (listMessages) return listMessages();
+        if (listMessages) return listMessages(query);
         return { items: [{ id: 'manual-1', direction: 'seller', content: { text: 'manual context' } }] };
       },
       sendMessage: async () => { calls.sent += 1; return { messageId: 'sent-1' }; },
@@ -774,6 +774,24 @@ test('recent platform messages are passed to backend before AI processing', asyn
   assert.equal(calls.processBodies[0].recentMessages[0].direction, 'seller');
   assert.equal(calls.processBodies[0].recentMessages[0].content.text, 'manual context');
   await runtime.stop();
+});
+
+test('canonical history sync respects the platform page cap while preflight stays at 50', async () => {
+  const queries = [];
+  const { runtime, calls, event } = await harness({
+    listMessages: async (query) => {
+      queries.push(structuredClone(query));
+      return { items: [{ id: 'buyer-1', direction: 'buyer', content: { text: 'hello' } }] };
+    },
+  });
+  await runtime.enqueue(event);
+  await waitFor(async () => (await runtime.health()).counts.completed === 1);
+  await runtime.stop();
+
+  assert.equal(calls.sent, 1);
+  assert.equal(queries[0].pageSize, 100);
+  assert.ok(queries.some((query) => query.pageSize === 50), 'send preflight must keep its smaller history window');
+  assert.ok(queries.every((query) => query.pageSize <= 100), 'all platform history requests must respect the cap');
 });
 
 test('a seller reply arriving while the Agent runs cancels the stale AI quote before send', async () => {

@@ -10,6 +10,7 @@ from app.canonical_conversation_agent import (
     AgentContextBuilder,
     CanonicalAgentToolBackend,
     CanonicalConversationAgent,
+    OpenAICompatibleAgentModel,
 )
 from app.quote_record_store import QuoteRecordStore
 from app.transaction_state_store import TransactionStateStore
@@ -47,6 +48,9 @@ class UpdateBackend:
                 "quote_state": "TRANSACTION_READY",
             },
         }
+
+    async def update_purchase_request(self, updates, context):
+        return await self.update_quote_request(updates, context)
 
 
 @dataclass
@@ -119,7 +123,7 @@ async def test_context_builder_aggregates_authorities_without_second_database(co
 @pytest.mark.asyncio
 async def test_agent_uses_high_level_quote_tool_and_returns_durable_reply():
     model = FakeModel([
-        {"tool_calls": [{"name": "update_quote_request", "arguments": {"ticket_count": 2}}]},
+        {"tool_calls": [{"name": "update_purchase_request", "arguments": {"ticket_count": 2}}]},
         {"reply": "已记下2张，合计78.2元。"},
     ])
     builder = AgentContextBuilder()
@@ -143,7 +147,7 @@ async def test_agent_uses_high_level_quote_tool_and_returns_durable_reply():
 async def test_agent_accepts_openai_nested_function_tool_arguments():
     model = FakeModel([
         {"tool_calls": [{"id": "call-1", "type": "function", "function": {
-            "name": "update_quote_request", "arguments": '{"ticket_count": 2}',
+            "name": "update_purchase_request", "arguments": '{"ticket_count": 2}',
         }}]},
         {"reply": "已记录2张。"},
     ])
@@ -159,7 +163,7 @@ async def test_agent_accepts_openai_nested_function_tool_arguments():
 @pytest.mark.asyncio
 async def test_update_quote_request_builds_structured_request_from_context_without_price():
     model = FakeModel([
-        {"tool_calls": [{"name": "update_quote_request", "arguments": {"ticket_count": 2}}]},
+        {"tool_calls": [{"name": "update_purchase_request", "arguments": {"ticket_count": 2}}]},
         {"reply": "已按当前场次记录2张。"},
     ])
     runtime = QuoteRuntimeStub([])
@@ -189,7 +193,7 @@ async def test_quote_request_id_follows_each_inbound_event():
     context = {"id": "ctx-wplus", "status": "quoted", "seat_request_type": "WPLUS_AREA"}
     for event_id, text_value in (("event-count-2", "2张"), ("event-count-3", "3张")):
         model = FakeModel([
-            {"tool_calls": [{"name": "update_quote_request", "arguments": {"ticket_count": int(text_value[0])}}]},
+            {"tool_calls": [{"name": "update_purchase_request", "arguments": {"ticket_count": int(text_value[0])}}]},
             {"reply": f"已记录{text_value}。"},
         ])
         payload = body(text=text_value, context=context)
@@ -211,7 +215,7 @@ async def test_acceptance_fixture_buyer_1606372904_wplus_preview_then_quantity()
     runtime = QuoteRuntimeStub([])
     backend = CanonicalAgentToolBackend(quote_runtime=runtime)
     model = FakeModel([
-        {"tool_calls": [{"name": "update_quote_request", "arguments": {"ticket_count": 2}}]},
+        {"tool_calls": [{"name": "update_purchase_request", "arguments": {"ticket_count": 2}}]},
         {"reply": "W+ 28/张，共2张56元。"},
     ])
     result = await CanonicalConversationAgent(AgentContextBuilder(), model, tool_backend=backend).process(payload)
@@ -228,7 +232,7 @@ async def test_acceptance_fixture_buyer_2217098857081_price_and_context_referenc
         "selected_seats": ["8排7座", "8排8座"],
     })
     model = FakeModel([
-        {"tool_calls": [{"name": "get_quote", "arguments": {}}]},
+        {"tool_calls": [{"name": "get_current_quote", "arguments": {}}]},
         {"reply": "当前这场是78.20元。"},
     ])
     result = await CanonicalConversationAgent(AgentContextBuilder(), model).process(payload)
@@ -367,7 +371,7 @@ async def test_context_tool_cannot_promote_candidate_price_to_authority():
 @pytest.mark.asyncio
 async def test_agent_reply_guard_allows_price_returned_by_quote_tool():
     model = FakeModel([
-        {"tool_calls": [{"name": "get_quote", "arguments": {}}]},
+        {"tool_calls": [{"name": "get_current_quote", "arguments": {}}]},
         {"reply": "当前报价是78.20元。"},
     ])
     agent = CanonicalConversationAgent(
@@ -396,11 +400,16 @@ async def test_agent_model_failure_is_fail_closed_without_send_action():
 
 def test_tool_surface_is_high_level_and_excludes_legacy_intent_rules():
     names = {item["function"]["name"] for item in AGENT_TOOL_SCHEMAS}
-    assert {
+    assert names == {
         "get_current_context", "get_current_quote", "get_transaction_state", "get_order",
         "get_seat_status", "get_show_options", "update_purchase_request", "request_quote",
         "select_existing_quote",
-    } <= names
-    assert {"get_quote", "update_quote_request", "select_quote", "get_transaction"} <= names
+    }
     assert "keyword" not in str(AGENT_TOOL_SCHEMAS).lower()
     assert "regex" not in str(AGENT_TOOL_SCHEMAS).lower()
+
+
+def test_agent_model_normalizes_openai_compatible_completion_endpoint():
+    assert OpenAICompatibleAgentModel._completion_url("https://airelvo.cc") == "https://airelvo.cc/v1/chat/completions"
+    assert OpenAICompatibleAgentModel._completion_url("https://airelvo.cc/v1") == "https://airelvo.cc/v1/chat/completions"
+    assert OpenAICompatibleAgentModel._completion_url("https://airelvo.cc/v1/chat/completions") == "https://airelvo.cc/v1/chat/completions"

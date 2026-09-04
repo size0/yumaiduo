@@ -667,7 +667,10 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     let cursor = null;
     try {
       for (let pageNumber = 0; pageNumber < 50; pageNumber += 1) {
-        const query = { ...session, pageSize: 500 };
+        // FishMore IM caps pageSize at 100. Keep the authoritative history
+        // path within that contract; the smaller preflight window below
+        // intentionally remains at pageSize 50.
+        const query = { ...session, pageSize: 100 };
         if (cursor) query.cursor = cursor;
         const page = await client.im.listMessages(query);
         const items = pageItems(page);

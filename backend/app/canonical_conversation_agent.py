@@ -13,18 +13,14 @@ from .quote_v2.service import CanonicalQuoteRequest
 
 AGENT_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     {"type": "function", "function": {"name": "get_current_context", "description": "Read the current purchase context and all fact tiers.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "get_quote", "description": "Read the current valid quote and its lifecycle state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "update_quote_request", "description": "Add structured missing purchase fields; backend validates and prices them.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "select_quote", "description": "Select an existing quote for the current purchase context.", "parameters": {"type": "object", "properties": {"quote_index": {"type": "integer", "minimum": 0}}, "required": ["quote_index"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "get_current_quote", "description": "Read the current valid quote and its lifecycle state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "get_transaction_state", "description": "Read the authoritative transaction state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_order", "description": "Read the authoritative order snapshot.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "get_transaction", "description": "Read the authoritative transaction state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_show_options", "description": "Read show options for an already identified movie and cinema.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_seat_status", "description": "Read authoritative realtime seat status for the current request.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "get_current_quote", "description": "Alias for get_quote: read the current valid quote and lifecycle state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "get_transaction_state", "description": "Alias for get_transaction: read authoritative transaction state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "update_purchase_request", "description": "Alias for update_quote_request: add structured purchase fields; backend validates and prices them.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "update_purchase_request", "description": "Add structured missing purchase fields; backend validates and prices them.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "request_quote", "description": "Request a quote for the current structured purchase request; backend calculates the result.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "select_existing_quote", "description": "Alias for select_quote: select an existing quote for the current purchase context.", "parameters": {"type": "object", "properties": {"quote_index": {"type": "integer", "minimum": 0}}, "required": ["quote_index"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "select_existing_quote", "description": "Select an existing quote for the current purchase context.", "parameters": {"type": "object", "properties": {"quote_index": {"type": "integer", "minimum": 0}}, "required": ["quote_index"], "additionalProperties": False}}},
 )
 
 
@@ -245,12 +241,21 @@ class OpenAICompatibleAgentModel:
         self._model = model
         self._timeout = timeout_seconds
 
+    @staticmethod
+    def _completion_url(base_url: str) -> str:
+        normalized = base_url.strip().rstrip("/")
+        if normalized.endswith("/chat/completions"):
+            return normalized
+        if not normalized.endswith("/v1"):
+            normalized += "/v1"
+        return normalized + "/chat/completions"
+
     async def complete(self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]) -> Mapping[str, Any]:
         if not self._api_key:
             return {"reply": "当前无法读取会话状态，请稍等人工确认。"}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
-                f"{self._base_url}/chat/completions",
+                self._completion_url(self._base_url),
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json={"model": self._model, "messages": messages, "tools": list(tools), "temperature": 0},
             )
