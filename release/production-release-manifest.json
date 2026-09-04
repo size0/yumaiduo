@@ -633,6 +633,31 @@
       "size": 56181
     },
     {
+      "path": "plugin-runtime/wanda-seat-autoquote/vendor/plugin-sdk-server/dist/client.js",
+      "sha256": "26a5ec96d1c1ed05dfeed8b141f62b6123b346739ca9bf25901da19ce464b5e3",
+      "size": 16287
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/vendor/plugin-sdk-server/dist/errors.js",
+      "sha256": "a983b6b3ece2a85aa91a1293d9c9b472d97a6e07a8b2e24362581e559a6a90eb",
+      "size": 854
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/vendor/plugin-sdk-server/dist/index.js",
+      "sha256": "e317819d21d2564c2eb982150109c0ffd5c8a686ced9169ed418bbabdabfd644",
+      "size": 942
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/vendor/plugin-sdk-server/dist/webhook.js",
+      "sha256": "5ae2b1fba30ea323f13cd9267468d11131094e08794ba05970a7922a83eeee46",
+      "size": 1421
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/vendor/plugin-sdk-server/package.json",
+      "sha256": "86bda7bb1f7f5ca6310183df5a3745c1950ec40971e1ff4643a5a71b9558fb98",
+      "size": 424
+    },
+    {
       "path": "plugin-runtime/wanda-seat-autoquote/yumaiduo.plugin.json",
       "sha256": "1eae10e011723fd039324c12486fe2ada223512b00834aa7b6314b429e7af164",
       "size": 1483
