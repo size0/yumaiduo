@@ -599,8 +599,8 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-processor.mjs",
-      "sha256": "78c4cc163f76c8cf540541b2c12bdadefcd0b7bfb62d9f6e0599603f769e6843",
-      "size": 61800
+      "sha256": "cd5e02047be2ffc7d3c39cfbff3d10e31b03bbf3eed026830070d8f0fad0cc5b",
+      "size": 64313
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-store.mjs",

@@ -672,7 +672,7 @@ test('recent platform messages are passed to backend before AI processing', asyn
   const { runtime, calls, event } = await harness();
   await runtime.enqueue(event);
   await waitFor(async () => (await runtime.health()).counts.completed === 1);
-  assert.equal(calls.listMessages, 2);
+  assert.equal(calls.listMessages, 3);
   assert.equal(calls.processBodies[0].recentMessages[0].direction, 'seller');
   assert.equal(calls.processBodies[0].recentMessages[0].content.text, 'manual context');
   await runtime.stop();
@@ -710,6 +710,43 @@ test('a seller reply arriving while the Agent runs cancels the stale AI quote be
   await waitFor(async () => (await runtime.health()).counts.completed === 1);
   await runtime.stop();
 
+  assert.equal(calls.sent, 0);
+  assert.equal(calls.reports[0].status, 'skipped');
+  assert.equal(calls.reports[0].reason, 'human_message_arrived_before_send');
+});
+
+test('the final send preflight catches an operator reply after the planning preflight', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-final-send-preflight-'));
+  const calls = { listMessages: 0, sent: 0, reports: [] };
+  const buyer = { id: 'buyer-image', direction: 'buyer', content: { text: 'seat image' }, sentAtMs: 100 };
+  const client = {
+    shops: { list: async () => [] },
+    im: {
+      listMessages: async () => {
+        calls.listMessages += 1;
+        if (calls.listMessages < 3) return { items: [buyer] };
+        return { items: [buyer, { id: 'human-final', direction: 'seller', messageType: 1, content: { text: '人工已接待' }, sentAtMs: 200 }] };
+      },
+      sendMessage: async () => { calls.sent += 1; return { messageId: 'must-not-send' }; },
+    },
+  };
+  const runtime = createV2Runtime({
+    config: { dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1 },
+    platform: { createClient: () => client },
+    backend: {
+      syncShops: async () => {},
+      processEvent: async () => ({ decision: { mode: 'auto', actions: [{ id: 'final-preflight-reply', type: 'send_message', text: 'Canonical reply' }] } }),
+      reportAction: async ({ result }) => { calls.reports.push(structuredClone(result)); return {}; },
+    },
+    logger: silent,
+  });
+
+  await runtime.start();
+  await runtime.enqueue(envelope('evt-final-send-preflight'));
+  await waitFor(async () => (await runtime.health()).counts.completed === 1);
+  await runtime.stop();
+
+  assert.equal(calls.listMessages, 3);
   assert.equal(calls.sent, 0);
   assert.equal(calls.reports[0].status, 'skipped');
   assert.equal(calls.reports[0].reason, 'human_message_arrived_before_send');

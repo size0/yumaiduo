@@ -142,6 +142,16 @@ function humanSellerMessage(value) {
   // though no seller typed anything. Only ordinary text/image records establish handoff.
   return !messageType || ['1', '2'].includes(messageType);
 }
+
+export function isKnownSelfPluginMessage(value, sentMessageIds = new Set()) {
+  if (value?.agent_generated === true) return true;
+  const ids = [platformMessageId(value), platformMessageKey(value)].filter(Boolean);
+  return ids.some((id) => sentMessageIds.has(id));
+}
+
+export function isExternalOperatorMessage(value, sentMessageIds = new Set()) {
+  return humanSellerMessage(value) && !isKnownSelfPluginMessage(value, sentMessageIds);
+}
 function buyerImageMessage(value) {
   if (platformMessageDirection(value) !== 'buyer') return false;
   const messageType = firstText(value?.messageType, value?.message_type);
@@ -197,6 +207,11 @@ function platformMessageKey(value) {
   const direction = platformMessageDirection(value) ?? '';
   return createdAt || body ? `fallback:${direction}:${createdAt}:${body}` : null;
 }
+const PREFLIGHT_BLOCK_REASONS = new Set([
+  'conversation_snapshot_unavailable', 'conversation_preflight_unavailable',
+  'human_message_arrived_before_send', 'buyer_message_arrived_before_send',
+  'newer_buyer_image_arrived_before_send', 'buyer_quote_inputs_changed_before_price_change',
+]);
 function platformFailure(error) {
   const status = Number(error?.status);
   const code = firstText(error?.code, error?.errorCode);
@@ -368,7 +383,13 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
             if (existing) {
               await backend.completeReminder(taskId, leaseToken, { status: 'sent', deduplicated: true, message_id: platformMessageId(existing) });
             } else {
-              const sent = await sendMessageWithReconciliation(client, officialSession, message, { eventId: taskId, actionId: `${taskId}:send` });
+              const sent = await sendMessageWithReconciliation(client, officialSession, message, {
+                eventId: taskId, actionId: `${taskId}:send`,
+                preflight: () => conversationPreflight(
+                  client, officialSession, recent.messages, recent.available,
+                  { allowNewBuyerMessages: false, allowHumanSellerMessages: false },
+                ),
+              });
               const messageId = platformMessageId(sent);
               if (messageId) sentAgentMessageIds.add(messageId);
               await backend.completeReminder(taskId, leaseToken, { status: 'sent', message_id: messageId });
@@ -543,6 +564,10 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       if (!alreadySent) await sendMessageWithReconciliation(client, officialSession, request.message_text, {
         eventId: `wanda-fulfillment-${normalizedTenant}-${normalizedOrderId}`,
         actionId: `${normalizedOrderId}:fulfillment-message`,
+        preflight: () => conversationPreflight(
+          client, officialSession, recent.messages, recent.available,
+          { allowNewBuyerMessages: false, allowHumanSellerMessages: false },
+        ),
       });
     }
     if (existing?.status === 'submitted') {
@@ -614,9 +639,15 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     }
   }
 
-  async function sendMessageWithReconciliation(client, session, message, { eventId, actionId }) {
+  async function sendMessageWithReconciliation(client, session, message, { eventId, actionId, preflight }) {
     const gateReason = actionGateReason(config, 'send_message');
     if (gateReason) throw fulfillmentError(gateReason, 503);
+    if (typeof preflight !== 'function') throw fulfillmentError('conversation_preflight_unavailable', 503);
+    const assertPreflight = async () => {
+      const result = await preflight();
+      if (!result?.allowed) throw fulfillmentError(result?.reason || 'conversation_preflight_unavailable', 503);
+    };
+    await assertPreflight();
     const startedAt = Date.now();
     try {
       return await client.im.sendMessage({ ...session, text: message });
@@ -627,9 +658,10 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       const delays = Number(error?.status) === 429 ? [250] : [250, 750, 1_500];
       for (const delayMs of delays) {
         await wait(delayMs);
+        await assertPreflight();
         const latest = await readRecentMessages(client, session);
         const matching = latest.messages.find((item) => (
-          platformMessageDirection(item) === 'seller'
+          isKnownSelfPluginMessage(item, sentAgentMessageIds)
           && platformMessageText(item) === message
           && messageTime(item) >= startedAt - 5_000
         ));
@@ -638,6 +670,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       // HTTP 429 is an explicit rejection by the core and therefore safe to retry
       // once after proving that no matching outbound message entered history.
       if (Number(error?.status) === 429) {
+        await assertPreflight();
         return client.im.sendMessage({ ...session, text: message });
       }
       throw error;
@@ -663,10 +696,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       return id && !baselineIds.has(id) && (!occurredAt || !baselineNewestTime || occurredAt >= baselineNewestTime);
     });
     if (!allowHumanSellerMessages && additions.some((item) => (
-      humanSellerMessage(item)
-      && item.agent_generated !== true
-      && !sentAgentMessageIds.has(platformMessageId(item))
-      && !sentAgentMessageIds.has(platformMessageKey(item))
+      isExternalOperatorMessage(item, sentAgentMessageIds)
     ))) {
       return { allowed: false, reason: 'human_message_arrived_before_send' };
     }
@@ -901,7 +931,13 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
             const message = text(paidOrder(currentOrder) ? action.paid_text : action.unpaid_text);
             if (!currentOrder || closedOrder(currentOrder) || !message) result = { status: 'skipped', reason: 'unverified_order_guard_not_applicable' };
             else {
-              const sent = await sendMessageWithReconciliation(client, session, message, { eventId: envelope.id, actionId });
+              const sent = await sendMessageWithReconciliation(client, session, message, {
+                eventId: envelope.id, actionId,
+                preflight: () => conversationPreflight(
+                  client, session, baselineMessages, baselineAvailable,
+                  { allowNewBuyerMessages: true, allowHumanSellerMessages: false },
+                ),
+              });
               result = { status: 'succeeded', message_id: platformMessageId(sent), order_id: actionOrderId, paid: paidOrder(currentOrder) };
             }
           }
@@ -955,7 +991,13 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
               const message = text(cancelConfirmed ? action.closed_text : action.refund_text);
               if (!message) result = { status: 'skipped', reason: 'paid_mismatch_recovery_text_missing' };
               else {
-                const sent = await sendMessageWithReconciliation(client, session, message, { eventId: envelope.id, actionId });
+                const sent = await sendMessageWithReconciliation(client, session, message, {
+                  eventId: envelope.id, actionId,
+                  preflight: () => conversationPreflight(
+                    client, session, baselineMessages, baselineAvailable,
+                    { allowNewBuyerMessages: true, allowHumanSellerMessages: false },
+                  ),
+                });
                 result = {
                   status: 'succeeded', message_id: platformMessageId(sent), order_id: actionOrderId,
                   target_amount_cents: targetAmount, verified_amount_cents: currentOrder?.amount_cents ?? null,
@@ -1058,6 +1100,15 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
             && !preserveOnNewBuyer
             && baselineHasNewerBuyerMessage(baselineMessages, envelope)
           );
+          const preflightOptions = {
+            // A verified price result is already bound to the authoritative
+            // order read. Ordinary buyer follow-ups must not suppress the
+            // completion notice; external seller messages still hold it.
+            allowNewBuyerMessages: action.type === 'send_price_change_confirmation'
+              ? true : preserveOnNewBuyer,
+            blockNewBuyerImages: suppressOnNewerImage,
+            allowHumanSellerMessages: false,
+          };
           const preflight = alreadySupersededInQueue
             ? { allowed: false, reason: 'newer_session_event_already_queued' }
             : alreadySupersededByImage
@@ -1065,19 +1116,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
             : alreadySuperseded
               ? { allowed: false, reason: 'buyer_message_already_newer' }
             : await conversationPreflight(
-              client,
-              session,
-              baselineMessages,
-              baselineAvailable,
-              {
-                // A verified price result is already bound to the authoritative
-                // order read.  Ordinary buyer follow-ups must not suppress the
-                // completion notice; human seller messages still hold it.
-                allowNewBuyerMessages: action.type === 'send_price_change_confirmation'
-                  ? true : preserveOnNewBuyer,
-                blockNewBuyerImages: suppressOnNewerImage,
-                allowHumanSellerMessages: false,
-              },
+              client, session, baselineMessages, baselineAvailable, preflightOptions,
             );
           if (!preflight.allowed) result = { status: 'skipped', reason: preflight.reason };
           // Human replies always stop automation. New buyer messages stop ordinary
@@ -1094,7 +1133,17 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
                 if (!currentOrder) result = { status: 'skipped', reason: 'price_change_confirmation_order_unavailable' };
                 else if (!eligibility.allowed) result = { status: 'skipped', reason: `price_change_confirmation_${eligibility.reason_code}` };
                 else {
-                  const sent = await sendMessageWithReconciliation(client, session, message, { eventId: envelope.id, actionId });
+                  const sent = await sendMessageWithReconciliation(client, session, message, {
+                    eventId: envelope.id, actionId,
+                    preflight: () => conversationPreflight(
+                      client, session, baselineMessages, baselineAvailable,
+                      {
+                        allowNewBuyerMessages: true,
+                        blockNewBuyerImages: suppressOnNewerImage,
+                        allowHumanSellerMessages: false,
+                      },
+                    ),
+                  });
                   result = { status: 'succeeded', message_id: platformMessageId(sent) };
                 }
               }
@@ -1102,10 +1151,12 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
               result = { status: 'skipped', reason: 'price_change_confirmation_order_unavailable' };
             }
           } else {
-            // The platform history endpoint cannot identify whether an outbound message
-            // was sent by this agent or by a human. Treating every outbound record as a
-            // handoff suppresses the buyer's next message after an AI reply.
-            const sent = await sendMessageWithReconciliation(client, session, message, { eventId: envelope.id, actionId });
+            const sent = await sendMessageWithReconciliation(client, session, message, {
+              eventId: envelope.id, actionId,
+              preflight: () => conversationPreflight(
+                client, session, baselineMessages, baselineAvailable, preflightOptions,
+              ),
+            });
             const messageId = platformMessageId(sent);
             if (messageId) sentAgentMessageIds.add(messageId);
             result = { status: 'succeeded', message_id: messageId };
@@ -1114,7 +1165,9 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
       }
     } catch (error) {
       logger.warn('v2 platform action failed', { eventId: envelope.id, actionId, actionType: action?.type, error });
-      result = platformFailure(error);
+      result = PREFLIGHT_BLOCK_REASONS.has(error?.code)
+        ? { status: 'skipped', reason: error.code }
+        : platformFailure(error);
     }
     await store.finishAction(record.id, actionId, result);
     return { actionId, ...result, nextActions: [] };

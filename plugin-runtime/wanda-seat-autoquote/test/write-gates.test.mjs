@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { loadV2Config } from '../src/config.mjs';
-import { createV2Runtime } from '../src/runtime/event-processor.mjs';
+import { createV2Runtime, isExternalOperatorMessage, isKnownSelfPluginMessage } from '../src/runtime/event-processor.mjs';
 import { V2EventStore } from '../src/runtime/event-store.mjs';
 import manifest from '../yumaiduo.plugin.json' with { type: 'json' };
 
@@ -58,6 +58,14 @@ async function runWithConfig(config) {
   await runtime.stop();
   return calls;
 }
+
+test('ordinary unknown outbound messages are external operators while known self messages are safe', () => {
+  const sentIds = new Set(['self-1']);
+  assert.equal(isExternalOperatorMessage({ id: 'human-1', direction: 'outbound', messageType: 1, content: '人工回复' }, sentIds), true);
+  assert.equal(isExternalOperatorMessage({ id: 'self-1', direction: 'outbound', messageType: 1, content: 'AI回复' }, sentIds), false);
+  assert.equal(isKnownSelfPluginMessage({ id: 'self-1', direction: 'outbound' }, sentIds), true);
+  assert.equal(isExternalOperatorMessage({ id: 'card-1', direction: 'outbound', messageType: 26, content: '交易卡片' }, sentIds), false);
+});
 
 test('production config defaults every external action permit closed', () => {
   const config = loadV2Config({ env: env('EXTERNAL_WRITES_ENABLED', 'true'), manifest });
