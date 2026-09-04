@@ -57,6 +57,14 @@ def to_real_quote(
     """Adapt a result to RealQuote; this function never derives a new amount."""
     parsed_date = date.fromisoformat(quote_date) if isinstance(quote_date, str) and quote_date else quote_date
     return RealQuote(
+        quote_id=result.quote_id, record_id=result.record_id, event_id=result.event_id,
+        recognition_snapshot_id=result.recognition_snapshot_id, provider=result.provider,
+        quote_route=result.quote_route, generation=quote_generation or result.generation,
+        quote_expires_at=result.quote_expires_at,
+        provider_max_amount_cents=result.provider_max_amount_cents,
+        buyer_quote_cents=result.buyer_quote_cents,
+        order_max_price_cents=result.order_max_price_cents,
+        calculation_evidence=dict(result.calculation_evidence),
         quote_scope=result.quote_scope, quote_date=parsed_date,
         seat_zone_type=result.seat_zone_type,
         member_unit_price_cents=result.member_unit_price_cents,
@@ -149,6 +157,9 @@ def to_quote_record(
     quote_expires_at: datetime | str,
     item_id: str | None = None,
     order_id: str | None = None,
+    event_id: str | None = None,
+    recognition_snapshot_id: str | None = None,
+    generation: int | None = None,
     source: str = "pricing_engine",
 ) -> dict[str, Any]:
     """Build a QuoteRecord-shaped snapshot without persistence or ID generation."""
@@ -158,12 +169,18 @@ def to_quote_record(
         "tenant_id": _required(tenant_id, "tenant_id"), "shop_id": _required(shop_id, "shop_id"),
         "buyer_id": _required(buyer_id, "buyer_id"), "chat_id": _required(chat_id, "chat_id"),
         "created_at": _iso(created_at), "quote_expires_at": _iso(quote_expires_at),
-        "item_id": item_id, "order_id": order_id, "source": source,
+        "item_id": item_id, "order_id": order_id, "event_id": event_id,
+        "recognition_snapshot_id": recognition_snapshot_id,
+        "generation": generation if generation is not None else result.generation,
+        "source": source,
         "status": "succeeded", "delivery_state": "pending",
         # Existing transaction code branches on these lowercase route values;
-        # retain them while preserving the canonical P2.5 route alongside it.
+        # retain them while preserving the canonical route in explicit fields.
         "route": _legacy_quote_route(result), "quote_route": _legacy_quote_route(result),
+        "legacy_quote_route": _legacy_quote_route(result),
+        "canonical_quote_route": result.quote_route,
         "provider_route": result.quote_route, "pricing_quote_route": result.quote_route,
+        "provider": result.provider,
         "quote_scope": result.quote_scope, "ticket_count": result.ticket_count,
         "member_unit_price_cents": result.member_unit_price_cents,
         "original_unit_price_cents": result.original_unit_price_cents,
@@ -173,7 +190,12 @@ def to_quote_record(
         "price_source": _legacy_price_source(result), "pricing_source": result.pricing_source,
         "pricing_rule_version": result.pricing_rule_version,
         "provider_amount_cents": result.provider_amount_cents,
+        "provider_max_amount_cents": result.provider_max_amount_cents,
+        "buyer_quote_cents": result.buyer_quote_cents,
+        "order_max_price_cents": result.order_max_price_cents,
         "provider_quote_id": result.provider_quote_id, "provider_quote_hash": result.provider_quote_hash,
+        "supersedes_quote_id": result.supersedes_quote_id,
+        "calculation_evidence": dict(result.calculation_evidence),
         "semantic_flags": list(result.semantic_flags),
         "seat_quotes": [
             {"seat_id": seat.seat_id, "seat_number": seat.seat_label,

@@ -79,7 +79,12 @@ function text(value) {
 
 function integerCents(value) {
   if (value === null || value === undefined || value === '') return null;
-  const number = typeof value === 'number' ? value : Number(String(value).trim());
+  if (typeof value === 'boolean') return null;
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const number = Number(normalized);
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
@@ -185,6 +190,29 @@ export function normalizeQuoteSnapshot(quote_snapshot) {
     chat_id: requireText(quote_snapshot, 'chat_id', 'quote_chat_id_required'),
     target_amount_cents,
   };
+  if (quote_snapshot.flow_version === 'V4_NEW_FLOW_V2') {
+    normalized.flow_version = quote_snapshot.flow_version;
+    normalized.source = requireText(quote_snapshot, 'source', 'quote_source_required');
+    if (normalized.source !== 'phase_9a_authorization') {
+      throw new ExecutorContractError('quote_source_invalid');
+    }
+    normalized.quote_id = requireText(quote_snapshot, 'quote_id', 'quote_id_required');
+    normalized.quote_hash = requireText(quote_snapshot, 'quote_hash', 'quote_hash_required');
+    normalized.terms_fingerprint = normalized.quote_hash;
+    normalized.quote_generation = integerCents(quote_snapshot.quote_generation);
+    normalized.binding_revision = integerCents(quote_snapshot.binding_revision);
+    normalized.transaction_revision = integerCents(quote_snapshot.transaction_revision);
+    normalized.idempotency_key = requireText(quote_snapshot, 'idempotency_key', 'quote_idempotency_key_required');
+    if (!Number.isSafeInteger(normalized.quote_generation) || normalized.quote_generation < 1) {
+      throw new ExecutorContractError('quote_generation_invalid');
+    }
+    if (!Number.isSafeInteger(normalized.binding_revision) || normalized.binding_revision < 1) {
+      throw new ExecutorContractError('binding_revision_invalid');
+    }
+    if (!Number.isSafeInteger(normalized.transaction_revision) || normalized.transaction_revision < 0) {
+      throw new ExecutorContractError('transaction_revision_invalid');
+    }
+  }
   if (own(quote_snapshot, 'observed_order_amount_cents')) {
     const observedAmount = integerCents(quote_snapshot.observed_order_amount_cents);
     if (!Number.isSafeInteger(observedAmount) || observedAmount <= 0 || observedAmount > 200_000) {
@@ -204,6 +232,12 @@ export function normalizeQuoteSnapshot(quote_snapshot) {
       throw new ExecutorContractError('confirmed_ticket_count_invalid');
     }
     normalized.confirmed_ticket_count = confirmedCount;
+  }
+  if (normalized.flow_version === 'V4_NEW_FLOW_V2') {
+    const expectedKey = buildPriceChangeIdempotencyKey(normalized);
+    if (normalized.idempotency_key !== expectedKey) {
+      throw new ExecutorContractError('idempotency_key_mismatch');
+    }
   }
   normalized.field_sources = Object.fromEntries(
     Object.keys(normalized)
@@ -226,9 +260,10 @@ export function normalizeAuthoritativeOrder(provider_order, { sdk_tenant_id } = 
   const status = pick(provider_order, ['orderStatus', 'order_status', 'status']);
   const paid_at = pick(provider_order, ['payTime', 'pay_time', 'paidAt', 'paid_at', 'paymentTime', 'payment_time'], { allow_null: true });
   const amount = pick(provider_order, ['payment', 'paymentCents', 'payment_cents', 'priceFee', 'price_fee', 'totalAmountCents', 'total_amount_cents']);
+  const post_fee = pick(provider_order, ['postFee', 'post_fee'], { allow_null: true });
   const refund_status = pick(provider_order, ['refundStatus', 'refund_status', 'refundState', 'refund_state'], { allow_null: true });
   const quantity = pick(provider_order, ['quantity', 'ticketCount', 'ticket_count', 'num']);
-  const selected = [order_id, provider_tenant_id, shop_id, buyer_id, chat_id, status, paid_at, amount, refund_status, quantity];
+  const selected = [order_id, provider_tenant_id, shop_id, buyer_id, chat_id, status, paid_at, amount, post_fee, refund_status, quantity];
   const tenant_id = text(provider_tenant_id.value) ?? text(sdk_tenant_id);
 
   return {
@@ -241,6 +276,7 @@ export function normalizeAuthoritativeOrder(provider_order, { sdk_tenant_id } = 
     order_status: text(status.value)?.toLowerCase() ?? null,
     paid_at: text(paid_at.value),
     amount_cents: integerCents(amount.value),
+    post_fee_cents: integerCents(post_fee.value),
     refund_status: text(refund_status.value)?.toLowerCase() ?? null,
     quantity: integerCents(quantity.value),
     field_sources: {
@@ -252,6 +288,7 @@ export function normalizeAuthoritativeOrder(provider_order, { sdk_tenant_id } = 
       order_status: sourceEntry('provider_order', status),
       paid_at: sourceEntry('provider_order', paid_at),
       amount_cents: sourceEntry('provider_order', amount),
+      post_fee_cents: sourceEntry('provider_order', post_fee),
       refund_status: sourceEntry('provider_order', refund_status),
       quantity: sourceEntry('provider_order', quantity),
     },
@@ -293,18 +330,37 @@ export function orderChangeability(order) {
   return { allowed: true, reason_code: null };
 }
 
-export function buildPriceChangeIdempotencyKey({
-  tenant_id,
-  shop_id,
-  buyer_id,
-  chat_id,
-  order_id,
-  quote_version,
-  target_amount_cents,
-  observed_order_amount_cents,
-  quote_record_id,
-  confirmation_version,
-}) {
+export function canonicalRepriceIdentity(snapshot) {
+  const identity = [
+    requireText({ platform_order_id: snapshot?.order_id }, 'platform_order_id', 'idempotency_order_id_required'),
+    requireText(snapshot, 'quote_id', 'idempotency_quote_id_required'),
+    integerCents(snapshot?.quote_generation),
+    integerCents(snapshot?.binding_revision),
+    integerCents(snapshot?.target_amount_cents),
+  ];
+  if (!Number.isSafeInteger(identity[2]) || identity[2] < 1) {
+    throw new ExecutorContractError('idempotency_quote_generation_invalid');
+  }
+  if (!Number.isSafeInteger(identity[3]) || identity[3] < 1) {
+    throw new ExecutorContractError('idempotency_binding_revision_invalid');
+  }
+  if (!Number.isSafeInteger(identity[4]) || identity[4] <= 0) {
+    throw new ExecutorContractError('idempotency_target_amount_cents_invalid');
+  }
+  return identity;
+}
+
+export function buildPriceChangeIdempotencyKey(snapshot) {
+  if (snapshot?.flow_version === 'V4_NEW_FLOW_V2') {
+    const material = canonicalRepriceIdentity(snapshot);
+    const digest = createHash('sha256').update(JSON.stringify(material)).digest('base64url');
+    return `price_change:v1:${digest}`;
+  }
+
+  const {
+    tenant_id, shop_id, buyer_id, chat_id, order_id, quote_version,
+    target_amount_cents, observed_order_amount_cents, quote_record_id, confirmation_version,
+  } = snapshot ?? {};
   const material = {
     tenant_id: requireText({ tenant_id }, 'tenant_id', 'idempotency_tenant_id_required'),
     shop_id: requireText({ shop_id }, 'shop_id', 'idempotency_shop_id_required'),

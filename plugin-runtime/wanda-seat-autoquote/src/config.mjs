@@ -33,6 +33,12 @@ function loopbackUrl(env, name, fallback) {
   return value;
 }
 
+function flag(env, name, fallback = false) {
+  const value = env[name];
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 function integer(env, name, fallback, min, max) {
   const value = Number(env[name] ?? fallback);
   if (!Number.isInteger(value) || value < min || value > max) {
@@ -64,17 +70,20 @@ export function loadV2Config({ env, manifest }) {
     maxWebhookBodyBytes: integer(env, 'MAX_WEBHOOK_BODY_BYTES', 1_048_576, 1_024, 10_485_760),
     maxUiBodyBytes: integer(env, 'WANDA_V4_UI_MAX_BODY_BYTES', 30_000_000, 1_024, 40_000_000),
     maxConcurrentRuns: integer(env, 'WANDA_AI_V2_MAX_CONCURRENT_RUNS', 12, 1, 100),
-    messageCoalesceDelayMs: integer(env, 'WANDA_AI_V2_MESSAGE_COALESCE_DELAY_MS', 350, 0, 2_000),
     dataDir,
     encryptionKey: encryptionKey(env),
     logLevel: ['debug', 'info', 'warn', 'error'].includes(env.LOG_LEVEL) ? env.LOG_LEVEL : 'info',
     v4BackendUrl: loopbackUrl(env, 'WANDA_V4_BACKEND_URL', 'http://127.0.0.1:8012'),
     orderApiKey: optional(env, 'WANDA_ORDER_API_KEY'),
     orderApiTenantId: optional(env, 'WANDA_ORDER_API_TENANT_ID'),
-    fulfillmentEnabled: ['1', 'true', 'yes', 'on'].includes(String(env.WANDA_ORDER_FULFILLMENT_ENABLED ?? '').trim().toLowerCase()),
-    // Reset phase: direct transaction writes stay disabled while the new
-    // Agent Harness is read-only. Chat messages and read operations remain available.
-    agentHarnessReadOnly: !['0', 'false', 'no', 'off'].includes(String(env.AGENT_HARNESS_READ_ONLY ?? 'true').trim().toLowerCase()),
+    fulfillmentEnabled: flag(env, 'WANDA_ORDER_FULFILLMENT_ENABLED'),
+    externalWritesEnabled: flag(env, 'EXTERNAL_WRITES_ENABLED', flag(env, 'WANDA_EXTERNAL_WRITES_ENABLED')),
+    messageSendEnabled: flag(env, 'MESSAGE_SEND_ENABLED'),
+    xianyuRepriceEnabled: flag(env, 'XIANYU_REPRICE_ENABLED'),
+    liangpiaoOrderCreateEnabled: flag(env, 'LIANGPIAO_ORDER_CREATE_ENABLED'),
+    wandaProviderWritesEnabled: flag(env, 'WANDA_PROVIDER_WRITES_ENABLED'),
+    refundEnabled: flag(env, 'REFUND_ENABLED'),
+    shipEnabled: flag(env, 'SHIP_ENABLED'),
     backend: Object.freeze({
       baseUrl: url(env, 'WANDA_AI_V2_BACKEND_URL'),
       sharedSecret: required(env, 'WANDA_AI_V2_BRIDGE_KEY'),

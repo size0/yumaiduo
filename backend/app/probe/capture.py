@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -37,7 +39,7 @@ def redact_capture(value: object) -> object:
             normalized = str(key).strip().lower().replace("-", "_")
             if _is_sensitive_key(normalized):
                 continue
-            if normalized in _ORDER_KEYS:
+            if _is_order_key(normalized):
                 result[str(key)] = "fixture-order-1"
             else:
                 result[str(key)] = redact_capture(item)
@@ -71,6 +73,11 @@ def _is_sensitive_key(normalized: str) -> bool:
     return normalized in _SENSITIVE_KEYS or normalized.replace("_", "") in normalized_sensitive
 
 
+def _is_order_key(normalized: str) -> bool:
+    compact = normalized.replace("_", "")
+    return normalized in _ORDER_KEYS or compact in {item.replace("_", "") for item in _ORDER_KEYS}
+
+
 def write_v3_capture(
     directory: Path,
     *,
@@ -94,9 +101,36 @@ def write_v3_capture(
     assert_capture_redacted(safe_responses)
     assert_capture_redacted(safe_expected)
     target = Path(directory)
-    target.mkdir(parents=True, exist_ok=True)
-    (target / "manifest.json").write_text(json.dumps(sanitized_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(target, 0o700)
+    _atomic_write_json(target / "manifest.json", sanitized_manifest)
     for name, value in safe_responses.items():
-        (target / name).write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-    (target / "expected_probe_result.json").write_text(json.dumps(safe_expected, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(target / name, value)
+    _atomic_write_json(target / "expected_probe_result.json", safe_expected)
     return target
+
+
+def _atomic_write_json(path: Path, value: object) -> None:
+    """Write a sanitized fixture atomically and make the rename durable."""
+    payload = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        else:  # pragma: no cover - Windows CI has no fchmod
+            os.chmod(temporary, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        os.chmod(path, 0o600)
+    finally:
+        temporary.unlink(missing_ok=True)

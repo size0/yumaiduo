@@ -18,6 +18,7 @@ from app.diagnostics import DiagnosticsStore
 from app.errors import ProviderError
 from app.main import create_app
 from app.models import MovieImageInfo, PricingRulesUpdate, RealQuote
+from app.probe.policy import ProbePolicy, allow_active_probe
 from app.settings_store import PersistentSettingsStore
 from app.reply_template_store import ReplyTemplates
 from app.wanda_direct_quote import CINEMA_ORIGIN, H5_CHANNEL, MARKETING_ORIGIN, WandaDirectQuoteService
@@ -1454,6 +1455,7 @@ async def test_missing_realtime_wplus_activity_uses_verified_member_price_probe(
     settings = Settings(
         wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
         wanda_fixed_account_phone="13800009083",
+        wanda_active_probe_enabled=True, external_writes_enabled=True,
     )
     recognition = MovieImageInfo.model_validate({
         "cinema_name": "昆明西山万达广场店", "city": "昆明", "movie_name": "奥德赛",
@@ -1468,9 +1470,11 @@ async def test_missing_realtime_wplus_activity_uses_verified_member_price_probe(
         now_provider=quote_test_now,
         release_recheck_delays=(0,),
         pricing_rules=PricingRulesUpdate(enabled=True, regular_adjustment_cents=100, rounding_increment_cents=10),
+        probe_policy=ProbePolicy(active_probe_enabled=True, external_writes_enabled=True),
     )
 
-    quote = await service.quote(recognition)
+    with allow_active_probe(lease_acquired=True, risk_approved=True):
+        quote = await service.quote(recognition)
     await service.aclose()
 
     assert quote.member_unit_price_cents == 5816
@@ -1492,6 +1496,7 @@ async def test_member_price_probe_fails_closed_when_release_cannot_be_verified(t
     settings = Settings(
         wanda_account_pool_path=str(accounts), wanda_cinema_cache_path=str(cache),
         wanda_fixed_account_phone="13800009083",
+        wanda_active_probe_enabled=True, external_writes_enabled=True,
     )
     recognition = MovieImageInfo(
         cinema_name="昆明西山万达广场店", city="昆明", movie_name="奥德赛",
@@ -1504,10 +1509,12 @@ async def test_member_price_probe_fails_closed_when_release_cannot_be_verified(t
         )),
         now_provider=quote_test_now,
         release_recheck_delays=(0, 0),
+        probe_policy=ProbePolicy(active_probe_enabled=True, external_writes_enabled=True),
     )
 
-    with pytest.raises(ProviderError, match="座位尚未确认恢复"):
-        await service.quote(recognition)
+    with allow_active_probe(lease_acquired=True, risk_approved=True):
+        with pytest.raises(ProviderError, match="座位尚未确认恢复"):
+            await service.quote(recognition)
     await service.aclose()
 
     paths = [item["path"] for item in captured]
@@ -1967,14 +1974,17 @@ async def test_slow_member_offer_read_is_hedged_while_probe_is_locked() -> None:
 
     diagnostics = DiagnosticsStore()
     service = WandaDirectQuoteService(
-        Settings(), transport=httpx.MockTransport(handler), diagnostics=diagnostics,
+        Settings(wanda_active_probe_enabled=True, external_writes_enabled=True),
+        transport=httpx.MockTransport(handler), diagnostics=diagnostics,
         showtime_hedge_delay_seconds=0.05,
+        probe_policy=ProbePolicy(active_probe_enabled=True, external_writes_enabled=True),
     )
-    payload = await service._official_app_request(
-        {"token": "test-token"}, MARKETING_ORIGIN, "/mkt/activity/secret/list.api",
-        method="GET", pairs=[("partition", "1-2"), ("orderId", "3"), ("did", "4")],
-        event="wanda_member_offers_response",
-    )
+    with allow_active_probe(lease_acquired=True, risk_approved=True):
+        payload = await service._official_app_request(
+            {"token": "test-token"}, MARKETING_ORIGIN, "/mkt/activity/secret/list.api",
+            method="GET", pairs=[("partition", "1-2"), ("orderId", "3"), ("did", "4")],
+            event="wanda_member_offers_response",
+        )
     await service.aclose()
 
     assert payload["code"] == 0

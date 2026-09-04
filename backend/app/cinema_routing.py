@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .models import MovieImageInfo
-
-
 CinemaRoute = Literal["WANDA_SELF", "LIANGPIAO_EXACT", "UNKNOWN"]
 
 

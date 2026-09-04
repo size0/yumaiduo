@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .automation_mode import DEFAULT_AUTOMATION_MODE, normalize_automation_mode
 from .settings_store import SecretProtector, default_secret_protector
 
 
@@ -44,6 +43,17 @@ def _now(value: datetime | None = None) -> datetime:
     return current if current.tzinfo else current.replace(tzinfo=timezone.utc)
 
 
+def _parse_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _text(value: object) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
@@ -57,41 +67,6 @@ def _pick(source: object, *fields: str) -> str | None:
         if value:
             return value
     return None
-
-
-def _identity_display_from_body(body: object) -> dict[str, str | None]:
-    if not isinstance(body, Mapping):
-        return {"shop_id": None, "buyer_id": None, "chat_id": None, "shop_name": None, "buyer_name": None}
-    envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
-    payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
-    session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
-    order = body.get("order") if isinstance(body.get("order"), Mapping) else {}
-    recent = body.get("recent_messages") if isinstance(body.get("recent_messages"), list) else []
-    shop_id = _pick(session, "accountUnb", "account_unb", "shopId", "shop_id") or _pick(payload, "accountUnb", "account_unb", "shopId", "shop_id")
-    buyer_id = _pick(session, "peerUnb", "peer_unb", "buyerId", "buyer_id") or _pick(payload, "peerUnb", "peer_unb", "buyerId", "buyer_id")
-    chat_id = _pick(session, "chatId", "chat_id") or _pick(payload, "chatId", "chat_id")
-    shop_name = _pick(session, "shopName", "shop_name", "accountName", "account_name", "sellerNick") or _pick(payload, "shopName", "shop_name", "accountName", "account_name")
-    buyer_name = _pick(order, "buyerNick", "buyer_nick", "buyerName", "buyer_name") or _pick(session, "peerNick", "peer_nick", "buyerNick", "buyer_nick", "peerName", "peer_name") or _pick(payload, "buyerNick", "buyer_nick", "senderNick", "sender_nick", "senderName", "sender_name")
-    if not buyer_name:
-        for message in reversed(recent):
-            direction = str(_pick(message, "direction", "senderType", "sender_type") or "").lower()
-            if direction in {"outbound", "seller", "self", "2"}:
-                continue
-            buyer_name = _pick(
-                message, "buyerNick", "buyer_nick", "senderNick", "sender_nick",
-                "senderName", "sender_name", "nickName", "nickname", "fromNick",
-            )
-            if buyer_name:
-                break
-    if shop_name == shop_id:
-        shop_name = None
-    if buyer_name == buyer_id:
-        buyer_name = None
-    return {
-        "shop_id": shop_id, "buyer_id": buyer_id, "chat_id": chat_id,
-        "shop_name": shop_name[:200] if shop_name else None,
-        "buyer_name": buyer_name[:200] if buyer_name else None,
-    }
 
 
 class RulesFirstStore:
@@ -295,38 +270,40 @@ class RulesFirstStore:
                     ON liangpiao_callback_records(tenant_id, received_at DESC);
                 CREATE INDEX IF NOT EXISTS liangpiao_callback_order_idx
                     ON liangpiao_callback_records(provider_order_no, out_order_no, received_at DESC);
-
-                CREATE TABLE IF NOT EXISTS automation_modes (
-                    mode_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tenant_id TEXT NOT NULL,
-                    shop_id TEXT NOT NULL,
-                    buyer_id TEXT,
-                    chat_id TEXT,
-                    mode TEXT NOT NULL,
-                    revision INTEGER NOT NULL DEFAULT 0,
-                    updated_at TEXT NOT NULL,
-                    UNIQUE(tenant_id, shop_id, buyer_id, chat_id)
-                );
-                CREATE INDEX IF NOT EXISTS automation_modes_shop_idx
-                    ON automation_modes(tenant_id, shop_id, buyer_id, chat_id);
-
-                CREATE TABLE IF NOT EXISTS agent_tool_calls (
-                    audit_id TEXT PRIMARY KEY,
-                    call_id TEXT NOT NULL,
-                    tenant_id TEXT NOT NULL,
-                    shop_id TEXT NOT NULL,
-                    buyer_id TEXT NOT NULL,
-                    chat_id TEXT NOT NULL,
-                    event_id TEXT NOT NULL,
-                    tool_name TEXT NOT NULL,
-                    round_index INTEGER NOT NULL DEFAULT 0,
-                    status TEXT NOT NULL,
-                    payload_protected TEXT NOT NULL,
+                -- Cinema identity and show evidence live in the existing
+                -- RulesFirst database; this is not a second cinema database.
+                CREATE TABLE IF NOT EXISTS cinema_identity_crosswalk (
+                    canonical_cinema_identity_id TEXT PRIMARY KEY,
+                    liangpiao_cinema_id TEXT NOT NULL,
+                    wanda_store_id TEXT NOT NULL,
+                    city_name TEXT NOT NULL,
+                    liangpiao_name TEXT,
+                    wanda_name TEXT,
+                    address TEXT,
+                    verification_status TEXT NOT NULL DEFAULT 'CANDIDATE',
+                    verification_level TEXT NOT NULL DEFAULT 'FINGERPRINT_CANDIDATE',
+                    evidence_protected TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    UNIQUE(tenant_id, event_id, call_id)
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(liangpiao_cinema_id, wanda_store_id)
                 );
-                CREATE INDEX IF NOT EXISTS agent_tool_calls_tenant_idx
-                    ON agent_tool_calls(tenant_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS cinema_crosswalk_liangpiao_idx
+                    ON cinema_identity_crosswalk(liangpiao_cinema_id, city_name, verification_status);
+                CREATE INDEX IF NOT EXISTS cinema_crosswalk_wanda_idx
+                    ON cinema_identity_crosswalk(wanda_store_id, city_name);
+                CREATE TABLE IF NOT EXISTS wanda_show_index_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    city_id TEXT NOT NULL,
+                    city_name TEXT NOT NULL,
+                    show_date TEXT NOT NULL,
+                    movie_key TEXT NOT NULL,
+                    snapshot_protected TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS wanda_show_index_cache_lookup_idx
+                    ON wanda_show_index_cache(city_id, show_date, movie_key, expires_at);
                 """
             )
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(transactions)")}
@@ -407,239 +384,6 @@ class RulesFirstStore:
                     connection.execute("ROLLBACK")
                     raise
 
-    def record_agent_tool_call(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
-        required = (
-            "call_id", "tenant_id", "shop_id", "buyer_id", "chat_id",
-            "event_id", "tool_name", "status",
-        )
-        values = {key: _text(snapshot.get(key)) for key in required}
-        if any(not values[key] for key in required):
-            raise ValueError("agent_tool_call_invalid")
-        call_id = str(values["call_id"])
-        if len(call_id) > 200 or len(str(values["tool_name"])) > 120:
-            raise ValueError("agent_tool_call_invalid")
-        created_at = str(snapshot.get("created_at") or _now().isoformat())
-        payload = {
-            "arguments": snapshot.get("arguments") if isinstance(snapshot.get("arguments"), Mapping) else {},
-            "result": snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {},
-        }
-        with self._connect() as connection:
-            connection.execute(
-                """INSERT OR IGNORE INTO agent_tool_calls(
-                   audit_id, call_id, tenant_id, shop_id, buyer_id, chat_id, event_id,
-                   tool_name, round_index, status, payload_protected, created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    hashlib.sha256(
-                        f'{values["tenant_id"]}:{values["event_id"]}:{call_id}'.encode("utf-8")
-                    ).hexdigest(),
-                    call_id, values["tenant_id"], values["shop_id"], values["buyer_id"],
-                    values["chat_id"], values["event_id"], values["tool_name"],
-                    int(snapshot.get("round_index") or 0), values["status"],
-                    self._protect(payload), created_at,
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM agent_tool_calls WHERE audit_id=?", (
-                    hashlib.sha256(
-                        f'{values["tenant_id"]}:{values["event_id"]}:{call_id}'.encode("utf-8")
-                    ).hexdigest(),
-                )
-            ).fetchone()
-        return self._agent_tool_call_view(row)
-
-    def list_agent_tool_calls(self, tenant_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
-        tenant = str(tenant_id or "").strip()
-        if not tenant:
-            return []
-        bounded_limit = max(1, min(int(limit), 500))
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT * FROM agent_tool_calls WHERE tenant_id=?
-                   ORDER BY created_at DESC LIMIT ?""",
-                (tenant, bounded_limit),
-            ).fetchall()
-        return [self._agent_tool_call_view(row) for row in rows]
-
-    def list_event_audits(self, tenant_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
-        tenant = str(tenant_id or "").strip()
-        if not tenant:
-            return []
-        bounded_limit = max(1, min(int(limit), 500))
-        with self._connect() as connection:
-            rows = connection.execute(
-                """SELECT event_id, event_type, status, received_at, updated_at,
-                          result_protected, payload_protected
-                   FROM event_inbox WHERE tenant_id=? AND status='completed'
-                   ORDER BY inbox_id DESC LIMIT ?""",
-                (tenant, bounded_limit),
-            ).fetchall()
-        allowed = {
-            "automation_mode", "reply_route", "rule_code", "ai_called",
-            "order_state", "quote_state", "suppressed_reason", "action_types",
-            "transition_code", "state_after",
-        }
-        records: list[dict[str, Any]] = []
-        for row in rows:
-            result = self._unprotect(row["result_protected"]) or {}
-            public = {
-                key: value for key, value in result.items()
-                if key in allowed
-            } if isinstance(result, Mapping) else {}
-            identity = _identity_display_from_body(self._unprotect(row["payload_protected"]))
-            records.append({
-                "event_id": row["event_id"], "event_type": row["event_type"],
-                "status": row["status"], "received_at": row["received_at"],
-                "updated_at": row["updated_at"], **identity, **public,
-            })
-        return records
-
-    def identity_labels(
-        self, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
-    ) -> dict[str, str | None]:
-        tenant = str(tenant_id or "").strip()
-        session_key = "\0".join((
-            str(shop_id or "").strip(), str(chat_id or "").strip(), str(buyer_id or "").strip(),
-        ))
-        if not tenant or not all((shop_id, buyer_id, chat_id)):
-            return {"shop_name": None, "buyer_name": None}
-        with self._connect() as connection:
-            row = connection.execute(
-                """SELECT payload_protected FROM event_inbox
-                   WHERE tenant_id=? AND session_key=?
-                   ORDER BY inbox_id DESC LIMIT 1""",
-                (tenant, session_key),
-            ).fetchone()
-        if row is None:
-            return {"shop_name": None, "buyer_name": None}
-        identity = _identity_display_from_body(self._unprotect(row["payload_protected"]))
-        return {"shop_name": identity.get("shop_name"), "buyer_name": identity.get("buyer_name")}
-
-    def _agent_tool_call_view(self, row: sqlite3.Row | None) -> dict[str, Any]:
-        if row is None:
-            return {}
-        payload = self._unprotect(row["payload_protected"]) or {}
-        return {
-            "call_id": row["call_id"], "tenant_id": row["tenant_id"],
-            "shop_id": row["shop_id"], "buyer_id": row["buyer_id"],
-            "chat_id": row["chat_id"], "event_id": row["event_id"],
-            "tool_name": row["tool_name"], "round_index": int(row["round_index"]),
-            "status": row["status"], "arguments": payload.get("arguments", {}),
-            "result": payload.get("result", {}), "created_at": row["created_at"],
-        }
-
-    def _set_automation_mode(
-        self, *, tenant_id: str, shop_id: str, mode: str,
-        buyer_id: str | None = None, chat_id: str | None = None,
-    ) -> dict[str, object]:
-        tenant = _text(tenant_id)
-        shop = _text(shop_id)
-        buyer = _text(buyer_id)
-        chat = _text(chat_id)
-        if not tenant or not shop or (buyer is None) != (chat is None):
-            raise ValueError("automation_mode_identity_invalid")
-        normalized_mode = normalize_automation_mode(mode)
-        now = _now().isoformat()
-        with self._connect() as connection:
-            row = connection.execute(
-                """SELECT mode_id, revision FROM automation_modes
-                   WHERE tenant_id=? AND shop_id=? AND buyer_id IS ? AND chat_id IS ?""",
-                (tenant, shop, buyer, chat),
-            ).fetchone()
-            revision = int(row["revision"] if row else 0) + 1
-            if row:
-                connection.execute(
-                    """UPDATE automation_modes SET mode=?, revision=?, updated_at=?
-                       WHERE mode_id=?""",
-                    (normalized_mode, revision, now, int(row["mode_id"])),
-                )
-            else:
-                connection.execute(
-                    """INSERT INTO automation_modes(
-                       tenant_id, shop_id, buyer_id, chat_id, mode, revision, updated_at
-                    ) VALUES(?,?,?,?,?,?,?)""",
-                    (tenant, shop, buyer, chat, normalized_mode, revision, now),
-                )
-        return {
-            "mode": normalized_mode, "revision": revision, "updated_at": now,
-            "scope": "conversation" if buyer is not None else "shop",
-        }
-
-    def set_shop_automation_mode(self, tenant_id: str, shop_id: str, mode: str) -> dict[str, object]:
-        return self._set_automation_mode(tenant_id=tenant_id, shop_id=shop_id, mode=mode)
-
-    def set_conversation_automation_mode(
-        self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str, mode: str,
-    ) -> dict[str, object]:
-        return self._set_automation_mode(
-            tenant_id=tenant_id, shop_id=shop_id, buyer_id=buyer_id, chat_id=chat_id, mode=mode,
-        )
-
-    def get_conversation_automation_mode(
-        self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
-    ) -> dict[str, object] | None:
-        tenant = _text(tenant_id)
-        shop = _text(shop_id)
-        buyer = _text(buyer_id)
-        chat = _text(chat_id)
-        if not all((tenant, shop, buyer, chat)):
-            raise ValueError("automation_mode_identity_invalid")
-        with self._connect() as connection:
-            row = connection.execute(
-                """SELECT mode, revision, updated_at FROM automation_modes
-                   WHERE tenant_id=? AND shop_id=? AND buyer_id=? AND chat_id=?""",
-                (tenant, shop, buyer, chat),
-            ).fetchone()
-        if row is None:
-            return None
-        return {
-            "mode": str(row["mode"]), "revision": int(row["revision"]),
-            "updated_at": str(row["updated_at"]), "scope": "conversation",
-        }
-
-    def clear_conversation_automation_mode(
-        self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
-    ) -> bool:
-        tenant = _text(tenant_id)
-        shop = _text(shop_id)
-        buyer = _text(buyer_id)
-        chat = _text(chat_id)
-        if not all((tenant, shop, buyer, chat)):
-            raise ValueError("automation_mode_identity_invalid")
-        with self._connect() as connection:
-            cursor = connection.execute(
-                """DELETE FROM automation_modes
-                   WHERE tenant_id=? AND shop_id=? AND buyer_id=? AND chat_id=?""",
-                (tenant, shop, buyer, chat),
-            )
-        return cursor.rowcount > 0
-
-    def resolve_automation_mode(
-        self, *, tenant_id: str, shop_id: str, buyer_id: str | None = None,
-        chat_id: str | None = None,
-    ) -> str:
-        tenant = _text(tenant_id)
-        shop = _text(shop_id)
-        buyer = _text(buyer_id)
-        chat = _text(chat_id)
-        if not tenant or not shop:
-            return DEFAULT_AUTOMATION_MODE
-        with self._connect() as connection:
-            if buyer and chat:
-                row = connection.execute(
-                    """SELECT mode FROM automation_modes
-                       WHERE tenant_id=? AND shop_id=? AND buyer_id=? AND chat_id=?""",
-                    (tenant, shop, buyer, chat),
-                ).fetchone()
-                if row:
-                    return str(row["mode"])
-            row = connection.execute(
-                """SELECT mode FROM automation_modes
-                   WHERE tenant_id=? AND shop_id=? AND buyer_id IS NULL AND chat_id IS NULL""",
-                (tenant, shop),
-            ).fetchone()
-        return str(row["mode"]) if row else DEFAULT_AUTOMATION_MODE
-
     def journal_mode(self) -> str:
         with self._connect() as connection:
             return str(connection.execute("PRAGMA journal_mode").fetchone()[0])
@@ -687,18 +431,6 @@ class RulesFirstStore:
             row = connection.execute("SELECT * FROM liangpiao_quotes WHERE quote_id=?", (str(quote_id),)).fetchone()
         return self._liangpiao_quote_view(row) if row else None
 
-    def list_selected_seat_quotes(self, tenant_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
-        tenant = str(tenant_id or "").strip()
-        if not tenant:
-            return []
-        bounded_limit = max(1, min(int(limit), 500))
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM liangpiao_quotes WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
-                (tenant, bounded_limit),
-            ).fetchall()
-        return [self._liangpiao_quote_view(row) for row in rows]
-
     def save_liangpiao_order(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
         required = ("out_order_no", "tenant_id", "quote_id", "quote_hash", "payload_hash")
         if any(not _text(snapshot.get(key)) for key in required):
@@ -722,62 +454,54 @@ class RulesFirstStore:
             ).fetchone()
         return self._liangpiao_order_view(row)
 
-    def update_liangpiao_order(self, out_order_no: str, *, provider_status: str, snapshot_updates: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    def update_liangpiao_order(
+        self, out_order_no: str, *, provider_order_no: str | None = None,
+        provider_status: str | None = None, snapshot_updates: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update one durable provider-order snapshot without a second store."""
+        wanted = str(out_order_no or "").strip()
+        if not wanted:
+            raise ValueError("liangpiao_order_out_order_no_invalid")
         with self._connect() as connection:
-            row = connection.execute("SELECT * FROM liangpiao_orders WHERE out_order_no=?", (str(out_order_no),)).fetchone()
+            row = connection.execute(
+                "SELECT * FROM liangpiao_orders WHERE out_order_no=?", (wanted,),
+            ).fetchone()
             if row is None:
                 raise KeyError("liangpiao_order_not_found")
-            current = self._unprotect(row["snapshot_protected"]) or {}
-            current.update(dict(snapshot_updates or {}))
+            current = self._liangpiao_order_view(row)
+            if snapshot_updates:
+                current.update(dict(snapshot_updates))
+            normalized_provider = _text(provider_order_no) or current.get("provider_order_no")
+            normalized_status = _text(provider_status) or str(current.get("provider_status") or "unknown")
+            current.update({"out_order_no": wanted, "provider_order_no": normalized_provider,
+                            "provider_status": normalized_status})
             connection.execute(
-                "UPDATE liangpiao_orders SET provider_status=?, snapshot_protected=? WHERE out_order_no=?",
-                (str(provider_status), self._protect(current), str(out_order_no)),
+                "UPDATE liangpiao_orders SET provider_order_no=?,provider_status=?,snapshot_protected=? WHERE out_order_no=?",
+                (normalized_provider, normalized_status, self._protect(current), wanted),
             )
-            updated = connection.execute("SELECT * FROM liangpiao_orders WHERE out_order_no=?", (str(out_order_no),)).fetchone()
+            updated = connection.execute(
+                "SELECT * FROM liangpiao_orders WHERE out_order_no=?", (wanted,),
+            ).fetchone()
         return self._liangpiao_order_view(updated)
 
-    def append_system_commands(
-        self, *, tenant_id: str, event_id: str, session: Mapping[str, Any],
-        commands: Sequence[Mapping[str, Any]], state_revision: int,
-    ) -> list[dict[str, Any]]:
-        """Persist callback-driven commands with a completed synthetic inbox event."""
-        tenant = str(tenant_id or "").strip()
-        event = str(event_id or "").strip()
-        if not tenant or not event or len(event) > 240 or not commands:
-            raise ValueError("system_command_input_invalid")
-        body = {"system_event": True, "envelope": {"id": event, "tenantId": tenant, "event": "liangpiao.callback"},
-                "session": dict(session), "recent_messages": []}
-        now = _now().isoformat()
+    def has_liangpiao_callback_nonce(self, nonce: str) -> bool:
+        wanted = str(nonce or "").strip()
+        if not wanted:
+            return False
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """INSERT OR IGNORE INTO event_inbox(
-                   tenant_id,event_id,event_type,session_key,status,payload_protected,received_at,updated_at,result_protected
-                ) VALUES(?,?,?,?,?,?,?,?,?)""",
-                (tenant, event, "liangpiao.callback", "\0".join(str(session.get(key) or "") for key in ("accountUnb", "chatId", "peerUnb")),
-                 "completed", self._protect(body), now, now, self._protect({"system": True})),
-            )
-            inbox = connection.execute(
-                "SELECT * FROM event_inbox WHERE tenant_id=? AND event_id=?", (tenant, event),
-            ).fetchone()
-            created = []
-            for action in commands:
-                action_type = _pick(action, "type") or ""
-                dedupe_key = self._command_dedupe(action, state_revision)
-                command_id = "cmd-" + hashlib.sha256(f"{tenant}\0{action_type}\0{dedupe_key}".encode()).hexdigest()[:40]
-                payload = {"action": dict(action), "context": body}
-                connection.execute(
-                    """INSERT OR IGNORE INTO command_outbox(
-                       command_id,tenant_id,event_id,inbox_id,command_type,dedupe_key,state_revision,payload_protected,created_at,updated_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                    (command_id, tenant, event, inbox["inbox_id"], action_type, dedupe_key, state_revision,
-                     self._protect(payload), now, now),
-                )
-                row = connection.execute("SELECT * FROM command_outbox WHERE command_id=?", (command_id,)).fetchone()
-                if row is not None:
-                    created.append(row)
-            connection.commit()
-        return [self._command_view(row) for row in created]
+            rows = connection.execute(
+                "SELECT payload_protected, processing_status FROM liangpiao_callback_records ORDER BY callback_id DESC LIMIT 1000",
+            ).fetchall()
+        for row in rows:
+            if str(row["processing_status"] or "").lower() == "received":
+                continue
+            try:
+                payload = self._unprotect(row["payload_protected"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, Mapping) and str(payload.get("nonce") or "").strip() == wanted:
+                return True
+        return False
 
     def record_liangpiao_callback(
         self, raw_body: bytes, *, signature: str = "", timestamp: str = "", nonce: str = "",
@@ -789,11 +513,11 @@ class RulesFirstStore:
             body = {}
         body = dict(body) if isinstance(body, Mapping) else {}
         event_data = body.get("data") if isinstance(body.get("data"), Mapping) else body
-        event_data = {**dict(event_data), "event": body.get("event", event_data.get("event"))}
+        event_data = dict(event_data)
         out_order_no = _pick(event_data, "outOrderNo", "out_order_no")
         provider_order_no = _pick(event_data, "providerOrderNo", "provider_order_no", "orderNo", "orderId", "order_id")
         event_id = _pick(event_data, "eventId", "event_id")
-        provider_status = _pick(event_data, "status", "orderStatus", "order_status", "event")
+        provider_status = _pick(event_data, "status", "orderStatus", "order_status") or _pick(body, "event")
         tenant_id = None
         if out_order_no or provider_order_no:
             linked = self.find_liangpiao_order(
@@ -855,6 +579,126 @@ class RulesFirstStore:
             ).fetchall()
         return [self._liangpiao_callback_view(row) for row in rows]
 
+    def save_cinema_crosswalk(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+        required = ("canonical_cinema_identity_id", "liangpiao_cinema_id", "wanda_store_id", "city_name")
+        if any(not _text(snapshot.get(key)) for key in required):
+            raise ValueError("cinema_crosswalk_snapshot_invalid")
+        status = str(snapshot.get("verification_status") or "CANDIDATE").upper()
+        level = str(snapshot.get("verification_level") or "FINGERPRINT_CANDIDATE").upper()
+        if status not in {"CANDIDATE", "VERIFIED"}:
+            raise ValueError("cinema_crosswalk_verification_status_invalid")
+        if not level:
+            raise ValueError("cinema_crosswalk_verification_level_invalid")
+        now = _now().isoformat()
+        evidence = dict(snapshot.get("evidence") or {}) if isinstance(snapshot.get("evidence"), Mapping) else {}
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO cinema_identity_crosswalk(
+                   canonical_cinema_identity_id,liangpiao_cinema_id,wanda_store_id,
+                   city_name,liangpiao_name,wanda_name,address,verification_status,
+                   verification_level,evidence_protected,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(liangpiao_cinema_id, wanda_store_id) DO UPDATE SET
+                   canonical_cinema_identity_id=excluded.canonical_cinema_identity_id,
+                   city_name=excluded.city_name, liangpiao_name=excluded.liangpiao_name,
+                   wanda_name=excluded.wanda_name, address=excluded.address,
+                   verification_status=excluded.verification_status,
+                   verification_level=excluded.verification_level,
+                   evidence_protected=excluded.evidence_protected, updated_at=excluded.updated_at""",
+                (
+                    str(snapshot["canonical_cinema_identity_id"]), str(snapshot["liangpiao_cinema_id"]),
+                    str(snapshot["wanda_store_id"]), str(snapshot["city_name"]),
+                    _text(snapshot.get("liangpiao_name")), _text(snapshot.get("wanda_name")),
+                    _text(snapshot.get("address")), status, level, self._protect(evidence), now, now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM cinema_identity_crosswalk WHERE liangpiao_cinema_id=? AND wanda_store_id=?",
+                (str(snapshot["liangpiao_cinema_id"]), str(snapshot["wanda_store_id"])),
+            ).fetchone()
+        return self._cinema_crosswalk_view(row)
+
+    def find_cinema_crosswalk(
+        self, *, liangpiao_cinema_id: str | None = None, wanda_store_id: str | None = None,
+        city_name: str | None = None, verified_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if liangpiao_cinema_id:
+            clauses.append("liangpiao_cinema_id=?")
+            params.append(str(liangpiao_cinema_id))
+        if wanda_store_id:
+            clauses.append("wanda_store_id=?")
+            params.append(str(wanda_store_id))
+        if city_name:
+            clauses.append("city_name=?")
+            params.append(str(city_name))
+        if verified_only:
+            clauses.append("verification_status='VERIFIED'")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM cinema_identity_crosswalk"
+                + (" WHERE " + " AND ".join(clauses) if clauses else "")
+                + " ORDER BY updated_at DESC", tuple(params),
+            ).fetchall()
+        return [self._cinema_crosswalk_view(row) for row in rows]
+
+    def list_cinema_crosswalks(self, *, city_name: str | None = None) -> list[dict[str, Any]]:
+        return self.find_cinema_crosswalk(city_name=city_name)
+
+    def save_wanda_show_index(
+        self, *, cache_key: str, city_id: str, city_name: str, show_date: str,
+        movie_key: str, snapshot: Mapping[str, Any], expires_at: str,
+    ) -> dict[str, Any]:
+        values = (cache_key, city_id, city_name, show_date, movie_key, self._protect(dict(snapshot)), expires_at, _now().isoformat(), _now().isoformat())
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO wanda_show_index_cache(
+                   cache_key,city_id,city_name,show_date,movie_key,snapshot_protected,
+                   expires_at,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                   snapshot_protected=excluded.snapshot_protected,
+                   expires_at=excluded.expires_at, updated_at=excluded.updated_at""", values,
+            )
+            row = connection.execute("SELECT * FROM wanda_show_index_cache WHERE cache_key=?", (cache_key,)).fetchone()
+        return self._show_index_view(row)
+
+    def get_wanda_show_index(self, cache_key: str, *, now: datetime | None = None) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM wanda_show_index_cache WHERE cache_key=?", (str(cache_key),)).fetchone()
+        if row is None:
+            return None
+        expires = _parse_datetime(row["expires_at"])
+        if expires is None or expires <= _now(now):
+            return None
+        return self._show_index_view(row)
+
+    def _cinema_crosswalk_view(self, row: Mapping[str, Any] | None) -> dict[str, Any]:
+        if row is None:
+            return {}
+        row = dict(row)
+        evidence = self._unprotect(row.get("evidence_protected")) or {}
+        return {
+            "canonical_cinema_identity_id": row["canonical_cinema_identity_id"],
+            "liangpiao_cinema_id": row["liangpiao_cinema_id"], "wanda_store_id": row["wanda_store_id"],
+            "city_name": row["city_name"], "liangpiao_name": row.get("liangpiao_name"),
+            "wanda_name": row.get("wanda_name"), "address": row.get("address"),
+            "verification_status": row["verification_status"], "verification_level": row["verification_level"],
+            "evidence": evidence, "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def _show_index_view(self, row: Mapping[str, Any] | None) -> dict[str, Any]:
+        if row is None:
+            return {}
+        row = dict(row)
+        return {
+            "cache_key": row["cache_key"], "city_id": row["city_id"], "city_name": row["city_name"],
+            "show_date": row["show_date"], "movie_key": row["movie_key"],
+            "snapshot": self._unprotect(row.get("snapshot_protected")) or {},
+            "expires_at": row["expires_at"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
     def list_liangpiao_orders(self, tenant_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
         tenant = str(tenant_id or "").strip()
         if not tenant:
@@ -896,8 +740,7 @@ class RulesFirstStore:
         data = self._unprotect(row.get("snapshot_protected")) or {}
         data.update({"quote_id": str(row["quote_id"]), "quote_hash": str(row["quote_hash"]),
                      "tenant_id": str(row["tenant_id"]), "conversation_id": str(row["conversation_id"]),
-                     "generation": int(row["quote_generation"]), "expires_at": str(row["quote_expires_at"]),
-                     "status": str(row["status"]), "created_at": str(row["created_at"])})
+                     "generation": int(row["quote_generation"]), "expires_at": str(row["quote_expires_at"])})
         return data
 
     def _liangpiao_callback_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
@@ -963,16 +806,25 @@ class RulesFirstStore:
 
     def claim_event(
         self, *, now: datetime | None = None, lease_seconds: int = 60,
+        tenant_id: str | None = None, event_id: str | None = None,
     ) -> dict[str, Any] | None:
         current = _now(now)
         token = uuid4().hex
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            filters = ["(status='pending' OR (status='processing' AND lease_until<=?))"]
+            parameters: list[object] = [current.isoformat()]
+            if tenant_id:
+                filters.append("tenant_id=?")
+                parameters.append(tenant_id)
+            if event_id:
+                filters.append("event_id=?")
+                parameters.append(event_id)
             row = connection.execute(
-                """SELECT * FROM event_inbox
-                   WHERE status='pending' OR (status='processing' AND lease_until<=?)
+                f"""SELECT * FROM event_inbox
+                   WHERE {' AND '.join(filters)}
                    ORDER BY inbox_id LIMIT 1""",
-                (current.isoformat(),),
+                parameters,
             ).fetchone()
             if row is None:
                 connection.commit()
@@ -994,12 +846,72 @@ class RulesFirstStore:
     def _command_dedupe(action: Mapping[str, Any], state_revision: int) -> str:
         action_type = _pick(action, "type") or "unknown"
         explicit = _pick(action, "dedupe_key")
-        if explicit:
+        quote = action.get("quote_snapshot") if isinstance(action.get("quote_snapshot"), Mapping) else {}
+        flow_version = _pick(action, "flow_version") or _pick(quote, "flow_version")
+        if explicit and not (action_type == "change_order_price" and flow_version == "V4_NEW_FLOW_V2"):
             if len(explicit) > 500:
                 raise ValueError("command_dedupe_key_invalid")
             return explicit
         if action_type == "change_order_price":
-            quote = action.get("quote_snapshot") if isinstance(action.get("quote_snapshot"), Mapping) else {}
+            if flow_version == "V4_NEW_FLOW_V2":
+                action_key = _pick(action, "idempotency_key")
+                quote_key = _pick(quote, "idempotency_key")
+                required = (
+                    action_key, quote_key, _pick(quote, "flow_version"),
+                    _pick(quote, "source"), _pick(quote, "quote_id"),
+                    _pick(quote, "quote_version"), _pick(quote, "quote_hash"),
+                    _pick(quote, "terms_fingerprint"), _pick(quote, "quote_generation"),
+                    _pick(quote, "binding_revision"), _pick(quote, "order_id"),
+                    _pick(quote, "tenant_id"), _pick(quote, "shop_id"),
+                    _pick(quote, "buyer_id"), _pick(quote, "chat_id"),
+                    str(quote.get("target_amount_cents") or ""),
+                    str(quote.get("observed_order_amount_cents") or ""),
+                )
+                if (
+                    any(not value for value in required)
+                    or not isinstance(quote.get("quote_generation"), int)
+                    or isinstance(quote.get("quote_generation"), bool)
+                    or not isinstance(quote.get("binding_revision"), int)
+                    or isinstance(quote.get("binding_revision"), bool)
+                    or not isinstance(quote.get("target_amount_cents"), int)
+                    or isinstance(quote.get("target_amount_cents"), bool)
+                    or not isinstance(quote.get("observed_order_amount_cents"), int)
+                    or isinstance(quote.get("observed_order_amount_cents"), bool)
+                    or not isinstance(quote.get("transaction_revision"), int)
+                    or isinstance(quote.get("transaction_revision"), bool)
+                    or quote.get("quote_generation") < 1
+                    or quote.get("binding_revision") < 1
+                    or quote.get("target_amount_cents") <= 0
+                    or quote.get("observed_order_amount_cents") <= 0
+                    or quote.get("transaction_revision") < 0
+                    or _pick(action, "flow_version") != "V4_NEW_FLOW_V2"
+                    or _pick(action, "source") != "phase_9a_authorization"
+                    or quote.get("flow_version") != "V4_NEW_FLOW_V2"
+                    or quote.get("source") != "phase_9a_authorization"
+                    or quote.get("quote_hash") != quote.get("terms_fingerprint")
+                    or _pick(action, "tenant_id") != _pick(quote, "tenant_id")
+                    or _pick(action, "shop_id") != _pick(quote, "shop_id")
+                    or _pick(action, "buyer_id") != _pick(quote, "buyer_id")
+                    or _pick(action, "chat_id") != _pick(quote, "chat_id")
+                    or _pick(action, "platform_order_id") != _pick(quote, "order_id")
+                    or action.get("target_amount_fen") != quote.get("target_amount_cents")
+                    or action.get("current_amount_fen") != quote.get("observed_order_amount_cents")
+                    or action.get("transaction_revision") != quote.get("transaction_revision")
+                    or quote_key != action_key
+                    or not action_key.startswith("price_change:v1:")
+                ):
+                    raise ValueError("price_change_command_identity_invalid")
+                from .order_quote_binding_v2.service import canonical_reprice_idempotency_key
+
+                expected_key = canonical_reprice_idempotency_key(
+                    platform_order_id=str(quote["order_id"]), quote_id=str(quote["quote_id"]),
+                    quote_generation=quote["quote_generation"],
+                    binding_revision=quote["binding_revision"],
+                    target_amount_fen=quote["target_amount_cents"],
+                )
+                if action_key != expected_key:
+                    raise ValueError("price_change_command_identity_invalid")
+                return action_key
             values = (
                 _pick(quote, "order_id"), _pick(quote, "quote_record_id"),
                 _pick(quote, "confirmation_version"), str(quote.get("target_amount_cents") or ""),
@@ -1131,44 +1043,50 @@ class RulesFirstStore:
         now: datetime | None = None,
     ) -> list[dict[str, Any]]:
         timestamp = _now(now).isoformat()
-        status_clause = "status IN ('pending','reconciling')"
+        normalized_types = tuple(sorted({str(item).strip() for item in command_types or () if str(item).strip()}))
+        if command_types is not None and not normalized_types:
+            return []
         type_clause = ""
-        parameters: list[object] = []
+        type_parameters: tuple[object, ...] = ()
         if command_types is not None:
-            normalized_types = tuple(sorted({str(item).strip() for item in command_types if str(item).strip()}))
-            if not normalized_types:
-                return []
-            placeholders = ",".join("?" for _ in normalized_types)
-            type_clause = f" AND command_type IN ({placeholders})"
-            parameters.extend(normalized_types)
-        where = status_clause + type_clause
+            type_clause = f" AND command_type IN ({','.join('?' for _ in normalized_types)})"
+            type_parameters = normalized_types
+        where = "status IN ('pending','reconciling')" + type_clause
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
-                f"SELECT * FROM command_outbox WHERE {where} ORDER BY created_at",
-                tuple(parameters),
+                f"SELECT * FROM command_outbox WHERE {where} ORDER BY created_at", type_parameters,
             ).fetchall()
             connection.execute(
                 f"""UPDATE command_outbox SET status='cancelled',next_attempt_at=NULL,
                    last_error=?,updated_at=? WHERE {where}""",
-                (str(reason)[:240], timestamp, *parameters),
+                (str(reason)[:240], timestamp, *type_parameters),
             )
             connection.commit()
         return [self._command_view(row) for row in rows]
 
     def claim_commands(
         self, *, now: datetime | None = None, lease_seconds: int = 60, limit: int = 10,
+        command_types: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         current = _now(now)
         claimed: list[dict[str, Any]] = []
+        normalized_types = tuple(sorted({str(item).strip() for item in command_types or () if str(item).strip()}))
+        if command_types is not None and not normalized_types:
+            return []
+        type_clause = ""
+        type_parameters: tuple[object, ...] = ()
+        if command_types is not None:
+            type_clause = f" AND command_type IN ({','.join('?' for _ in normalized_types)})"
+            type_parameters = normalized_types
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
-                """SELECT * FROM command_outbox
-                   WHERE ((status IN ('pending','reconciling') AND (next_attempt_at IS NULL OR next_attempt_at<=?))
-                      OR (status='claimed' AND lease_until<=?))
+                f"""SELECT * FROM command_outbox
+                   WHERE (((status IN ('pending','reconciling') AND (next_attempt_at IS NULL OR next_attempt_at<=?))
+                      OR (status='claimed' AND lease_until<=?)){type_clause})
                    ORDER BY created_at,command_id LIMIT ?""",
-                (current.isoformat(), current.isoformat(), max(1, min(int(limit), 50))),
+                (current.isoformat(), current.isoformat(), *type_parameters, max(1, min(int(limit), 50))),
             ).fetchall()
             for row in rows:
                 token = uuid4().hex
@@ -1230,9 +1148,7 @@ class RulesFirstStore:
             next_attempt_at = None
             reconciliation_only = int(row["reconciliation_only"])
             reconciliation_attempts = int(row["reconciliation_attempts"])
-            if requested_status == "unknown" and row["command_type"] in {
-                "change_order_price", "cancel_failed_liangpiao_source_order",
-            }:
+            if requested_status == "unknown" and row["command_type"] == "change_order_price":
                 if reconciliation_attempts < len(_RECONCILIATION_DELAYS_SECONDS):
                     delay = _RECONCILIATION_DELAYS_SECONDS[reconciliation_attempts]
                     reconciliation_attempts += 1
@@ -1286,49 +1202,6 @@ class RulesFirstStore:
             )
             row = connection.execute("SELECT * FROM manual_tasks WHERE task_id=?", (task_id,)).fetchone()
         return self._manual_view(row)
-
-    def resolve_manual_tasks_after_state_transition(
-        self, *, tenant_id: str, transaction_id: str, state_revision: int,
-        state_after: str, event_id: str,
-    ) -> int:
-        tenant = str(tenant_id or "").strip()
-        transaction = str(transaction_id or "").strip()
-        state = str(state_after or "").strip().upper()
-        event = str(event_id or "").strip()
-        if not tenant or not transaction or not event or state_revision < 0:
-            raise ValueError("manual_task_state_resolution_invalid")
-        if state == "MANUAL_HOLD":
-            return 0
-        fulfillment_terminal = state in {"TICKET_SENT", "COMPLETED", "CANCELLED", "REFUNDED"}
-        timestamp = _now().isoformat()
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            rows = connection.execute(
-                """SELECT task_id, reason FROM manual_tasks
-                   WHERE tenant_id=? AND transaction_id=? AND status IN ('pending','claimed')""",
-                (tenant, transaction),
-            ).fetchall()
-            task_ids = [
-                str(row["task_id"]) for row in rows
-                if row["reason"] != "fulfillment_required" or fulfillment_terminal
-            ]
-            changed = 0
-            for task_id in task_ids:
-                changed += connection.execute(
-                    """UPDATE manual_tasks SET status='completed',transaction_revision=?,
-                       lease_token=NULL,lease_until=NULL,resolution_protected=?,updated_at=?
-                       WHERE task_id=? AND status IN ('pending','claimed')""",
-                    (
-                        state_revision,
-                        self._protect({
-                            "resolution": "state_transition", "state_after": state,
-                            "event_id": event,
-                        }),
-                        timestamp, task_id,
-                    ),
-                ).rowcount
-            connection.commit()
-        return changed
 
     def list_manual_tasks(self, tenant_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:

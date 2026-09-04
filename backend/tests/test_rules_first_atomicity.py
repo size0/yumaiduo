@@ -14,7 +14,6 @@ def test_selected_seat_real_write_gates_default_closed(monkeypatch) -> None:
         "EXTERNAL_WRITES_ENABLED",
         "LIANGPIAO_CALLBACK_ENABLED",
         "WANDA_EXTERNAL_WRITES_ENABLED",
-        "AGENT_HARNESS_READ_ONLY",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -24,13 +23,6 @@ def test_selected_seat_real_write_gates_default_closed(monkeypatch) -> None:
     assert settings.liangpiao_order_create_enabled is False
     assert settings.external_writes_enabled is False
     assert settings.liangpiao_callback_enabled is False
-    assert settings.agent_harness_read_only is True
-
-
-def test_agent_harness_read_only_flag_can_be_explicitly_disabled_for_non_production_tests(monkeypatch) -> None:
-    monkeypatch.setenv("AGENT_HARNESS_READ_ONLY", "false")
-
-    assert Settings.from_env().agent_harness_read_only is False
 
 
 def test_selected_seat_real_write_gates_read_explicit_environment(monkeypatch) -> None:

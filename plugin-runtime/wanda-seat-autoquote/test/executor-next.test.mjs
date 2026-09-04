@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildPriceChangeIdempotencyKey,
+  canonicalRepriceIdentity,
   normalizeAuthoritativeOrder,
   normalizeInboundEvent,
   normalizeQuoteSnapshot,
@@ -59,6 +60,24 @@ function quoteSnapshot(overrides = {}) {
     observed_order_amount_cents: 2_000,
     ...overrides,
   };
+}
+
+function newFlowQuoteSnapshot(overrides = {}) {
+  const snapshot = {
+    ...quoteSnapshot(),
+    quote_id: 'quote-1',
+    quote_hash: 'tf-1',
+    terms_fingerprint: 'tf-1',
+    quote_generation: 1,
+    binding_revision: 1,
+    transaction_revision: 0,
+    flow_version: 'V4_NEW_FLOW_V2',
+    source: 'phase_9a_authorization',
+    idempotency_key: '',
+    ...overrides,
+  };
+  snapshot.idempotency_key = buildPriceChangeIdempotencyKey(snapshot);
+  return snapshot;
 }
 
 function backendFullQuoteSnapshot(overrides = {}) {
@@ -150,6 +169,106 @@ function harness({ before = order(), after = order({ payment: 2_900 }), change_p
   });
   return { executor, calls, store };
 }
+
+test('canonical V2 reprice identity is stable and changes with quote lineage or target', () => {
+  const snapshot = {
+    quote_version: 'qv-1', quote_id: 'quote-1', quote_hash: 'tf-1',
+    quote_generation: 1, binding_revision: 1, transaction_revision: 0,
+    flow_version: 'V4_NEW_FLOW_V2', source: 'phase_9a_authorization',
+    idempotency_key: '', order_id: 'order-1', tenant_id: 'tenant-1',
+    shop_id: 'shop-1', buyer_id: 'buyer-1', chat_id: 'chat-1',
+    target_amount_cents: 2_900,
+  };
+  snapshot.idempotency_key = buildPriceChangeIdempotencyKey(snapshot);
+  const normalized = normalizeQuoteSnapshot(snapshot);
+  assert.equal(normalized.idempotency_key, snapshot.idempotency_key);
+  assert.deepEqual(canonicalRepriceIdentity(snapshot), ['order-1', 'quote-1', 1, 1, 2900]);
+  assert.equal(snapshot.idempotency_key, 'price_change:v1:bb4dUMUImWo-FCYwmA4mc2RD4FqQFYHz4uev8sNUttk');
+  assert.equal(buildPriceChangeIdempotencyKey(snapshot), snapshot.idempotency_key);
+  assert.notEqual(buildPriceChangeIdempotencyKey({ ...snapshot, quote_generation: 2 }), snapshot.idempotency_key);
+  assert.notEqual(buildPriceChangeIdempotencyKey({ ...snapshot, binding_revision: 2 }), snapshot.idempotency_key);
+  assert.notEqual(buildPriceChangeIdempotencyKey({ ...snapshot, target_amount_cents: 3_000 }), snapshot.idempotency_key);
+});
+
+test('new-flow executor confirms only after authoritative reread and keeps the canonical result class', async () => {
+  const { executor, calls } = harness();
+  const result = await executor.execute({
+    provider_event: providerEvent(), quote_snapshot: newFlowQuoteSnapshot(),
+  });
+
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.reprice_status, 'REPRICE_CONFIRMED');
+  assert.equal(calls.filter(([name]) => name === 'orders.change_price').length, 1);
+  assert.deepEqual(calls.map(([name]) => name), [
+    'orders.get', 'im.get_session_by_order', 'orders.change_price', 'orders.get',
+  ]);
+});
+
+test('new-flow already-priced and paid orders never call the provider writer', async (t) => {
+  await t.test('already priced', async () => {
+    const { executor, calls } = harness({ before: order({ payment: 2_900 }), after: order({ payment: 2_900 }) });
+    const result = await executor.execute({
+      provider_event: providerEvent(), quote_snapshot: newFlowQuoteSnapshot(),
+    });
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.reprice_status, 'ALREADY_PRICED');
+    assert.equal(calls.some(([name]) => name === 'orders.change_price'), false);
+  });
+  await t.test('paid before execution', async () => {
+    const { executor, calls } = harness({ before: order({ payTime: '2026-08-12T00:01:00Z', orderStatus: 2 }), after: order({ payTime: '2026-08-12T00:01:00Z', orderStatus: 2 }) });
+    const result = await executor.execute({
+      provider_event: providerEvent(), quote_snapshot: newFlowQuoteSnapshot(),
+    });
+    assert.equal(result.status, 'skipped');
+    assert.equal(result.reprice_status, 'ORDER_NOT_UNPAID');
+    assert.equal(calls.some(([name]) => name === 'orders.change_price'), false);
+  });
+});
+
+test('new-flow separates unconfirmed writes from unknown writes and never blindly retries unknown', async (t) => {
+  await t.test('provider success but mismatched reread', async () => {
+    const { executor } = harness({
+      after: order({ payment: 2_000 }),
+      change_price: async () => ({ ok: true }),
+    });
+    const result = await executor.execute({
+      provider_event: providerEvent(), quote_snapshot: newFlowQuoteSnapshot(),
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reprice_status, 'REPRICE_UNCONFIRMED');
+  });
+  await t.test('timeout reconciles to target', async () => {
+    const { executor, calls } = harness({
+      change_price: async () => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError', code: 'ETIMEDOUT', status: 504 }); },
+      after: order({ payment: 2_900 }),
+    });
+    const result = await executor.execute({
+      provider_event: providerEvent(), quote_snapshot: newFlowQuoteSnapshot(),
+    });
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.reprice_status, 'REPRICE_CONFIRMED');
+    assert.equal(result.reconciled, true);
+    assert.equal(calls.filter(([name]) => name === 'orders.change_price').length, 1);
+  });
+  await t.test('timeout remains unknown and duplicate does not write again', async () => {
+    const store = new FakeReceiptStore();
+    const { executor, calls } = harness({
+      receipt_store: store,
+      change_price: async () => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError', code: 'ETIMEDOUT', status: 504 }); },
+      after: order({ payment: 2_000 }),
+    });
+    const snapshot = newFlowQuoteSnapshot();
+    const first = await executor.execute({ provider_event: providerEvent(), quote_snapshot: snapshot });
+    const callsAfterFirst = calls.filter(([name]) => name === 'orders.change_price').length;
+    const second = await executor.execute({ provider_event: providerEvent(), quote_snapshot: snapshot });
+    assert.equal(first.status, 'unknown');
+    assert.equal(first.reprice_status, 'REPRICE_UNKNOWN');
+    assert.equal(second.status, 'unknown');
+    assert.equal(second.reprice_status, 'REPRICE_UNKNOWN');
+    assert.equal(callsAfterFirst, 1);
+    assert.equal(calls.filter(([name]) => name === 'orders.change_price').length, 1);
+  });
+});
 
 test('normalizers map provider fields once and keep snake_case contracts with raw summaries', () => {
   const event = normalizeInboundEvent(providerEvent());

@@ -23,7 +23,7 @@ async def _coordinator(path: Path, provider: FixtureWandaProvider) -> ProbeCoord
         provider,
         probe_store=store,
         release_tracker=ReleaseTracker(store, clock=FakeClock()),
-        policy=ProbePolicy(active_probe_enabled=True, agent_harness_read_only=False),
+        policy=ProbePolicy(active_probe_enabled=True, external_writes_enabled=True),
     )
     return ProbeCoordinator(
         probe_store=store,
@@ -33,7 +33,7 @@ async def _coordinator(path: Path, provider: FixtureWandaProvider) -> ProbeCoord
             token_present=True, phone_present=True, risk_status="normal", remaining=2,
         )]),
         seat_selector=ProbeSeatSelector(), active_probe=active,
-        policy=ProbePolicy(active_probe_enabled=True, agent_harness_read_only=False),
+        policy=ProbePolicy(active_probe_enabled=True, external_writes_enabled=True),
     )
 
 

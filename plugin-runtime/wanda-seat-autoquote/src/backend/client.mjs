@@ -86,7 +86,6 @@ export function createV2BackendClient(config, { fetchImpl = globalThis.fetch, lo
     }),
     claimCommands: (limit = 10) => request('/api/wanda-ai-v2/plugin/commands/claim', { body: { limit }, retry: true }),
     reportCommand: ({ commandId, leaseToken, result }) => request(`/api/wanda-ai-v2/plugin/commands/${encodeURIComponent(commandId)}/result`, { eventId: commandId, body: { lease_token: leaseToken, result }, retry: true }),
-    createLiangpiaoOrder: ({ tenantId, request: orderRequest }) => request('/api/liangpiao/order/create', { tenantId, body: orderRequest }),
     claimReminders: (limit = 10) => request('/api/wanda-ai-v2/plugin/reminders/claim', { body: { limit }, retry: true }),
     completeReminder: (taskId, leaseToken, result) => request(`/api/wanda-ai-v2/plugin/reminders/${encodeURIComponent(taskId)}/complete`, { body: { lease_token: leaseToken, result }, retry: true }),
     failReminder: (taskId, leaseToken, reason) => request(`/api/wanda-ai-v2/plugin/reminders/${encodeURIComponent(taskId)}/fail`, { body: { lease_token: leaseToken, reason }, retry: true }),

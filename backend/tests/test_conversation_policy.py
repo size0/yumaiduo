@@ -17,9 +17,6 @@ def test_conversation_policy_defaults_to_per_user_24_hours_and_50_messages(tmp_p
     assert current.memory_depth == 50
     assert current.human_takeover_delay_seconds == 20
     assert current.ai_reply_enabled is True
-    assert "W+未标记" in current.customer_service_knowledge
-    assert "重新发送一张标记好的截图" in current.customer_service_knowledge
-    assert "拍下后先不要付款" in current.customer_service_knowledge
     saved = store.save({**current.model_dump(), "memory_hours": 12, "memory_depth": 30})
     assert saved.revision == 1
     assert ConversationPolicyStore(tmp_path / "conversation-policy.json").current().memory_depth == 30
@@ -35,36 +32,6 @@ def test_ai_reply_switch_is_dynamic_and_partial_updates_preserve_other_policy_fi
     assert saved.memory_depth == 30
     assert saved.human_takeover_delay_seconds == 45
     assert saved.revision == 2
-
-
-def test_legacy_keyword_confirmation_knowledge_migrates_to_current_playbook(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "conversation-policy.json"
-    policy = ConversationPolicyStore(path).save({
-        "customer_service_knowledge": (
-            "报价发送前检查信息完整，报价后引导买家核对并明确回复“正确”。"
-            "信息不确定时一律转人工。"
-        ),
-    })
-    assert "明确回复“正确”" in policy.customer_service_knowledge
-
-    migrated = ConversationPolicyStore(path).current()
-
-    assert "明确回复“正确”" not in migrated.customer_service_knowledge
-    assert "W+未标记" in migrated.customer_service_knowledge
-    assert "拍下后先不要付款" in migrated.customer_service_knowledge
-
-
-def test_business_background_save_clears_legacy_persona_background(tmp_path: Path) -> None:
-    store = ConversationPolicyStore(tmp_path / "conversation-policy.json")
-    store.save({"persona_background": "旧业务背景"})
-    migrated = store.current()
-    assert migrated.business_background == "旧业务背景"
-    assert migrated.persona_background == ""
-    saved = store.save({"business_background": "新业务背景"})
-    assert saved.business_background == "新业务背景"
-    assert saved.persona_background == ""
 
 
 def test_chat_memory_depth_changes_without_restarting_store(tmp_path: Path) -> None:
@@ -237,5 +204,6 @@ async def test_recent_human_reply_does_not_stop_deterministic_keyword_rule() -> 
 
     result = await automation.process_event(body)
 
-    assert result["decision"]["reason"] == "human_takeover_cooldown"
-    assert result["decision"]["actions"] == []
+    assert result["decision"]["reason"] == "custom_keyword_reply_ready"
+    assert result["decision"]["actions"][0]["text"] == "每天10点到22点。"
+    assert result["decision"]["actions"][0]["rule_governed"] is True

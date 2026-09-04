@@ -19,7 +19,9 @@ from .transaction_state_store import (
 
 
 class SqliteTransactionStateStore:
-    """Transaction state and append-only transition evidence in the rules-first DB."""
+    """Production New-flow transaction state in the RulesFirst DB."""
+
+    authority_name = "rules_first_sqlite"
 
     def __init__(
         self, path: Path, *, protector: SecretProtector | None = None,

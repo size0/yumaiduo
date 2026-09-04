@@ -280,10 +280,26 @@ class SelectedSeatQuoteService:
             "operator_pricing_applied": operator_markup_percent is not None,
             "operator_markup_percent": operator_markup_percent,
             "pricing_rule_version": _text(_value(preflight, "pricingRuleVersion", "pricing_rule_version")) or self._pricing_rule_version,
+            "provider_quote_id": _text(_value(preflight, "quoteId", "quote_id")),
+            "provider_quote_hash": _text(_value(preflight, "quoteHash", "quote_hash")),
+            "provider_preflight_expires_at": _text(_value(
+                preflight, "expiresAt", "expires_at", "quoteExpiresAt", "quote_expires_at",
+            )),
             "generation": req.generation, "trace_id": req.trace_id, "expires_at": expires_at.isoformat(),
         }
         quote_hash = hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        quote_id = f"lpq-{uuid4().hex}"
+        # The preflight evidence store keys by quote_id.  Derive that key from
+        # the canonical request identity so a retried event reuses one evidence
+        # row instead of creating another random provider snapshot.
+        quote_identity = {
+            "tenant_id": req.tenant_id, "conversation_id": req.conversation_id,
+            "show_id": show_id, "seats": preflight_payload["seats"],
+            "ticket_mode": req.ticket_mode, "price_mode": req.price_mode,
+            "area_quote_strategy": req.area_quote_strategy, "generation": req.generation,
+        }
+        quote_id = "lpq-" + hashlib.sha256(
+            json.dumps(quote_identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:32]
         plan = ReplyPlan(
             template_key="flow.quote.ready", template_version=1,
             variables={"showtime_summary": show_id, "ticket_count": len(selected),

@@ -201,6 +201,61 @@ async def test_sync_timeout_switches_once_to_idempotent_async_recognition() -> N
     assert result.recognition_id == "rec-1"
 
 
+def test_raw_city_is_a_hard_constraint_and_blocks_cross_city_final_override() -> None:
+    result = LiangpiaoRecognitionClient._map_result({
+        "recognizeId": "case-a",
+        "rawResults": {
+            "isSeatSelection": True, "city": "合肥",
+            "cinema": "合肥天鹅湖万达广场店", "film": "奥德赛",
+            "showtime": "2026-09-03 12:40:00", "hall": "IMAX激光厅",
+        },
+        "finalResults": {
+            "matchLevel": "NONE", "noMatchReason": "NOT_FOUND",
+            "city": "太原", "cinema": "万达影城 太原龙湖激光IMAX万达广场店（解放路店）",
+            "cinemaId": 8835, "film": "奥德赛", "showtime": "2026-09-03 12:40:00",
+            "hall": "IMAX激光厅", "cinemaHitNums": 1,
+            "candidates": {"cinemas": [
+                {"cinemaId": 8835, "name": "万达影城 太原龙湖激光IMAX万达广场店（解放路店）", "cityName": "太原", "score": 0.59},
+            ]},
+        },
+    })
+
+    assert result.city == "合肥"
+    assert result.cinema_name == "合肥天鹅湖万达广场店"
+    assert result.cinema_id is None
+    assert result.match_level == "CANDIDATE"
+    assert result.resolution_diagnostic == "RESOLVER_WRONG_MATCH"
+    assert result.candidate_cinemas == []
+
+
+def test_raw_city_filters_candidate_explosion_to_same_city() -> None:
+    result = LiangpiaoRecognitionClient._map_result({
+        "recognizeId": "case-b",
+        "rawResults": {
+            "isSeatSelection": True, "city": "保定",
+            "cinema": "保定万达影城万博广场店", "film": "奥德赛",
+            "showtime": "2026-09-05 10:15:00", "hall": "IMAX厅",
+        },
+        "finalResults": {
+            "matchLevel": "CANDIDATE", "city": "保定",
+            "cinema": "万达影城（保定万博广场激光IMAX店）", "cinemaId": 1799,
+            "film": "奥德赛", "showtime": "2026-09-05 10:15:00", "hall": "IMAX厅",
+            "cinemaHitNums": 47,
+            "candidates": {"cinemas": [
+                {"cinemaId": 1799, "name": "万达影城（保定万博广场激光IMAX店）", "cityName": "保定", "score": 0.95},
+                {"cinemaId": 4201, "name": "万达影城（万邦广场4DX店）", "cityName": "汉中", "score": 0.67},
+                {"cinemaId": 4748, "name": "万达影城（万达广场IMAX激光店）", "cityName": "呼和浩特", "score": 0.67},
+            ]},
+        },
+    })
+
+    assert result.city == "保定"
+    assert result.cinema_id == 1799
+    assert result.cinema_hit_count == 1
+    assert [candidate.city_name for candidate in result.candidate_cinemas] == ["保定"]
+    assert result.resolution_diagnostic != "RESOLVER_WRONG_MATCH"
+
+
 def test_liangpiao_recognition_routes_from_final_seats_even_when_show_is_unmatched() -> None:
     result = LiangpiaoRecognitionClient._map_result({
         "recognizeId": "14837",

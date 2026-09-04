@@ -12,6 +12,9 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+WPLUS_MARK_REQUIRED_TEXT = "辛苦标记一下位置截图发我哈"
+
+
 class KeywordReplyRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -64,7 +67,7 @@ class ReplyTemplates(BaseModel):
         max_length=4_000,
     )
     cinema_match_failure_template: str = Field(
-        default="我看到了截图中的影院是{影院}，但暂时无法唯一匹配官方影院。请补充“城市＋影院全名”，我会继续按原截图核对。",
+        default="我看到了截图中的影院是{影院}，但暂时无法唯一匹配万达官方门店（影院）。请补充“城市＋影院全名”，我会继续按原截图核对。",
         min_length=1,
         max_length=2_000,
     )
@@ -101,6 +104,18 @@ class ReplyTemplates(BaseModel):
         min_length=1,
         max_length=2_000,
     )
+    wplus_mark_required_template: str = Field(
+        default=WPLUS_MARK_REQUIRED_TEXT,
+        min_length=1,
+        max_length=1_000,
+    )
+
+    @field_validator("wplus_mark_required_template")
+    @classmethod
+    def keep_wplus_mark_required_text(cls, value: str) -> str:
+        if value != WPLUS_MARK_REQUIRED_TEXT:
+            raise ValueError("wplus_mark_required_template_is_fixed")
+        return value
     wplus_marker_confirmed_template: str = Field(
         default="请问需要几张呢？",
         min_length=1,
@@ -294,6 +309,7 @@ _TEMPLATE_LABELS = {
     "wplus_unit_price_reply_template": "W+单价回复文案",
     "wplus_marker_confirmation_template": "W+标记确认文案",
     "wplus_marker_missing_template": "W+未标记补问文案",
+    "wplus_mark_required_template": "W+履约标记待提交文案",
     "wplus_marker_confirmed_template": "W+已标记下单引导文案",
     "showtime_changed_template": "场次信息变化文案",
     "exact_quote_template": "精确座位报价",
@@ -354,6 +370,7 @@ _ALLOWED_VARIABLES = {
     "wplus_unit_price_reply_template": {"报价单价"},
     "wplus_marker_confirmation_template": set(),
     "wplus_marker_missing_template": set(),
+    "wplus_mark_required_template": set(),
     "wplus_marker_confirmed_template": set(),
     "showtime_changed_template": set(),
     "exact_quote_template": {"影片", "城市", "影院", "日期", "场次", "影厅", "座位", "报价名称", "逐座报价", "报价合计", "报价说明", "规则版本"},

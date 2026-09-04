@@ -25,6 +25,7 @@ from .errors import ProviderError
 from .models import MovieImageInfo, PricingRulesUpdate, RealQuote, RealSeatQuote
 from .reply_template_store import ReplyTemplates, render_template
 from .observability import LOGGER
+from .probe.errors import ProbeError
 from .probe.policy import ProbePolicy
 
 
@@ -46,7 +47,7 @@ APP_AES_KEY: Final = b"6f34faeefba8fd39"
 
 
 class WandaDirectQuoteService:
-    """Fast Wanda pricing with realtime W+ activity prices and a verified probe fallback."""
+    """Wanda read pricing with an explicitly gated Active Probe fallback."""
 
     def __init__(
         self,
@@ -61,6 +62,7 @@ class WandaDirectQuoteService:
         showtime_hedge_delay_seconds: float = 1.5,
         pricing_rules: PricingRulesUpdate | Callable[[], PricingRulesUpdate] | None = None,
         reply_templates: Callable[[], ReplyTemplates] | None = None,
+        probe_policy: ProbePolicy | None = None,
     ) -> None:
         self._settings_provider = settings if callable(settings) else lambda: settings
         self._pricing_rules_provider = (
@@ -68,6 +70,9 @@ class WandaDirectQuoteService:
             else lambda: pricing_rules or PricingRulesUpdate()
         )
         self._reply_templates_provider = reply_templates
+        # A dedicated policy is independent from the global settings fuse.
+        # Production composition does not inject an enabled policy by default.
+        self._probe_policy = probe_policy or ProbePolicy()
         initial = self._settings_provider()
         self._client = httpx.AsyncClient(
             transport=transport,
@@ -765,6 +770,7 @@ class WandaDirectQuoteService:
         *,
         channel: str,
         event: str,
+        record_response: bool = True,
     ) -> Mapping[str, Any]:
         parsed = urlsplit(origin)
         if (
@@ -870,7 +876,11 @@ class WandaDirectQuoteService:
         if not isinstance(payload, Mapping):
             raise ProviderError("wanda_official_response_invalid", "万达官方接口返回格式无效。")
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
-        self._diagnostics.add(event, duration_ms=duration_ms, response=payload)
+        self._diagnostics.add(
+            event,
+            duration_ms=duration_ms,
+            **({"response": payload} if record_response else {}),
+        )
         code = payload.get("code")
         data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
         biz_code = data.get("bizCode")
@@ -889,8 +899,26 @@ class WandaDirectQuoteService:
         showtime_id: str,
         seat: Mapping[str, Any],
     ) -> int:
-        if not ProbePolicy.context_allows_active_probe():
-            raise ProviderError("QUOTE_REQUIRES_ACTIVE_PROBE", "实时会员成本缺失，需要独立 Active Probe。")
+        # This is the legacy write-capable path. It must re-read runtime
+        # settings at the moment of admission so config reloads cannot leave a
+        # stale enabled decision in memory. The async flow context additionally
+        # proves that the caller explicitly accepted Probe, acquired a lease,
+        # and passed its risk gate.
+        try:
+            ProbePolicy.from_settings(self._settings_provider).ensure_allowed()
+            self._probe_policy.ensure_allowed()
+        except ProbeError as error:
+            raise ProviderError(error.code, error.message) from error
+        risk_status = str(account.get("risk_status") or "normal").strip().lower()
+        if risk_status != "normal":
+            raise ProviderError("probe_risk_check_failed", "万达账号未通过 Probe 风险检查。")
+        remaining = account.get("probe_remaining", account.get("remaining"))
+        if remaining is not None:
+            try:
+                if int(remaining) <= 0:
+                    raise ProviderError("probe_account_limit_exhausted", "万达账号当前不可执行 Probe。")
+            except (TypeError, ValueError):
+                raise ProviderError("probe_account_limit_unknown", "万达账号 Probe 限额状态无效。") from None
         seat_id = str(seat.get("seat_id") or "").strip()
         area_id = str(seat.get("area_id") or "").strip()
         original_price = int(seat.get("price") or 0)
@@ -1081,6 +1109,14 @@ class WandaDirectQuoteService:
         sign_encoded: bool = False,
         timeout_seconds: float | None = None,
     ) -> Mapping[str, Any]:
+        # This private APP request helper is exclusively used by the legacy
+        # Probe lifecycle. Guard it as well as the lifecycle entry so callers
+        # cannot bypass admission by invoking the helper directly.
+        try:
+            ProbePolicy.from_settings(self._settings_provider).ensure_allowed()
+            self._probe_policy.ensure_allowed()
+        except ProbeError as error:
+            raise ProviderError(error.code, error.message) from error
         parsed = urlsplit(origin)
         allowed_paths = {
             "/order/create_order.api", "/order/order_status.api", "/order/cancel.api",

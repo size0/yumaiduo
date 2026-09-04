@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Mapping, Sequence
 
 from .errors import PricingError
@@ -277,3 +277,26 @@ class QuoteResult:
     provider_quote_hash: str | None = None
     pricing_source: str = ""
     semantic_flags: tuple[str, ...] = ()
+    # Integration lineage is attached after the pure engine calculation.  The
+    # engine neither generates IDs nor persists records; these optional fields
+    # keep the authoritative QuoteResult as the only price-result DTO.
+    quote_id: str | None = None
+    record_id: str | None = None
+    event_id: str | None = None
+    recognition_snapshot_id: str | None = None
+    generation: int | None = None
+    quote_expires_at: str | None = None
+    supersedes_quote_id: str | None = None
+    provider_max_amount_cents: int | None = None
+    buyer_quote_cents: int | None = None
+    order_max_price_cents: int | None = None
+    calculation_evidence: Mapping[str, Any] = field(default_factory=dict)
+    recognition_source: str | None = None
+    show_resolution_source: str | None = None
+    matched_show_id: str | None = None
+    matched_movie_name: str | None = None
+    matched_date: str | None = None
+    matched_showtime_start: str | None = None
+    matched_hall_name: str | None = None
+    member_cost_source: str | None = None
+    transaction_authorized: bool = True

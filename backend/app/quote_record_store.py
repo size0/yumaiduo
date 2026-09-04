@@ -14,7 +14,16 @@ from .settings_store import SecretProtector, default_secret_protector
 
 
 class QuoteRecordStore:
-    """Encrypted, tenant-scoped persistence for authoritative quote audit records."""
+    """Encrypted, tenant-scoped persistence for authoritative quote audit records.
+
+    ``save`` remains the compatibility primitive for Legacy callers. V2 quote
+    lifecycle callers must use ``save_quote`` and the query methods below so
+    TTL, generation, supersession and eligibility have one authority.
+    """
+
+    _CURRENT_QUOTE_STATES = frozenset({"PREVIEW", "TRANSACTION_READY"})
+    _V2_QUOTE_SOURCES = frozenset({"AUTO_PRICING", "MANUAL_OPERATOR", "wanda_pricing_v2"})
+    _TRANSACTION_READY_STATE = "TRANSACTION_READY"
 
     def __init__(
         self,
@@ -52,6 +61,283 @@ class QuoteRecordStore:
             self._write_records(records[: self._max_records])
         return dict(normalized)
 
+    def save_quote(
+        self,
+        record: Mapping[str, Any],
+        *,
+        ttl_seconds: int = 1_800,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Persist a V2 quote and own its complete lifecycle.
+
+        This is deliberately an extension of the existing store rather than a
+        second quote repository. The service layer supplies facts only; this
+        method computes expiry, generation, terms hash and supersession while
+        holding the same store lock.
+        """
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 60 <= ttl_seconds <= 24 * 60 * 60:
+            raise ValueError("quote_record_ttl_seconds_invalid")
+        normalized = self._normalize(record)
+        created = self._datetime(normalized.get("created_at")) or self._datetime(now)
+        if created is None:
+            raise ValueError("quote_record_created_at_invalid")
+        created = created.astimezone(timezone.utc)
+        normalized["created_at"] = created.isoformat()
+        normalized["expires_at"] = (created + timedelta(seconds=ttl_seconds)).isoformat()
+        normalized["seller_quote_expires_at"] = normalized["expires_at"]
+        normalized["quote_expires_at"] = normalized["expires_at"]
+        source = str(normalized.get("source") or "").strip()
+        if source in {"wanda_pricing_v2", "AUTO_PRICING", "MANUAL_OPERATOR"}:
+            provider_expiry = normalized.get("provider_preflight_expires_at")
+            provider_preflight_verified = (
+                provider_expiry is None or self._expires_after(provider_expiry, created)
+            )
+            normalized["provider_preflight_verified"] = provider_preflight_verified
+            transaction_ready = bool(
+                not normalized.get("needs_ticket_count")
+                and normalized.get("ticket_count") is not None
+                and normalized.get("total_sell_price_fen") is not None
+                and provider_preflight_verified
+            )
+            normalized["transaction_authorized"] = transaction_ready
+            normalized["quote_state"] = "TRANSACTION_READY" if transaction_ready else "PREVIEW"
+        if source == "MANUAL_OPERATOR":
+            basis = str(normalized.get("price_basis") or "").strip()
+            if basis not in {"UNIT", "TOTAL"}:
+                raise ValueError("manual_quote_price_basis_invalid")
+            count = normalized.get("ticket_count")
+            if count is not None and (
+                not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 20
+            ):
+                raise ValueError("manual_quote_ticket_count_invalid")
+            if basis == "TOTAL":
+                total = normalized.get("total_sell_price_fen")
+                if count is None or not isinstance(total, int) or isinstance(total, bool) or total <= 0:
+                    raise ValueError("manual_quote_total_requires_count_and_total")
+            if basis == "UNIT" and (
+                not isinstance(normalized.get("unit_sell_price_fen"), int)
+                or isinstance(normalized.get("unit_sell_price_fen"), bool)
+                or normalized.get("unit_sell_price_fen") <= 0
+            ):
+                raise ValueError("manual_quote_unit_price_required")
+            if basis == "UNIT":
+                normalized["needs_ticket_count"] = normalized.get("ticket_count") is None
+                if normalized.get("ticket_count") is None:
+                    normalized["total_sell_price_fen"] = None
+                    normalized["total_quote_cents"] = None
+                else:
+                    unit = normalized.get("unit_sell_price_fen")
+                    if not isinstance(unit, int) or isinstance(unit, bool) or unit <= 0:
+                        raise ValueError("manual_quote_unit_price_required")
+                    normalized["total_sell_price_fen"] = unit * normalized["ticket_count"]
+                    normalized["total_quote_cents"] = normalized["total_sell_price_fen"]
+                transaction_ready = normalized["total_sell_price_fen"] is not None
+                normalized["transaction_authorized"] = transaction_ready
+                normalized["quote_state"] = "TRANSACTION_READY" if transaction_ready else "PREVIEW"
+        identity = self._quote_identity(normalized)
+        request_id = str(normalized.get("request_id") or "").strip()
+        if not request_id:
+            raise ValueError("quote_record_request_id_invalid")
+        with self._lock:
+            records = self._read_records()
+            existing = next(
+                (
+                    item for item in records
+                    if self._quote_identity(item) == identity
+                    and str(item.get("request_id") or "").strip() == request_id
+                ),
+                None,
+            )
+            if existing is not None:
+                if self._quote_idempotency_material(existing) != self._quote_idempotency_material(normalized):
+                    raise ValueError("idempotency_request_conflict")
+                return dict(existing)
+
+            lineage = [
+                item for item in records
+                if self._quote_identity(item) == identity
+                and str(item.get("purchase_context_id") or item.get("item_id") or "").strip()
+                == str(normalized.get("purchase_context_id") or normalized.get("item_id") or "").strip()
+                and self._is_current_quote(item)
+                and not item.get("platform_order_id")
+                and not item.get("order_id")
+            ]
+            normalized["generation"] = max(
+                (self._positive_generation(item) for item in lineage), default=0,
+            ) + 1
+            normalized = self._with_lineage(normalized, None)
+            normalized["quote_hash"] = normalized.get("terms_fingerprint")
+            predecessor = self._latest_quote_predecessor(
+                lineage, normalized,
+                allow_same_terms=source == "MANUAL_OPERATOR",
+            )
+            active_manual = next(
+                (
+                    item for item in lineage
+                    if item.get("source") == "MANUAL_OPERATOR"
+                    and self._expires_after(item.get("expires_at"), created)
+                ),
+                None,
+            )
+            if source in {"wanda_pricing_v2", "AUTO_PRICING"} and active_manual is not None:
+                # Preserve the manual authority as current while retaining the
+                # automatic calculation as an audit record.
+                normalized.update({
+                    "status": "superseded",
+                    "quote_state": "SUPERSEDED",
+                    "transaction_authorized": False,
+                    "invalidated_reason": "active_manual_quote_authority",
+                    "superseded_by_quote_id": active_manual.get("quote_id"),
+                })
+                predecessor = None
+            if predecessor is not None:
+                normalized["supersedes_quote_id"] = predecessor.get("quote_id")
+
+            records = [item for item in records if item.get("record_id") != normalized["record_id"]]
+            records.append(normalized)
+            if predecessor is not None:
+                predecessor_id = predecessor.get("record_id")
+                for item in records:
+                    if item.get("record_id") != predecessor_id:
+                        continue
+                    item.update({
+                        "status": "superseded",
+                        "quote_state": "SUPERSEDED",
+                        "transaction_authorized": False,
+                        "superseded_by_quote_id": normalized.get("quote_id"),
+                        "superseded_at": created.isoformat(),
+                    })
+                    break
+            records.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+            self._write_records(records[: self._max_records])
+        return dict(normalized)
+
+    def list_current_quotes(
+        self,
+        *,
+        tenant_id: str,
+        shop_id: str,
+        buyer_id: str,
+        chat_id: str,
+        at: datetime,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Return active V2 quotes; expiry/state decisions live in this store."""
+        identity = self._quote_identity({
+            "tenant_id": tenant_id, "shop_id": shop_id,
+            "buyer_id": buyer_id, "chat_id": chat_id,
+        })
+        reference = self._datetime(at)
+        if reference is None:
+            raise ValueError("quote_query_datetime_invalid")
+        with self._lock:
+            records = [item for item in self._read_records() if self._quote_identity(item) == identity]
+        active = [
+            dict(item) for item in records
+            if self._is_current_quote(item) and self._expires_after(item.get("expires_at"), reference)
+        ]
+        if active:
+            return "ACTIVE_QUOTES_FOUND", active
+        expired = any(
+            self._is_current_quote(item) and not self._expires_after(item.get("expires_at"), reference)
+            for item in records
+        )
+        return ("QUOTE_EXPIRED" if expired else "NO_QUOTE_EVER"), []
+
+    def list_transaction_candidates(
+        self,
+        *,
+        tenant_id: str,
+        shop_id: str,
+        buyer_id: str,
+        chat_id: str,
+        at: datetime,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Return only active, unbound, transaction-ready candidates."""
+        identity = self._quote_identity({
+            "tenant_id": tenant_id, "shop_id": shop_id,
+            "buyer_id": buyer_id, "chat_id": chat_id,
+        })
+        reference = self._datetime(at)
+        if reference is None:
+            raise ValueError("quote_query_datetime_invalid")
+        with self._lock:
+            records = [item for item in self._read_records() if self._quote_identity(item) == identity]
+        v2_records = [item for item in records if item.get("source") in self._V2_QUOTE_SOURCES]
+        candidates = [
+            dict(item) for item in v2_records
+            if self._is_transaction_candidate(item, reference)
+        ]
+        if candidates:
+            return "ACTIVE_TRANSACTION_QUOTES", candidates
+        current = [item for item in v2_records if self._is_current_quote(item)]
+        if any(
+            item.get("quote_state") == "PREVIEW"
+            and self._expires_after(item.get("expires_at"), reference)
+            for item in current
+        ):
+            return "ONLY_PREVIEW_QUOTES", []
+        if any(
+            item.get("quote_state") == self._TRANSACTION_READY_STATE
+            and not self._expires_after(item.get("expires_at"), reference)
+            for item in current
+        ):
+            return "QUOTE_EXPIRED", []
+        return ("NO_QUOTE_EVER" if not v2_records else "NO_ACTIVE_TRANSACTION_QUOTE"), []
+
+    def is_quote_active(self, record: Mapping[str, Any], *, at: datetime) -> bool:
+        """Evaluate current/expiry eligibility from the Quote authority."""
+        reference = self._datetime(at)
+        return reference is not None and self._is_current_quote(record) and self._expires_after(
+            record.get("expires_at"), reference,
+        )
+
+    def get_bound_order_quote(
+        self,
+        *,
+        tenant_id: str,
+        shop_id: str,
+        buyer_id: str,
+        chat_id: str,
+        platform_order_id: str,
+    ) -> dict[str, Any] | None:
+        identity = self._quote_identity({
+            "tenant_id": tenant_id, "shop_id": shop_id,
+            "buyer_id": buyer_id, "chat_id": chat_id,
+        })
+        wanted = str(platform_order_id or "").strip()
+        if not wanted:
+            return None
+        with self._lock:
+            for item in self._read_records():
+                if self._quote_identity(item) != identity:
+                    continue
+                stored = str(item.get("platform_order_id") or item.get("order_id") or "").strip()
+                if stored == wanted and item.get("quote_id"):
+                    return dict(item)
+        return None
+
+    def find_by_request(
+        self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
+        request_id: str,
+    ) -> dict[str, Any] | None:
+        identity = self._quote_identity({
+            "tenant_id": tenant_id, "shop_id": shop_id,
+            "buyer_id": buyer_id, "chat_id": chat_id,
+        })
+        wanted = str(request_id or "").strip()
+        if not wanted:
+            return None
+        with self._lock:
+            selected = next(
+                (
+                    item for item in self._read_records()
+                    if self._quote_identity(item) == identity
+                    and str(item.get("request_id") or "").strip() == wanted
+                ),
+                None,
+            )
+        return dict(selected) if selected is not None else None
+
     def list(self, tenant_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         tenant = str(tenant_id or "").strip()
         if not tenant:
@@ -75,149 +361,6 @@ class QuoteRecordStore:
                 if item.get("tenant_id") == tenant and item.get("record_id") == wanted
             ), None)
         return dict(selected) if selected is not None else None
-
-    def invalidate(
-        self, *, tenant_id: str, record_id: str, reason: str,
-    ) -> dict[str, Any] | None:
-        tenant = str(tenant_id or "").strip()
-        wanted = str(record_id or "").strip()
-        normalized_reason = str(reason or "").strip()
-        if not tenant or not wanted or not normalized_reason:
-            return None
-        with self._lock:
-            records = self._read_records()
-            selected = next(
-                (
-                    item for item in records
-                    if item.get("tenant_id") == tenant
-                    and item.get("record_id") == wanted
-                    and item.get("status") in {None, "succeeded"}
-                ),
-                None,
-            )
-            if selected is None:
-                return None
-            selected["invalidated_reason"] = normalized_reason
-            normalized = self._normalize(selected)
-            self._write_records(records[: self._max_records])
-            return dict(normalized)
-
-    def select_offer(
-        self, *, tenant_id: str, record_id: str, offer_id: str,
-        selected_at: datetime | None = None,
-        selection_source: str = "api",
-        authoritative_offer: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        """Select one immutable offer on a tenant-scoped quote record.
-
-        Selection never changes the amount or quote facts. It only records the
-        buyer's chosen offer so later order binding can require an explicit,
-        auditable choice instead of assuming the newest quote.
-        """
-        tenant = str(tenant_id or "").strip()
-        wanted_record = str(record_id or "").strip()
-        wanted_offer = str(offer_id or "").strip()
-        source = str(selection_source or "").strip().lower()
-        if not tenant or not wanted_record or not wanted_offer or source not in {
-            "api", "buyer_message", "operator_panel", "rule_event",
-        }:
-            return None
-        with self._lock:
-            records = self._read_records()
-            selected = next(
-                (item for item in records
-                 if item.get("tenant_id") == tenant and item.get("record_id") == wanted_record),
-                None,
-            )
-            if selected is None or selected.get("status") not in {None, "succeeded"}:
-                return None
-            expires_at = self._datetime(selected.get("quote_expires_at"))
-            if expires_at is not None and expires_at <= datetime.now(timezone.utc):
-                return None
-            offers = selected.get("offers")
-            if not isinstance(offers, list):
-                return None
-            offer = next(
-                (value for value in offers
-                 if isinstance(value, Mapping) and str(value.get("offer_id") or "") == wanted_offer),
-                None,
-            )
-            if not isinstance(offer, Mapping):
-                return None
-            selected_offer = dict(offer)
-            if authoritative_offer is not None:
-                allowed = {
-                    "price_mode", "ticket_mode", "unit_quote_cents", "total_quote_cents",
-                    "ticket_count", "quote_expires_at", "quote_id", "quote_hash",
-                    "generation", "preflight_verified", "provider_amount_fen",
-                    "max_price_fen", "pricing_rule_version",
-                }
-                selected_offer.update({
-                    key: value for key, value in authoritative_offer.items()
-                    if key in allowed and value is not None
-                })
-                required_lineage = (
-                    selected_offer.get("quote_id"), selected_offer.get("quote_hash"),
-                    selected_offer.get("generation"), selected_offer.get("quote_expires_at"),
-                )
-                refreshed_expiry = self._datetime(selected_offer.get("quote_expires_at"))
-                refreshed_total = selected_offer.get("total_quote_cents")
-                refreshed_generation = selected_offer.get("generation")
-                if (
-                    not all(required_lineage)
-                    or len(str(selected_offer.get("quote_hash"))) != 64
-                    or selected_offer.get("preflight_verified") is not True
-                    or not isinstance(refreshed_total, int) or isinstance(refreshed_total, bool) or refreshed_total <= 0
-                    or not isinstance(refreshed_generation, int) or isinstance(refreshed_generation, bool) or refreshed_generation < 1
-                    or refreshed_expiry is None or refreshed_expiry <= datetime.now(timezone.utc)
-                ):
-                    return None
-                for field in (
-                    "confirmation_id", "confirmation_version", "confirmation_source",
-                    "confirmation_event_id", "confirmed_at", "confirmed_ticket_count",
-                    "order_id", "order_bound_at", "order_binding_event_id",
-                ):
-                    selected.pop(field, None)
-                selected["quote_expires_at"] = selected_offer["quote_expires_at"]
-            selected["selected_offer_id"] = wanted_offer
-            selected["selected_offer"] = selected_offer
-            selected["selected_at"] = (selected_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
-            selected["selection_source"] = source
-            selected.pop("terms_fingerprint", None)
-            selected.pop("quote_version", None)
-            normalized = self._with_lineage(self._normalize(selected), None)
-            self._write_records([
-                normalized if item.get("record_id") == wanted_record else item
-                for item in records
-            ])
-            return dict(normalized)
-
-    def mark_event_quotes_delivered(
-        self, *, tenant_id: str, event_id: str, delivered_at: datetime, message_id: str,
-    ) -> int:
-        """Mark all Agent quote tool records for one sent event as delivered."""
-        tenant = str(tenant_id or "").strip()
-        event = str(event_id or "").strip()
-        message = str(message_id or "").strip()
-        if not tenant or not event or not message:
-            return 0
-        prefix = f"{event}:agent:"
-        with self._lock:
-            records = self._read_records()
-            changed = 0
-            for item in records:
-                if (
-                    item.get("tenant_id") == tenant
-                    and str(item.get("record_id") or "").startswith(prefix)
-                    and item.get("status") in {None, "succeeded"}
-                ):
-                    item["delivery_state"] = "delivered"
-                    item["delivered_at"] = delivered_at.astimezone(timezone.utc).isoformat()
-                    item["delivery_message_id"] = message
-                    changed += 1
-            if changed:
-                self._write_records(records)
-            return changed
 
     def find_by_order(
         self, *, tenant_id: str, order_id: str, shop_id: str | None = None,
@@ -268,7 +411,7 @@ class QuoteRecordStore:
             )
             if recent is None or recent.get("delivery_state") != "delivered":
                 return None
-            created_at = self._effective_quote_time(recent)
+            created_at = self._datetime(recent.get("created_at"))
             if created_at is None:
                 return None
             previous_count = recent.get("confirmed_ticket_count") or recent.get("ticket_count")
@@ -285,10 +428,7 @@ class QuoteRecordStore:
                 "confirmation_event_id": str(confirmation_id),
                 "confirmed_at": confirmed_at.astimezone(timezone.utc).isoformat(),
                 "confirmed_ticket_count": effective_count,
-                "quote_expires_at": min(
-                    created_at + timedelta(seconds=max_age_seconds),
-                    self._datetime(recent.get("quote_expires_at")) or created_at + timedelta(seconds=max_age_seconds),
-                ).isoformat(),
+                "quote_expires_at": (created_at + timedelta(seconds=max_age_seconds)).isoformat(),
             })
             normalized = self._normalize(recent)
             updated = [item for item in records if item.get("record_id") != normalized["record_id"]]
@@ -466,99 +606,27 @@ class QuoteRecordStore:
             self._write_records(records[: self._max_records])
             return dict(normalized)
 
-    def release_order_binding(
-        self, *, record_id: str, tenant_id: str, shop_id: str, buyer_id: str,
-        chat_id: str, order_id: str, released_at: datetime,
-    ) -> dict[str, Any] | None:
-        expected = tuple(str(value or "").strip() for value in (tenant_id, shop_id, buyer_id, chat_id))
-        wanted_record = str(record_id or "").strip()
-        wanted_order = str(order_id or "").strip()
-        if not wanted_record or not wanted_order or any(not value for value in expected):
-            return None
-        with self._lock:
-            records = self._read_records()
-            selected = next((item for item in records if item.get("record_id") == wanted_record), None)
-            if selected is None:
-                return None
-            actual = tuple(str(selected.get(field) or "").strip() for field in ("tenant_id", "shop_id", "buyer_id", "chat_id"))
-            if actual != expected or str(selected.get("order_id") or "").strip() != wanted_order:
-                return None
-            selected.update({
-                "order_id": None,
-                "binding_state": "confirmed",
-                "order_bound_at": None,
-                "order_released_at": released_at.astimezone(timezone.utc).isoformat(),
-            })
-            normalized = self._normalize(selected)
-            self._write_records(records[: self._max_records])
-            return dict(normalized)
-
     def find_confirmed(
         self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
         item_id: str | None, at: datetime,
     ) -> dict[str, Any] | None:
-        """Return the newest usable confirmed quote in this conversation.
-
-        A newer quote can be persisted before its send action is reconciled.
-        Looking at only the newest record would hide an older confirmation for
-        the same terms during that small window.  That is unsafe in the other
-        direction too, so a newer delivered replacement with a different
-        terms fingerprint still blocks the older confirmation.
-        """
-        wanted = tuple(str(value or "").strip() for value in (
-            tenant_id, shop_id, buyer_id, chat_id,
-        ))
-        wanted_item = str(item_id or "").strip()
-        reference = at.astimezone(timezone.utc)
-        with self._lock:
-            recent: list[tuple[datetime, dict[str, Any]]] = []
-            for item in self._read_records():
-                actual = tuple(str(item.get(field) or "").strip() for field in (
-                    "tenant_id", "shop_id", "buyer_id", "chat_id",
-                ))
-                if actual != wanted:
-                    continue
-                record_item = str(item.get("item_id") or "").strip()
-                if wanted_item and record_item != wanted_item:
-                    continue
-                created = self._effective_quote_time(item)
-                if created is None or not 0 <= (reference - created).total_seconds() <= 900:
-                    continue
-                if (
-                    item.get("status") not in {None, "succeeded"}
-                    or item.get("delivery_state") != "delivered"
-                    or item.get("invalidated_reason")
-                    or item.get("quote_scope") not in {"exact_seats", "area_probe", "area_preview"}
-                ):
-                    continue
-                recent.append((created, item))
-
-            recent.sort(key=lambda pair: pair[0], reverse=True)
-            for created, candidate in recent:
-                if not candidate.get("confirmation_version"):
-                    continue
-                expires_at = self._datetime(candidate.get("quote_expires_at"))
-                count = candidate.get("confirmed_ticket_count")
-                if (
-                    expires_at is None or reference >= expires_at
-                    or not isinstance(count, int) or isinstance(count, bool)
-                    or not 1 <= count <= 20
-                ):
-                    continue
-                candidate_id = str(candidate.get("record_id") or candidate.get("quote_id") or "")
-                candidate_terms = str(candidate.get("terms_fingerprint") or "")
-                superseding_changed = any(
-                    newer_created > created
-                    and str(newer.get("supersedes_quote_id") or "") == candidate_id
-                    and candidate_terms
-                    and str(newer.get("terms_fingerprint") or "")
-                    and str(newer.get("terms_fingerprint")) != candidate_terms
-                    for newer_created, newer in recent
-                )
-                if superseding_changed:
-                    continue
-                return dict(candidate)
-        return None
+        recent = self.find_recent(
+            tenant_id=tenant_id, shop_id=shop_id, buyer_id=buyer_id, chat_id=chat_id,
+            item_id=item_id, at=at,
+        )
+        if (
+            recent is None
+            or recent.get("delivery_state") != "delivered"
+            or not recent.get("confirmation_version")
+        ):
+            return None
+        expires_at = self._datetime(recent.get("quote_expires_at"))
+        count = recent.get("confirmed_ticket_count")
+        if expires_at is None or at.astimezone(timezone.utc) >= expires_at:
+            return None
+        if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 20:
+            return None
+        return recent
 
     @classmethod
     def _find_recent_record(
@@ -576,7 +644,7 @@ class QuoteRecordStore:
             wanted_item = str(item_id or "").strip()
             if wanted_item and record_item != wanted_item:
                 continue
-            created = cls._effective_quote_time(item)
+            created = cls._datetime(item.get("created_at"))
             if created is None or not 0 <= (reference - created).total_seconds() <= max_age_seconds:
                 continue
             if item.get("status") == "failed":
@@ -597,13 +665,76 @@ class QuoteRecordStore:
         return None
 
     @classmethod
-    def _effective_quote_time(cls, record: Mapping[str, Any]) -> datetime | None:
-        selected_offer = record.get("selected_offer")
-        if isinstance(selected_offer, Mapping) and selected_offer.get("preflight_verified") is True:
-            selected_at = cls._datetime(record.get("selected_at"))
-            if selected_at is not None:
-                return selected_at
-        return cls._datetime(record.get("created_at"))
+    def _quote_identity(cls, record: Mapping[str, Any]) -> tuple[str, str, str, str]:
+        return tuple(
+            str(record.get(field) or "").strip()
+            for field in ("tenant_id", "shop_id", "buyer_id", "chat_id")
+        )  # type: ignore[return-value]
+
+    @classmethod
+    def _is_current_quote(cls, record: Mapping[str, Any]) -> bool:
+        return (
+            record.get("quote_state") in cls._CURRENT_QUOTE_STATES
+            and record.get("status") in {None, "succeeded"}
+            and not record.get("invalidated_reason")
+        )
+
+    @classmethod
+    def _is_transaction_candidate(cls, record: Mapping[str, Any], reference: datetime) -> bool:
+        return (
+            record.get("source") in cls._V2_QUOTE_SOURCES
+            and cls._is_current_quote(record)
+            and record.get("quote_state") == cls._TRANSACTION_READY_STATE
+            and record.get("transaction_authorized") is True
+            and record.get("total_sell_price_fen") is not None
+            and (
+                record.get("provider_preflight_expires_at") is None
+                or cls._expires_after(record.get("provider_preflight_expires_at"), reference)
+            )
+            and not record.get("platform_order_id")
+            and not record.get("order_id")
+            and cls._expires_after(record.get("expires_at"), reference)
+        )
+
+    @classmethod
+    def _latest_quote_predecessor(
+        cls, records: list[dict[str, Any]], record: Mapping[str, Any],
+        *, allow_same_terms: bool = False,
+    ) -> dict[str, Any] | None:
+        candidates = [
+            item for item in records
+            if item.get("quote_id") != record.get("quote_id")
+            and (
+                allow_same_terms
+                or item.get("terms_fingerprint") != record.get("terms_fingerprint")
+            )
+        ]
+        candidates.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _positive_generation(record: Mapping[str, Any]) -> int:
+        value = record.get("generation")
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+    @staticmethod
+    def _quote_idempotency_material(record: Mapping[str, Any]) -> str:
+        excluded = {
+            "record_id", "quote_id", "quote_version", "quote_hash", "terms_fingerprint",
+            "event_id", "recognition_id", "message_id", "created_at", "expires_at",
+            "quote_expires_at", "seller_quote_expires_at", "generation", "supersedes_quote_id", "superseded_by_quote_id",
+            "superseded_at", "invalidated_reason", "delivery_state", "delivered_at",
+            "delivery_message_id", "binding_state", "order_bound_at", "order_id",
+            "platform_order_id", "binding_request_id", "bound_at", "binding_revision",
+            "binding_reason", "binding_history",
+        }
+        material = {key: value for key, value in record.items() if key not in excluded}
+        return json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def _expires_after(cls, value: object, reference: datetime) -> bool:
+        expires = cls._datetime(value)
+        return expires is not None and reference.astimezone(timezone.utc) < expires
 
     @staticmethod
     def _datetime(value: object) -> datetime | None:
@@ -693,21 +824,45 @@ class QuoteRecordStore:
             "seat_display": canonical(record.get("seat_display")),
             "quote_scope": canonical(record.get("quote_scope")),
             "seat_zone_type": canonical(record.get("seat_zone_type")),
+            "provider": canonical(record.get("provider")),
+            "provider_route": canonical(record.get("provider_route")),
+            "canonical_quote_route": canonical(record.get("canonical_quote_route")),
+            "wanda_store_id": canonical(record.get("wanda_store_id")),
+            "wanda_show_id": canonical(record.get("wanda_show_id")),
+            "liangpiao_cinema_id": canonical(record.get("liangpiao_cinema_id")),
+            "liangpiao_movie_id": canonical(record.get("liangpiao_movie_id")),
+            "liangpiao_show_id": canonical(record.get("liangpiao_show_id")),
             "ticket_count": record.get("ticket_count"),
-            "selected_offer_id": canonical(record.get("selected_offer_id")),
-            "selected_offer_amount": (
-                record.get("selected_offer", {}).get("total_quote_cents")
-                if isinstance(record.get("selected_offer"), Mapping) else None
-            ),
-            "selected_offer_hash": canonical(
-                record.get("selected_offer", {}).get("quote_hash")
-                if isinstance(record.get("selected_offer"), Mapping) else None
-            ),
-            "selected_offer_generation": (
-                record.get("selected_offer", {}).get("generation")
-                if isinstance(record.get("selected_offer"), Mapping) else None
-            ),
         }
+        if record.get("source") == "MANUAL_OPERATOR":
+            material.update({
+                "source": "MANUAL_OPERATOR",
+                "price_basis": canonical(record.get("price_basis")),
+                "unit_sell_price_fen": record.get("unit_sell_price_fen"),
+                "total_sell_price_fen": record.get("total_sell_price_fen"),
+                "showtime_end": canonical(record.get("showtime_end")),
+                "seat_request_type": canonical(record.get("seat_request_type")),
+                "format": canonical(record.get("format")),
+                "language": canonical(record.get("language")),
+                "selected_seats": record.get("selected_seats") or [],
+            })
+            # A UNIT commitment remains valid when only the buyer's count is
+            # supplied later. TOTAL commitments retain count as a term.
+            if record.get("price_basis") == "UNIT":
+                material["ticket_count"] = None
+                material["total_sell_price_fen"] = None
+        # V2 records opt into the extended existing terms fingerprint. Keep
+        # legacy records compatible while ensuring V2 money and pricing-policy
+        # changes cannot reuse the old quote hash.
+        if record.get("pricing_rule_revision") is not None or record.get("pricing_rule_version"):
+            material.update({
+                "request_type": canonical(record.get("request_type")),
+                "wanda_show_id": canonical(record.get("wanda_show_id")),
+                "unit_sell_price_fen": record.get("unit_sell_price_fen"),
+                "total_sell_price_fen": record.get("total_sell_price_fen"),
+                "pricing_rule_revision": record.get("pricing_rule_revision"),
+                "pricing_rule_version": canonical(record.get("pricing_rule_version")),
+            })
         return f'tf-{hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:24]}'
 
     @staticmethod

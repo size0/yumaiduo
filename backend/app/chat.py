@@ -100,7 +100,7 @@ def _quote_block(recognition: MovieImageInfo, quote: RealQuote, templates: Reply
         seat_prices = "、".join(
             f"{item.seat_number} {_cents(item.unit_quote_cents)}"
             for item in quote.seat_quotes
-        ) or f"已核验座位：{recognition.seat_display}"
+        )
         label = "后台实时报价" if quote.pricing_rule_version else "万达官方实时区域参考价"
         return render_template(templates.exact_quote_template, {
             **recognition_values,
@@ -114,7 +114,7 @@ def _quote_block(recognition: MovieImageInfo, quote: RealQuote, templates: Reply
             "报价说明": explanation,
             "规则版本": quote.pricing_rule_version,
         })
-    rendered = render_template(templates.area_quote_template, {
+    return render_template(templates.area_quote_template, {
         **recognition_values,
         "报价名称": "W+专享区后台报价单价" if quote.pricing_rule_version else "W+专享区官方参考价",
         "报价单价": _cents(quote.unit_quote_cents),
@@ -122,14 +122,6 @@ def _quote_block(recognition: MovieImageInfo, quote: RealQuote, templates: Reply
         "报价说明": explanation,
         "规则版本": quote.pricing_rule_version,
     })
-    if (
-        not quote.needs_ticket_count
-        and isinstance(quote.ticket_count, int)
-        and quote.ticket_count > 0
-        and isinstance(quote.total_quote_cents, int)
-    ):
-        rendered = f"{rendered}\n本次{quote.ticket_count}张合计：{_cents(quote.total_quote_cents)}"
-    return rendered
 
 
 def _safe_quote_failure_reply(
@@ -137,16 +129,11 @@ def _safe_quote_failure_reply(
 ) -> str | None:
     cinema = (recognition.cinema_name or "").strip()
     error = (quote_error or "").strip()
-    # Never infer support from a model/provider cinema-name substring. Cinema
-    # capability and identity belong to the authoritative quote adapter; a
-    # recognized chain must get the same match/quote opportunity regardless of
-    # whether its name contains a known brand.
-    if error and "明确座位" in error:
-        return "非万达影院需要明确座位后才能精确报价，请发送包含座位的最新选座截图。"
-    if error and "会员区域无可选座位" in error:
-        if not recognition.selected_seats:
-            return "当前场次会员区域无可选座位；截图中没有识别到官方已选的具体座位，手绘圈选不等于已选座，请在购票页实际选中座位后发送最新截图。"
-        return "当前场次会员区域无可选座位，请刷新选座页面后重试。"
+    # “寰映影城” is Wanda's official cinema brand and is present in the
+    # Wanda cinema directory. Do not reject it as a third-party cinema before
+    # the authoritative cache/showtime resolver gets a chance to match it.
+    if cinema and not any(brand in cinema for brand in ("万达", "寰映")):
+        return templates.unsupported_cinema_template
     if error and "影院" in error:
         return render_template(templates.cinema_match_failure_template, {"影院": cinema or "截图中的影院"})
     if error and "场次" in error:
@@ -167,62 +154,16 @@ def _safe_quote_failure_reply(
                 {"缺失信息": "、".join(missing_labels)},
             )
     if error:
-        # The same-type seat reference already contains its complete, concise
-        # customer-facing message. Do not add the generic quote-unavailable
-        # wrapper, which would repeat the refresh instruction.
-        if "不可选，同类型参考价" in error:
-            return error
+        safe_failure_reason = (
+            error
+            if "当前不可选" in error and "同座位类型当前参考价" in error
+            else "当前场次暂未取得可核验价格"
+        )
         return render_template(
             templates.quote_unavailable_template,
-            {"失败原因": "当前场次暂未取得可核验价格"},
+            {"失败原因": safe_failure_reason},
         )
     return None
-
-
-def is_wplus_unselected_image(recognition: MovieImageInfo) -> bool:
-    """Return true for a seat-selection image with no explicit seat returned."""
-    return recognition.is_seat_selection is True and not recognition.selected_seats
-
-
-def build_wplus_quote_marker_reply(
-    recognition: MovieImageInfo, quote: RealQuote, *, templates: ReplyTemplates | None = None,
-) -> str:
-    configured = templates or ReplyTemplates()
-    return render_template(
-        configured.wplus_quote_marker_template,
-        _recognition_variables(recognition, quote),
-    )
-
-
-def build_wplus_unit_price_reply(
-    quote: RealQuote, *, templates: ReplyTemplates | None = None,
-) -> str:
-    configured = templates or ReplyTemplates()
-    return render_template(
-        configured.wplus_unit_price_reply_template,
-        _recognition_quote_variables(quote),
-    )
-
-
-def build_wplus_marker_confirmation_reply(*, templates: ReplyTemplates | None = None) -> str:
-    """Ask only whether the buyer marked a W+ position for manual fulfillment."""
-    configured = templates or ReplyTemplates()
-    return configured.wplus_marker_confirmation_template
-
-
-def build_wplus_marker_missing_reply(*, templates: ReplyTemplates | None = None) -> str:
-    configured = templates or ReplyTemplates()
-    return configured.wplus_marker_missing_template
-
-
-def build_wplus_marker_confirmed_reply(
-    *, templates: ReplyTemplates | None = None, order_guide: str | None = None,
-) -> str:
-    configured = templates or ReplyTemplates()
-    return render_template(
-        configured.wplus_marker_confirmed_template,
-        {"下单引导": order_guide or ""},
-    )
 
 
 def build_recognition_reply(
@@ -235,11 +176,9 @@ def build_recognition_reply(
     """Render structured facts without exposing screenshot prices or language/format."""
     configured = templates or ReplyTemplates()
     if recognition.match_level == "CANDIDATE" and recognition.candidate_cinemas:
-        # Candidate choices are intentionally concise: the provider's cinema
-        # name is the only buyer-facing identity. Addresses are internal
-        # disambiguation data and can be long, stale, or privacy-sensitive.
         lines = [
-            f"{index}、{candidate.name}"
+            f"{index}、{candidate.city_name + ' ' if candidate.city_name else ''}{candidate.name}"
+            + (f"（{candidate.address}）" if candidate.address else "")
             for index, candidate in enumerate(recognition.candidate_cinemas, start=1)
         ]
         return "识别到多个可能的影院，请回复序号确认：\n" + "\n".join(lines) + "\n请回复对应序号（如“1”），确认后我再重新获取当前场次和座位报价。"

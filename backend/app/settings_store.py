@@ -165,12 +165,6 @@ class PersistentSettingsStore:
                 "chat_api_key": chat_api_key,
                 "chat_base_url": payload.get("chat_base_url", payload.get("base_url", self._environment.chat_base_url)),
                 "chat_model": payload.get("chat_model", payload.get("model", self._environment.chat_model)),
-                "chat_max_completion_tokens": payload.get(
-                    "chat_max_completion_tokens", self._environment.chat_max_completion_tokens,
-                ),
-                "chat_context_messages": payload.get(
-                    "chat_context_messages", self._environment.chat_context_messages,
-                ),
                 "enable_thinking": payload.get("enable_thinking", self._environment.enable_thinking),
                 "reasoning_effort": payload.get("reasoning_effort", self._environment.reasoning_effort),
                 "vision_prompt": payload.get("vision_prompt", self._environment.vision_prompt),
@@ -185,8 +179,6 @@ class PersistentSettingsStore:
             model=current.model,
             chat_base_url=current.chat_base_url,
             chat_model=current.chat_model,
-            chat_max_completion_tokens=current.chat_max_completion_tokens,
-            chat_context_messages=current.chat_context_messages,
             enable_thinking=current.enable_thinking,
             reasoning_effort=current.reasoning_effort,
             vision_prompt=current.vision_prompt,
@@ -213,16 +205,6 @@ class PersistentSettingsStore:
                 chat_api_key=chat_api_key,
                 chat_base_url=update.chat_base_url or existing.chat_base_url,
                 chat_model=update.chat_model or existing.chat_model,
-                chat_max_completion_tokens=(
-                    update.chat_max_completion_tokens
-                    if update.chat_max_completion_tokens is not None
-                    else existing.chat_max_completion_tokens
-                ),
-                chat_context_messages=(
-                    update.chat_context_messages
-                    if update.chat_context_messages is not None
-                    else existing.chat_context_messages
-                ),
                 enable_thinking=update.enable_thinking,
                 reasoning_effort=update.reasoning_effort,
                 vision_prompt=update.vision_prompt,
@@ -240,8 +222,6 @@ class PersistentSettingsStore:
                 "model": validated.model,
                 "chat_base_url": validated.chat_base_url,
                 "chat_model": validated.chat_model,
-                "chat_max_completion_tokens": validated.chat_max_completion_tokens,
-                "chat_context_messages": validated.chat_context_messages,
                 "enable_thinking": validated.enable_thinking,
                 "reasoning_effort": validated.reasoning_effort,
                 "vision_prompt": validated.vision_prompt,

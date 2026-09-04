@@ -18,8 +18,6 @@ from app.probe.probe_store import DurableProbeStore
 from app.probe.release_tracker import FakeClock, ReleaseTracker
 from app.probe.seat_selector import LiveSeat, ProbeSeatSelector
 from app.probe.wanda_active_probe import FixtureWandaProvider, WandaActiveProbe
-from app.agent.tools import build_read_only_registry
-from app.errors import ProviderError
 
 
 IDENTITY = {
@@ -65,12 +63,12 @@ def build(tmp_path: Path, provider: FixtureWandaProvider, *, enabled: bool = Tru
     tracker = ReleaseTracker(probe_store, clock=FakeClock())
     active = WandaActiveProbe(
         provider, probe_store=probe_store, release_tracker=tracker,
-        policy=ProbePolicy(active_probe_enabled=enabled, agent_harness_read_only=False),
+        policy=ProbePolicy(active_probe_enabled=enabled, external_writes_enabled=enabled),
     )
     coordinator = ProbeCoordinator(
         probe_store=probe_store, lease_store=lease_store, account_pool=accounts(provider),
         seat_selector=ProbeSeatSelector(), active_probe=active,
-        policy=ProbePolicy(active_probe_enabled=enabled, agent_harness_read_only=False),
+        policy=ProbePolicy(active_probe_enabled=enabled, external_writes_enabled=enabled),
         lease_ttl_seconds=180,
     )
     return coordinator, probe_store, lease_store
@@ -107,9 +105,9 @@ async def test_kill_switch_fails_closed_without_provider_call(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_read_only_also_blocks_probe() -> None:
-    policy = ProbePolicy(active_probe_enabled=True, agent_harness_read_only=True)
-    with pytest.raises(ProbeError, match="agent_harness_read_only"):
+async def test_active_probe_disabled_by_default() -> None:
+    policy = ProbePolicy(active_probe_enabled=False, external_writes_enabled=False)
+    with pytest.raises(ProbeError, match="active_probe_disabled"):
         policy.ensure_allowed()
 
 
@@ -135,7 +133,7 @@ async def test_probe_golden_scenarios_are_probe_only(tmp_path: Path, scenario: d
 
 
 @pytest.mark.asyncio
-async def test_cleanup_survives_agent_turn_cancellation(tmp_path: Path) -> None:
+async def test_cleanup_survives_probe_cancellation(tmp_path: Path) -> None:
     provider = FixtureWandaProvider(member_price_cents=3800, cancel_delay_seconds=0.01)
     coordinator, store, _ = build(tmp_path, provider)
     task = asyncio.create_task(coordinator.run(request(), seats()))
@@ -192,22 +190,6 @@ def test_release_tracker_uses_fake_clock_without_real_sleep(tmp_path: Path) -> N
     verified = asyncio.run(tracker.verify(order, provider))
     assert verified is True
     assert clock.elapsed_seconds == 5
-
-
-@pytest.mark.asyncio
-async def test_quote_preview_disables_legacy_active_probe_context() -> None:
-    class LegacyQuoteService:
-        async def quote(self, _recognition: object) -> object:
-            assert ProbePolicy.context_allows_active_probe() is False
-            raise ProviderError("QUOTE_REQUIRES_ACTIVE_PROBE", "member cost missing")
-
-    registry = build_read_only_registry(quote_service=LegacyQuoteService())
-    observation = await registry.execute(
-        "quote.preview",
-        {"cinema_name": "测试影院", "movie_name": "测试影片", "date": "2026-09-02", "showtime_start": "12:00"},
-        identity={"tenant_id": "t", "shop_id": "s", "buyer_id": "b", "chat_id": "c"},
-    )
-    assert observation.code == "QUOTE_REQUIRES_ACTIVE_PROBE"
 
 
 def test_probe_result_rejects_commercial_pricing_fields() -> None:

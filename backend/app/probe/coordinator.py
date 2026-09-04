@@ -10,7 +10,7 @@ from .account_pool import FixtureProbeAccountPool, ProbeAccount
 from .errors import ProbeError
 from .lease_store import DurableAccountLeaseStore
 from .models import ProbeOrder, ProbeResult, ProbeStatus
-from .policy import ProbePolicy
+from .policy import ProbePolicy, allow_active_probe
 from .probe_store import DurableProbeStore
 from .seat_selector import LiveSeat, ProbeSeatSelector
 from .wanda_active_probe import WandaActiveProbe
@@ -49,7 +49,10 @@ class ProbeCoordinator:
         self._lease_ttl = float(lease_ttl_seconds or policy.account_lease_ttl_seconds)
 
     async def run(self, request: ProbeRequest, live_seats: list[LiveSeat]) -> ProbeResult:
-        self._policy.ensure_allowed()
+        # Admission is checked before any durable Probe state or provider
+        # operation is created. The context is set again only after the
+        # account lease and risk/eligibility checks have succeeded.
+        self._policy.ensure_enabled()
         now = datetime.now(timezone.utc)
         probe_id = f"probe-{uuid4().hex}"
         order = ProbeOrder(
@@ -87,7 +90,8 @@ class ProbeCoordinator:
                 probe_id, expected_revision=order.revision,
                 account_ref=account.account_ref, seat_ids=[seat.seat_id for seat in selected],
             )
-            result = await self._active_probe.run(order, selected, account)
+            with allow_active_probe(lease_acquired=True, risk_approved=True):
+                result = await self._active_probe.run(order, selected, account)
             latest = self._probe_store.get(probe_id)
             if latest and latest.status == ProbeStatus.RELEASE_VERIFIED:
                 self._probe_store.release_show(request.show_id, probe_id)

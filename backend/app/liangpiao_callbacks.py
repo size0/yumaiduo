@@ -62,7 +62,11 @@ class CallbackVerifier:
 class LiangpiaoCallbackHandler:
     """Map verified callbacks to one transaction and legal state transitions."""
 
-    _ORDER = {"created": 1, "pending": 1, "paid": 2, "processing": 3, "ticket_sent": 5, "completed": 6, "failed": 99, "cancelled": 99}
+    _ORDER = {
+        "created": 1, "pending": 1, "paid": 2, "submitting": 3, "ticketing": 4,
+        "processing": 4, "shipped": 4, "ticket_sent": 5, "completed": 6, "settled": 6,
+        "failed": 99, "cancelled": 99, "refunded": 99, "refund_rejected": 99,
+    }
 
     def __init__(self, verifier: CallbackVerifier, *, state_store: object | None = None,
                  mapping_store: object | None = None, client: object | None = None,
@@ -78,6 +82,9 @@ class LiangpiaoCallbackHandler:
         if not self._enabled:
             raise CallbackError("LIANGPIAO_CALLBACK_DISABLED", "良票回调开关未开启。")
         raw = raw_body.encode("utf-8") if isinstance(raw_body, str) else bytes(raw_body)
+        durable_replay = getattr(self._mapping, "has_liangpiao_callback_nonce", None)
+        if callable(durable_replay) and durable_replay(nonce):
+            raise CallbackError("LIANGPIAO_CALLBACK_REPLAY", "重复回调已忽略。")
         self._verifier.verify(raw, signature=signature, timestamp=timestamp, nonce=nonce)
         try:
             body = json.loads(raw.decode("utf-8"))
@@ -135,7 +142,7 @@ class LiangpiaoCallbackHandler:
         previous_status = str(mapping.get("provider_status") or "created").lower()
         if self._ORDER.get(status, 0) < self._ORDER.get(previous_status, 0):
             return {"status": "ok", "code": "LIANGPIAO_CALLBACK_STALE", "ignored": True}
-        if status in {"ticket_sent", "completed"} and not _has_ticket_evidence(event_data):
+        if status in {"ticket_sent", "completed", "settled"} and not _has_ticket_evidence(event_data):
             detail = await self._order_detail(out_order_no, provider_order_no)
             if detail:
                 event_data = {**event_data, **dict(detail)}
@@ -143,8 +150,11 @@ class LiangpiaoCallbackHandler:
                 await self._hold(mapping, "liangpiao_ticket_evidence_missing")
                 return {"status": "manual_hold", "code": "LIANGPIAO_TICKET_EVIDENCE_MISSING"}
         target = {"created": "ORDER_BOUND", "pending": "ORDER_BOUND", "paid": "PAID_WAITING_FULFILLMENT",
-                  "processing": "FULFILLMENT_IN_PROGRESS", "shipped": "FULFILLMENT_IN_PROGRESS",
-                  "ticket_sent": "TICKET_SENT", "completed": "COMPLETED", "failed": "MANUAL_HOLD", "cancelled": "MANUAL_HOLD"}[status]
+                  "submitting": "FULFILLMENT_IN_PROGRESS", "ticketing": "FULFILLMENT_IN_PROGRESS",
+                  "processing": "FULFILLMENT_IN_PROGRESS", "shipped": "FULFILLMENT_IN_PROGRESS", "ticket_sent": "TICKET_SENT",
+                  "settled": "TICKET_SENT", "completed": "COMPLETED", "failed": "MANUAL_HOLD",
+                  "cancelled": "MANUAL_HOLD", "refunded": "REFUND_PENDING",
+                  "refund_rejected": "MANUAL_HOLD"}[status]
         update_order = getattr(self._mapping, "update_liangpiao_order", None)
         if callable(update_order) and out_order_no:
             update_order(out_order_no, provider_status=status, snapshot_updates={
@@ -173,7 +183,7 @@ class LiangpiaoCallbackHandler:
                     "取票链接": GateEvidence(source="audited_fulfillment_event", value=_text(_pick(event_data, "pickupUrl", "pickup_url")) or "").model_dump(),
                 },
             ).model_dump(mode="json")
-        elif status in {"failed", "cancelled"}:
+        elif status in {"failed", "cancelled", "refund_rejected"}:
             response["reply_dedupe_key"] = f"liangpiao:{out_order_no or provider_order_no}:{status}"
             # A provider FAILED order is terminal and its frozen amount is
             # already released by Liangpiao.  The callback path must never
@@ -216,7 +226,7 @@ class LiangpiaoCallbackHandler:
                 "refund_amount_fen": refund_amount,
                 "loss_amount_fen": loss_amount,
             }
-            if fallback_available:
+            if fallback_available and mapping.get("flow_version") != "V4_LIANGPIAO_FULFILLMENT_V1":
                 action = self._platform_source_cancel_action(mapping)
                 response["platform_actions"] = [action] if action is not None else []
         return response
@@ -342,6 +352,8 @@ class LiangpiaoCallbackHandler:
 
         current_out = _text(getattr(current, "out_order_no", None))
         current_provider = _text(getattr(current, "provider_order_no", None))
+        if getattr(current, "flow_state", None) in {"REFUND_PENDING", "REFUNDED", "MANUAL_HOLD", "CANCELLED"}:
+            return "stale"
         current_mapping_mismatch = bool(
             (current_out and mapped_out and current_out != mapped_out)
             or (
@@ -458,11 +470,15 @@ class LiangpiaoCallbackHandler:
                         transition_code=code, flow_state=target, updates={
                             "order_status": (
                                 "refund_pending"
-                                if str(code).lower() == "failed" and price_mode == "LIMIT"
+                                if (
+                                    str(code).lower() == "failed" and price_mode == "LIMIT"
+                                ) or str(code).lower() == "refunded"
                                 else order_status
                             ),
                             **({"payment_status": "refund_pending"}
-                               if str(code).lower() == "failed" and price_mode == "LIMIT" else {}),
+                               if (
+                                   str(code).lower() == "failed" and price_mode == "LIMIT"
+                               ) or str(code).lower() == "refunded" else {}),
                             "fulfillment_status": fulfillment_status,
                             "provider_status": str(code).lower(),
                             **fixed_switch_updates,
@@ -489,10 +505,16 @@ def _normalize_status(value: object) -> str | None:
     text = str(value or "").strip().lower()
     aliases = {
         "order.paid": "paid", "payment_success": "paid", "40": "paid",
+        "created": "created", "order.created": "created", "pending": "pending",
+        "submitting": "submitting", "order.submitting": "submitting",
+        "ticketing": "ticketing", "processing": "processing", "order.processing": "processing",
         "ticket_sent": "ticket_sent", "ticketed": "ticket_sent", "order.ticketed": "ticket_sent", "ticket.updated": "ticket_sent",
+        "settled": "settled", "order.settled": "settled",
         "出票成功": "ticket_sent", "issued": "ticket_sent", "3": "shipped", "4": "completed",
         "order.failed": "failed", "failed": "failed", "出票失败": "failed",
         "cancelled": "cancelled", "canceled": "cancelled",
+        "refunded": "refunded", "order.refunded": "refunded",
+        "refund_rejected": "refund_rejected", "refund.rejected": "refund_rejected",
     }
     return aliases.get(text, text if text in LiangpiaoCallbackHandler._ORDER else None)
 
@@ -543,7 +565,7 @@ def _ticket_codes(body: Mapping[str, Any]) -> list[str]:
     codes = []
     if isinstance(values, list):
         codes.extend(_text(item.get("ticketCode") or item.get("ticket_code")) for item in values if isinstance(item, Mapping))
-    for key in ("ticketCode", "ticket_code"):
+    for key in ("ticketCode", "ticket_code", "ticketNo", "ticket_no", "pickupCode", "pickup_code"):
         value = _text(body.get(key))
         if value:
             codes.append(value)
@@ -552,5 +574,8 @@ def _ticket_codes(body: Mapping[str, Any]) -> list[str]:
 
 def _has_ticket_evidence(body: Mapping[str, Any]) -> bool:
     return bool(_ticket_codes(body)) or any(
-        _text(body.get(key)) for key in ("ticketUrl", "ticket_url", "voucher", "ticketNo", "ticket_no", "ticketLink")
+        _text(body.get(key)) for key in (
+            "ticketUrl", "ticket_url", "voucher", "ticketNo", "ticket_no", "ticketLink",
+            "pickupCode", "pickup_code", "qrUrl", "qr_url", "pickupUrl", "pickup_url",
+        )
     )

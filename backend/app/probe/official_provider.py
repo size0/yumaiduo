@@ -16,6 +16,8 @@ from .canonical import (
 )
 from .errors import ProbeError
 from .account_pool import ProbeAccount
+from .policy import ProbePolicy
+from ..config import Settings
 
 
 OfflineTransport = Callable[[str, Mapping[str, object]], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
@@ -26,8 +28,18 @@ class OfficialWandaProbeProvider:
 
     fixture = False
 
-    def __init__(self, *, offline_transport: OfflineTransport | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        offline_transport: OfflineTransport | None = None,
+        policy: ProbePolicy | None = None,
+    ) -> None:
         self._offline_transport = offline_transport
+        self._policy = policy
+
+    def _ensure_write_allowed(self) -> None:
+        policy = self._policy or ProbePolicy.from_settings(Settings.from_env)
+        policy.ensure_allowed()
 
     async def _request(self, operation: str, payload: Mapping[str, object]) -> Mapping[str, Any]:
         if self._offline_transport is None:
@@ -40,6 +52,7 @@ class OfficialWandaProbeProvider:
         return result
 
     async def create_probe_order(self, *, account: ProbeAccount, show_id: str, seat_ids: list[str]) -> CreateOrderResult:
+        self._ensure_write_allowed()
         payload = await self._request("create_probe_order", {"account_ref": account.account_ref, "show_id": show_id, "seat_ids": seat_ids})
         return canonical_create_order(payload)
 
@@ -50,6 +63,7 @@ class OfficialWandaProbeProvider:
         return canonical_activity(await self._request("get_activity_offers", {"temporary_order_reference": temporary_order_reference}))
 
     async def cancel_probe_order(self, *, temporary_order_reference: str) -> CancelResult:
+        self._ensure_write_allowed()
         payload = await self._request("cancel_probe_order", {"temporary_order_reference": temporary_order_reference})
         return CancelResult(accepted=payload.get("code") in (0, "0") or payload.get("ok") is True)
 

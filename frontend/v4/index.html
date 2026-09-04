@@ -56,12 +56,6 @@
     .typing-status { color:#85858d; font-size:11px; white-space:nowrap; }
     @keyframes pulse { 0%,60%,100% { transform:translateY(0); opacity:.45; } 30% { transform:translateY(-4px); opacity:1; } }
     .recognition-card { width:min(560px,100%); margin-top:10px; overflow:hidden; border:1px solid #ededf0; border-radius:13px; background:#fbfbfc; white-space:normal; }
-    .agent-simulation-badge { display:inline-flex; align-items:center; gap:5px; padding:6px 9px; border:1px solid #b9e5d0; border-radius:999px; color:#1f7a4d; font-size:10px; font-weight:700; background:#effcf5; white-space:nowrap; }
-    .agent-trace-card { width:min(620px,100%); margin-top:10px; overflow:hidden; border:1px solid #cfe3f8; border-radius:12px; background:#f7fbff; white-space:normal; }
-    .agent-trace-head { padding:9px 12px; border-bottom:1px solid #dcebf8; color:#245d8c; font-size:11px; font-weight:800; }
-    .agent-trace-list { display:grid; gap:7px; margin:0; padding:10px 12px 11px 29px; }
-    .agent-trace-row { padding:7px 9px; border:1px solid #e0edf8; border-radius:8px; color:#425466; font-size:10px; line-height:1.5; background:#fff; }
-    .agent-trace-meta { color:#245d8c; font-weight:700; }.agent-trace-tool { margin-top:2px; color:#5d7184; }.agent-trace-summary { margin-top:3px; color:#71808d; overflow-wrap:anywhere; }.agent-trace-empty { padding:11px 12px; color:#7b8792; font-size:10px; }
     .recognition-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #ededf0; }
     .recognition-head strong { font-size:12px; }.recognition-head span { color:#909097; font-size:10px; }
     .fact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; background:#ededf0; }
@@ -126,7 +120,6 @@
     .operation-section { margin-bottom:20px; padding:16px; border:1px solid #e7e7eb; border-radius:15px; background:#fcfcfd; }
     .operation-section h3 { margin:0 0 5px; font-size:14px; }.operation-section>p { margin:0 0 14px; color:#8b8b92; font-size:10px; line-height:1.6; }
     .money-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-    .policy-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
     .money-field label { display:block; margin-bottom:6px; color:#66666d; font-size:11px; font-weight:700; }.money-field input,.money-field select { width:100%; height:41px; padding:0 11px; border:1px solid #dedee3; border-radius:10px; outline:0; color:#29292e; background:#fff; }.money-field input:focus,.money-field select:focus { border-color:#ef8f8f; box-shadow:0 0 0 3px rgba(240,68,68,.08); }.money-input { position:relative; }.money-input span { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:#9a9aa1; font-size:11px; }.money-input input { padding-right:34px; }
     .formula-card { margin-top:13px; padding:12px; border-radius:11px; color:#6e581e; font:11px/1.75 Consolas,"Microsoft YaHei",sans-serif; background:#fff8e8; }
     .pricing-preview { margin-top:13px; padding:13px; border:1px dashed #e0b8b8; border-radius:12px; background:#fff; }.pricing-preview strong { display:block; margin-bottom:9px; font-size:12px; }.preview-result { margin-top:10px; color:#c93138; font-size:18px; font-weight:850; }
@@ -146,7 +139,7 @@
       .message.assistant { padding-right:5%; }.message.buyer { padding-left:5%; }.message-stack { max-width:88%; }
       .composer-row { padding-inline:11px; }.composer-hint { display:none; }.fact-grid { grid-template-columns:1fr; }.fact.wide { grid-column:auto; }
       .diagnostics-panel { min-height:calc(100vh - 82px); }.diagnostics-title span { display:none; }.diagnostics-entries { max-height:calc(100vh - 150px); }
-      .money-grid,.gate-list,.policy-grid { grid-template-columns:1fr; }.knowledge-stats { grid-template-columns:repeat(3,1fr); }.settings-tabs { overflow-x:auto; padding-inline:14px; }.settings-tab { white-space:nowrap; }
+      .money-grid,.gate-list { grid-template-columns:1fr; }.knowledge-stats { grid-template-columns:repeat(3,1fr); }.settings-tabs { overflow-x:auto; padding-inline:14px; }.settings-tab { white-space:nowrap; }
     }
   </style>
 </head>
@@ -172,7 +165,7 @@
         <div class="avatar">AI</div>
         <div class="agent-copy"><strong>万达电影票 AI 客服</strong><div class="presence"><i></i>在线 · 图片识别已启用</div></div>
       </div>
-      <div class="header-actions"><span class="mode">Agent 仿真 · 完整编排</span><button class="model-badge" id="openSettings" type="button" title="打开模型设置"><span>识图路由</span><b id="currentModel">上传千问 · URL良票优先</b></button><button class="icon-btn" id="clearChat" type="button" title="清空对话" aria-label="清空对话">↻</button></div>
+      <div class="header-actions"><span class="mode">混合识图模式</span><button class="model-badge" id="openSettings" type="button" title="打开模型设置"><span>当前模型</span><b id="currentModel">qwen3.5-flash-2026-02-23</b></button><button class="icon-btn" id="clearChat" type="button" title="清空对话" aria-label="清空对话">↻</button></div>
     </header>
 
     <section class="chat-window" id="chatWindow" aria-live="polite">
@@ -200,7 +193,7 @@
         <textarea id="composer" rows="1" maxlength="2000" placeholder="输入消息，或拖拽图片到对话区…" aria-label="消息内容"></textarea>
         <button class="send" id="send" type="button">发送</button>
       </div>
-      <div class="composer-hint">Enter 发送 · Shift + Enter 换行 · 平台图片 URL 走良票主识别，本地上传由千问兜底 · 金额仅为截图原文</div>
+      <div class="composer-hint">Enter 发送 · Shift + Enter 换行 · 识别金额仅为截图原文，不代表最终报价</div>
     </footer>
   </main>
   </section>
@@ -303,23 +296,12 @@
 
     <section class="settings-panel" id="policySettingsPanel" hidden>
       <div class="operation-section">
-        <h3>会话策略</h3><p>这些内容会作为客服回复的运行时策略注入 Agent；Agent 可查询和报价，但交易写操作与人工接管安全门禁不可被绕过。适用于 W+代订与纯文字咨询。</p>
+        <h3>会话策略</h3><p>这些内容会作为客服回复的运行时策略注入 AI；交易、报价、库存和人工接管安全门禁不可被覆盖。</p>
         <div class="setting-group"><label for="agentPersona">客服人设</label><textarea id="agentPersona" maxlength="500" style="min-height:80px" placeholder="例如：热情、专业、简洁的电影票在线客服"></textarea></div>
         <div class="setting-group"><label for="businessBackground">业务背景</label><textarea id="businessBackground" maxlength="2000" style="min-height:110px" placeholder="说明店铺服务范围和业务边界"></textarea></div>
         <div class="setting-group"><label for="customerServiceKnowledge">客服知识与常见问题补充</label><textarea id="customerServiceKnowledge" maxlength="3000" style="min-height:130px" placeholder="填写不适合拆成知识条目的总则；具体问答请在知识库维护"></textarea></div>
         <div class="setting-group"><label for="replyStyle">回复风格</label><textarea id="replyStyle" maxlength="1000" style="min-height:90px" placeholder="例如：自然、简短、礼貌，先回答问题再给下一步"></textarea></div>
         <div class="setting-group"><label for="humanServiceHours">人工客服时间</label><input id="humanServiceHours" maxlength="500" placeholder="例如：每日 09:00-24:00"></div>
-        <div class="setting-group policy-grid">
-          <div><label for="memoryHours">会话记忆有效期</label><div class="money-input"><input id="memoryHours" type="number" min="1" max="24" step="1"><span>小时</span></div></div>
-          <div><label for="memoryDepth">保留文字消息</label><div class="money-input"><input id="memoryDepth" type="number" min="5" max="50" step="1"><span>条</span></div></div>
-          <div><label for="humanTakeoverDelay">人工回复后暂停 Agent</label><div class="money-input"><input id="humanTakeoverDelay" type="number" min="5" max="300" step="1"><span>秒</span></div></div>
-        </div>
-        <div class="toggle-row"><div class="toggle-copy"><strong>启用阶段门禁</strong><span>开启后仅在指定业务阶段由 Agent 自动回复；固定交易通知和安全门禁不受影响。</span></div><label class="switch"><input id="stageGateEnabled" type="checkbox"><span class="slider"></span></label></div>
-        <div class="setting-group policy-grid">
-          <div><label for="interventionStart">Agent 介入开始阶段</label><select id="interventionStart"><option value="consultation">咨询</option><option value="order_pending">待下单</option><option value="payment">付款</option><option value="shipping_refund">出票/售后</option></select></div>
-          <div><label for="interventionEnd">Agent 介入结束阶段</label><select id="interventionEnd"><option value="consultation">咨询</option><option value="order_pending">待下单</option><option value="payment">付款</option><option value="shipping_refund">出票/售后</option></select></div>
-        </div>
-        <div class="setting-help">Agent 可直接回复、追问、查询和报价；改价、付款后下单、出票、退款等动作仍必须由固定流程和后端状态门禁执行，不能由模型自行声称完成。</div>
         <div class="toggle-row"><div class="toggle-copy"><strong>AI 自动回复</strong><span>关闭后停止自由文本回复，但确定性识图、报价、订单和固定话术继续运行。</span></div><label class="switch"><input id="policyAiReplyEnabled" type="checkbox"><span class="slider"></span></label></div>
       </div>
     </section>
@@ -332,16 +314,11 @@
     <section class="settings-panel" id="operationsSettingsPanel" role="tabpanel" aria-labelledby="operationsSettingsTab" hidden>
       <div class="operations-hero" data-operation-view="pricing">
         <strong>确定性运营报价</strong>
-        <p>模型只负责理解和表达。万达各座位类型均按官方优惠价与原价的折扣率匹配下方规则区间，叠加固定加价/减价并按全局规则取整。</p>
+        <p>模型只负责理解和表达。优先使用万达实时座位接口返回的W+会员活动价；未显示会员价时才使用临时探针，并仅在取消订单、确认座位恢复后报价。</p>
       </div>
       <div class="operation-section" data-operation-view="pricing">
         <h3>报价规则</h3>
         <p id="pricingRuleMeta">正在读取后台规则…</p>
-        <div class="toggle-row" style="margin-bottom:13px">
-          <div class="toggle-copy"><strong>良票价格模式</strong><span>LIMIT 报预估上限，FIXED 报一口价；询价和正式下单严格使用同一模式。</span></div>
-          <select id="liangpiaoPriceMode"><option value="LIMIT">LIMIT · 预估上限</option><option value="FIXED">FIXED · 一口价</option></select>
-        </div>
-        <div class="setting-group"><label for="liangpiaoFixedRules">FIXED 一口价规则（JSON）</label><textarea id="liangpiaoFixedRules" maxlength="6000" style="min-height:90px" placeholder='[{"min_discount_percent":0,"max_discount_percent":100,"markup_percent":0}]'></textarea><div class="setting-help">可选。填写完整 0-100 区间；FIXED 切换报价只使用这套规则，留空时沿用兼容的旧规则。</div></div>
         <div class="toggle-row" style="margin-bottom:13px">
           <div class="toggle-copy"><strong>启用后台报价规则</strong><span>关闭时最终报价等于官方实时区域参考价。</span></div>
           <label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label>
@@ -354,17 +331,13 @@
           <div class="money-field"><label for="regularMarkup">普通座调整</label><div class="money-input"><input id="regularMarkup" type="number" min="0" max="1000" step="0.1" value="1.0"><span>元</span></div></div>
           <div class="money-field"><label for="wplusDiscount">W+原价减免</label><div class="money-input"><input id="wplusDiscount" type="number" min="0" max="1000" step="0.1" value="2.9"><span>元</span></div></div>
           <div class="money-field"><label for="wplusThreshold">W+会员价阈值</label><div class="money-input"><input id="wplusThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
-          <div class="money-field"><label for="vipCost">VIP厅固定成本（利润核算）</label><div class="money-input"><input id="vipCost" type="number" min="0.01" max="2000" step="0.1" value="50"><span>元</span></div></div>
-          <div class="money-field"><label for="vipThreshold">VIP厅低价阈值</label><div class="money-input"><input id="vipThreshold" type="number" min="0.01" max="2000" step="0.1" value="60"><span>元</span></div></div>
-          <div class="money-field"><label for="vipLowDiscount">VIP厅低价减免</label><div class="money-input"><input id="vipLowDiscount" type="number" min="0" max="1000" step="0.1" value="2"><span>元</span></div></div>
-          <div class="money-field"><label for="vipHighDiscount">VIP厅高价折扣</label><div class="money-input"><input id="vipHighDiscount" type="number" min="1" max="100" step="1" value="90"><span>%</span></div></div>
           <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
         </div>
-        <div class="formula-card">普通座/W+座：官方优惠价 ÷ 官方原价匹配万达规则区间，再叠加固定加价/减价并按全局取整。VIP厅：按下方 VIP 专属规则报价；固定成本用于利润核算，不作为最低价兜底。</div>
+        <div class="formula-card">普通座：实时会员价 + 普通座调整。<br>W+会员价≤阈值：max(实时原价 − W+减免, 会员价)；会员价&gt;阈值：直接取会员价。<br>逐座轮整后求和，报价不得低于会员价或高于实时原价。</div>
         <div class="pricing-preview">
           <strong>规则试算（仅本地预览，只读不锁座）</strong>
           <div class="money-grid">
-            <div class="money-field"><label for="previewSeatType">座位类型</label><select id="previewSeatType"><option value="wplus">W+会员座</option><option value="regular">普通座/其他区域</option><option value="vip">VIP厅</option></select></div>
+            <div class="money-field"><label for="previewSeatType">座位类型</label><select id="previewSeatType"><option value="wplus">W+会员座</option><option value="regular">普通座/其他区域</option></select></div>
             <div class="money-field"><label for="previewOriginal">实时原价</label><div class="money-input"><input id="previewOriginal" type="number" min="0.01" step="0.1" value="69.9"><span>元</span></div></div>
             <div class="money-field"><label for="previewMember">实时会员价</label><div class="money-input"><input id="previewMember" type="number" min="0.01" step="0.1" value="55"><span>元</span></div></div>
           </div>
@@ -386,7 +359,7 @@
         <h3>客服知识库</h3><p>常见问题拆分为可编辑、可启停、可分类的知识条目；只有启用条目会注入 AI 回复。</p>
         <div class="knowledge-toolbar"><button class="inline-setting-button" id="addKnowledge" type="button">新增知识</button><select id="knowledgeCategoryFilter"><option value="">全部分类</option><option>售后人工</option><option>下单确认</option><option>订单出票</option><option>报价规则</option><option>截图识别</option><option>异常处理</option><option>购票流程</option><option>常见问题</option></select></div>
         <div class="knowledge-stats"><div class="knowledge-stat"><b id="knowledgeTotal">0</b><span>全部条目</span></div><div class="knowledge-stat"><b id="knowledgeEnabled">0</b><span>已启用</span></div><div class="knowledge-stat"><b id="knowledgeCategories">0</b><span>分类</span></div></div>
-        <div class="knowledge-notice"><strong>安全提示</strong><span>知识库只提供常见问题的识别和表达参考；价格、库存、订单、付款、出票和退款事实必须来自实时工具与后端状态。Agent 可以主动追问、查询和报价，但不能绕过固定流程或安全门禁。当前展示的是迁移审核快照的可编辑版本。</span></div>
+        <div class="knowledge-notice"><strong>安全提示</strong><span>知识库只影响常见问题的识别和表达；价格、库存、订单、付款、出票、退款和人工接管仍由确定性规则掌管。W+代订与纯文字咨询仍须经过实时核验。当前展示的是迁移审核快照的可编辑版本。</span></div>
         <div class="knowledge-list" id="knowledgeList"></div>
         <div class="setting-help knowledge-source">每条知识包含买家常见问法、回复口径和处理规则；保存后仅启用条目进入下一次 AI 回复。</div>
       </div>
@@ -407,13 +380,6 @@
   };
   const chat = $('chatWindow');
   let loadedPrompt = '';
-  const headerActions=document.querySelector('.header-actions');
-  if(headerActions&&!headerActions.querySelector('.agent-simulation-badge')){
-    const badge=element('span','agent-simulation-badge','Agent仿真 · 完整编排');
-    badge.title='工作台请求使用后端 Agent 仿真，不执行真实平台写操作';
-    headerActions.prepend(badge);
-  }
-  const modelBadge=$('currentModel'); if(modelBadge)modelBadge.textContent='上传千问 · URL良票优先';
 
   function now() { return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()); }
   function money(value) { return Number.isFinite(value) ? `¥${value.toFixed(2).replace(/\.00$/,'')}` : '—'; }
@@ -430,32 +396,8 @@
     if(text) bubble.append(document.createTextNode(text));
     if(options.recognition) bubble.append(buildRecognitionCard(options.recognition));
     if(options.quote) bubble.append(buildQuoteCard(options.quote));
-    if(options.agentTrace) bubble.append(buildAgentTraceCard(options.agentTrace));
     stack.append(bubble,element('div','message-time',now())); row.append(stack); chat.append(row); scrollBottom(); return row;
   }
-
-  // 仅展示后端返回的安全摘要，不渲染私有思考链、原始响应或凭据。
-  function buildAgentTraceCard(trace) {
-    const card=element('section','agent-trace-card');
-    card.append(element('div','agent-trace-head','Agent执行轨迹 · 仿真编排'));
-    const rows=Array.isArray(trace)?trace:(trace?.steps||trace?.events||trace?.rounds||[]);
-    if(!rows.length){card.append(element('div','agent-trace-empty','本次请求未返回可展示的执行阶段。'));return card;}
-    const list=element('ol','agent-trace-list');
-    rows.slice(0,40).forEach((item,index)=>{
-      if(!item||typeof item!=='object')return;
-      const row=element('li','agent-trace-row');
-      const stage=String(item.stage??item.phase??item.type??item.name??'执行阶段').slice(0,80);
-      const round=item.round??item.round_index??item.turn??index;
-      const tool=String(item.tool??item.tool_name??item.action??'—').slice(0,100);
-      const status=String(item.status??item.state??'completed').slice(0,40);
-      const summary=String(item.summary??item.safe_summary??item.result_summary??item.message??'').slice(0,240);
-      row.append(element('div','agent-trace-meta',`阶段：${stage} · 第 ${Number(round)+1} 轮`),element('div','agent-trace-tool',`工具：${tool} · 状态：${status}`));
-      if(summary)row.append(element('div','agent-trace-summary',`摘要：${summary}`));
-      list.append(row);
-    });
-    card.append(list); return card;
-  }
-  function extractAgentTrace(body){return body?.agent_trace||body?.trace||body?.message?.agent_trace||body?.message?.trace||null;}
 
   function appendTyping(label) {
     const row=element('article','message assistant dynamic-message'); row.dataset.role='assistant'; row.id='typingMessage';
@@ -517,13 +459,13 @@
     try {
       let response;
       if(file) {
-        const form=new FormData(); form.append('conversation_id',state.conversationId); form.append('message_text',text); form.append('simulation','true'); form.append('image',file);
+        const form=new FormData(); form.append('conversation_id',state.conversationId); form.append('message_text',text); form.append('image',file);
         response=await fetch('/api/chat/image-messages',{method:'POST',body:form});
       } else {
-        response=await fetch('/api/chat/text-messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:state.conversationId,text,simulation:true})});
+        response=await fetch('/api/chat/text-messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:state.conversationId,text})});
       }
       const body=await response.json(); if(!response.ok) throw new Error(body?.error?.message||body?.detail?.[0]?.msg||'回复生成失败，请稍后重试。');
-      typing.remove(); appendMessage('assistant',body.message.text,{recognition:body.message.recognition,quote:body.message.quote,agentTrace:extractAgentTrace(body)});
+      typing.remove(); appendMessage('assistant',body.message.text,{recognition:body.message.recognition,quote:body.message.quote});
     } catch(error) { typing.remove(); appendMessage('assistant',`暂时没有处理成功：${error.message}`); }
     finally { clearInterval(progressTimer);state.sending=false;updateSend();$('composer').focus();refreshDiagnostics(); }
   }
@@ -544,7 +486,6 @@
 
   let diagnosticsLoading=false;
   const diagnosticLabels=Object.freeze({
-    liangpiao_recognition_completed:'良票主识别完成',liangpiao_recognition_fallback_to_qwen:'良票不可用，切换千问备用',
     vision_provider_response:'千问图片识别响应',vision_fast_path_completed:'图片识别快速路径完成',
     vision_fast_path_rejected:'图片识别需要格式修复',vision_interpreter_provider_response:'GPT识别格式修复响应',
     vision_fallback_completed:'图片识别兜底完成',vision_conversation_context_merged:'多图会话信息已合并',
@@ -637,18 +578,6 @@
   const yuanToCents=id=>Math.round(Number($(id).value)*100);
   function updatePricingPreview() {
     const original=yuanToCents('previewOriginal'),member=yuanToCents('previewMember'),step=Number($('roundingIncrement').value);
-    const isVip=$('previewSeatType').value==='vip';
-    if(isVip){
-      let quoted=original;
-      if($('pricingEnabled').checked){
-        const threshold=yuanToCents('vipThreshold'),lowDiscount=yuanToCents('vipLowDiscount'),highDiscount=Number($('vipHighDiscount').value);
-        const raw=original<=threshold?original-lowDiscount:Math.round(original*highDiscount/100);
-        quoted=Math.min(Math.max(Math.floor((raw+Math.floor(step/2))/step)*step,step),original);
-      }
-      const profit=quoted-yuanToCents('vipCost');
-      $('pricingPreviewResult').textContent=`最终报价 ¥${(quoted/100).toFixed(2)}${$('pricingEnabled').checked?'':'（规则未启用）'} · 预计利润 ¥${(profit/100).toFixed(2)}`;
-      return;
-    }
     if(!Number.isInteger(original)||original<=0||!Number.isInteger(member)||member<=0){$('pricingPreviewResult').textContent='请输入有效的实时原价和会员价';return;}
     if(member>original){$('pricingPreviewResult').textContent='会员价下限高于实时原价上限，停止自动报价';return;}
     let quoted=member;
@@ -666,15 +595,14 @@
   async function loadOperations() {
     try {
       const response=await fetch('/api/settings/operations'); const data=await response.json(); if(!response.ok)throw new Error(data?.detail||'读取运营设置失败');
-      $('pricingEnabled').checked=data.enabled; $('liangpiaoPriceMode').value=data.liangpiao_price_mode||'FIXED'; $('liangpiaoFixedRules').value=JSON.stringify(data.liangpiao_fixed_rules||[],null,2); $('wplusFridayEnabled').checked=data.wplus_friday_member_day_enabled!==false; $('regularMarkup').value=(data.regular_adjustment_cents/100).toFixed(2); $('wplusDiscount').value=(Math.abs(data.wplus_adjustment_cents)/100).toFixed(2); $('wplusThreshold').value=(data.wplus_member_price_threshold_cents/100).toFixed(2); $('vipCost').value=(data.vip_fixed_cost_cents/100).toFixed(2); $('vipThreshold').value=(data.vip_discount_threshold_cents/100).toFixed(2); $('vipLowDiscount').value=(data.vip_low_price_discount_cents/100).toFixed(2); $('vipHighDiscount').value=String(data.vip_high_price_discount_percent); $('roundingIncrement').value=String(data.rounding_increment_cents);
+      $('pricingEnabled').checked=data.enabled; $('wplusFridayEnabled').checked=data.wplus_friday_member_day_enabled!==false; $('regularMarkup').value=(data.regular_adjustment_cents/100).toFixed(2); $('wplusDiscount').value=(Math.abs(data.wplus_adjustment_cents)/100).toFixed(2); $('wplusThreshold').value=(data.wplus_member_price_threshold_cents/100).toFixed(2); $('roundingIncrement').value=String(data.rounding_increment_cents);
       $('pricingRuleMeta').textContent=`版本 ${data.rule_version} · 修订 ${data.revision}${data.updated_at?` · ${new Date(data.updated_at).toLocaleString('zh-CN')}`:''}`; updatePricingPreview();
     } catch(error) { settingsMessage(error.message,true); }
   }
   async function saveOperations() {
     const button=$('saveOperations'); button.disabled=true; settingsMessage('正在校验并保存运营报价规则…');
     try {
-      let fixedRules=[]; try { fixedRules=JSON.parse($('liangpiaoFixedRules').value||'[]'); if(!Array.isArray(fixedRules)) throw new Error('FIXED规则必须是数组'); } catch(error) { throw new Error('FIXED规则 JSON 无效：'+error.message); }
-      const payload={enabled:$('pricingEnabled').checked,liangpiao_price_mode:$('liangpiaoPriceMode').value,liangpiao_fixed_rules:fixedRules,wplus_friday_member_day_enabled:$('wplusFridayEnabled').checked,regular_adjustment_cents:yuanToCents('regularMarkup'),wplus_adjustment_cents:-yuanToCents('wplusDiscount'),wplus_member_price_threshold_cents:yuanToCents('wplusThreshold'),vip_fixed_cost_cents:yuanToCents('vipCost'),vip_discount_threshold_cents:yuanToCents('vipThreshold'),vip_high_price_discount_percent:Number($('vipHighDiscount').value),vip_low_price_discount_cents:yuanToCents('vipLowDiscount'),rounding_increment_cents:Number($('roundingIncrement').value)};
+      const payload={enabled:$('pricingEnabled').checked,wplus_friday_member_day_enabled:$('wplusFridayEnabled').checked,regular_adjustment_cents:yuanToCents('regularMarkup'),wplus_adjustment_cents:-yuanToCents('wplusDiscount'),wplus_member_price_threshold_cents:yuanToCents('wplusThreshold'),rounding_increment_cents:Number($('roundingIncrement').value)};
       const response=await fetch('/api/settings/operations',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const data=await response.json();
       if(!response.ok)throw new Error(data?.detail?.[0]?.msg||data?.detail||'运营规则保存失败');
       $('pricingRuleMeta').textContent=`版本 ${data.rule_version} · 修订 ${data.revision} · ${new Date(data.updated_at).toLocaleString('zh-CN')}`; settingsMessage(`运营报价规则已保存，下一次核价立即使用（${data.rule_version}）。`); updatePricingPreview();
@@ -695,13 +623,13 @@
     settingsMessage('正在读取设置…');
     try {
       const [response,policyResponse]=await Promise.all([fetch('/api/settings/vision'),fetch('/api/settings/conversation-policy')]); const data=await response.json(); const policy=await policyResponse.json(); if(!response.ok) throw new Error(data?.detail||'读取设置失败'); if(!policyResponse.ok) throw new Error(policy?.detail||'读取AI回复开关失败');
-      $('baseUrl').value=data.base_url; $('modelSelect').value=data.model; $('chatBaseUrl').value=data.chat_base_url||data.base_url; $('chatModelSelect').value=data.chat_model||data.model; $('thinkingToggle').checked=data.enable_thinking; $('reasoningEffort').value=data.reasoning_effort||'none'; $('visionPrompt').value=data.vision_prompt; $('chatPrompt').value=data.chat_prompt; $('aiReplyEnabled').checked=policy.ai_reply_enabled!==false; $('policyAiReplyEnabled').checked=policy.ai_reply_enabled!==false; $('agentPersona').value=policy.agent_persona||''; $('businessBackground').value=policy.business_background||policy.persona_background||''; $('customerServiceKnowledge').value=policy.customer_service_knowledge||''; $('replyStyle').value=policy.reply_style||''; $('humanServiceHours').value=policy.human_service_hours||''; $('memoryHours').value=policy.memory_hours||24; $('memoryDepth').value=policy.memory_depth||50; $('humanTakeoverDelay').value=policy.human_takeover_delay_seconds||20; $('stageGateEnabled').checked=policy.stage_gate_enabled===true; $('interventionStart').value=policy.intervention_start||'consultation'; $('interventionEnd').value=policy.intervention_end||'payment';
-      loadedPrompt=data.vision_prompt; $('currentModel').textContent=`上传千问 · URL良票优先（${data.model} / ${data.chat_model||data.model}）`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20';
+      $('baseUrl').value=data.base_url; $('modelSelect').value=data.model; $('chatBaseUrl').value=data.chat_base_url||data.base_url; $('chatModelSelect').value=data.chat_model||data.model; $('thinkingToggle').checked=data.enable_thinking; $('reasoningEffort').value=data.reasoning_effort||'none'; $('visionPrompt').value=data.vision_prompt; $('chatPrompt').value=data.chat_prompt; $('aiReplyEnabled').checked=policy.ai_reply_enabled!==false; $('policyAiReplyEnabled').checked=policy.ai_reply_enabled!==false; $('agentPersona').value=policy.agent_persona||''; $('businessBackground').value=policy.business_background||''; $('customerServiceKnowledge').value=policy.customer_service_knowledge||''; $('replyStyle').value=policy.reply_style||''; $('humanServiceHours').value=policy.human_service_hours||'';
+      loadedPrompt=data.vision_prompt; $('currentModel').textContent=`${data.model} → ${data.chat_model||data.model}`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20';
       $('apiKey').value=''; $('clearApiKey').checked=false; $('chatKeyState').textContent=data.has_chat_api_key?`已保存 ${data.masked_chat_api_key}`:'未配置'; $('chatKeyState').style.color=data.has_chat_api_key?'#29945a':'#b16b20'; $('chatApiKey').value=''; $('clearChatApiKey').checked=false; updatePromptLength(); updateThinkingHint(); settingsMessage('');
     } catch(error) { settingsMessage(error.message,true); }
   }
   async function loadReplyTemplates() { try{const response=await fetch('/api/settings/reply-templates');const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取回复话术失败');$('movieReminderTemplate').value=data.movie_reminder_template||'';$('orderShippedTemplate').value=data.order_shipped_template||''}catch(error){settingsMessage(error.message,true)} }
-  async function savePolicy() { const button=$('savePolicy');button.disabled=true;settingsMessage('正在保存会话策略…');try{const payload={ai_reply_enabled:$('policyAiReplyEnabled').checked,agent_persona:$('agentPersona').value.trim(),business_background:$('businessBackground').value.trim(),customer_service_knowledge:$('customerServiceKnowledge').value.trim(),reply_style:$('replyStyle').value.trim(),human_service_hours:$('humanServiceHours').value.trim(),memory_hours:Number($('memoryHours').value),memory_depth:Number($('memoryDepth').value),human_takeover_delay_seconds:Number($('humanTakeoverDelay').value),stage_gate_enabled:$('stageGateEnabled').checked,intervention_start:$('interventionStart').value,intervention_end:$('interventionEnd').value};const response=await fetch('/api/settings/conversation-policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'会话策略保存失败');$('aiReplyEnabled').checked=data.ai_reply_enabled!==false;settingsMessage('会话策略已保存，下一次 AI 回复立即使用。')}catch(error){settingsMessage(error.message,true)}finally{button.disabled=false;}}
+  async function savePolicy() { const button=$('savePolicy');button.disabled=true;settingsMessage('正在保存会话策略…');try{const payload={ai_reply_enabled:$('policyAiReplyEnabled').checked,agent_persona:$('agentPersona').value.trim(),business_background:$('businessBackground').value.trim(),customer_service_knowledge:$('customerServiceKnowledge').value.trim(),reply_style:$('replyStyle').value.trim(),human_service_hours:$('humanServiceHours').value.trim()};const response=await fetch('/api/settings/conversation-policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'会话策略保存失败');$('aiReplyEnabled').checked=data.ai_reply_enabled!==false;settingsMessage('会话策略已保存，下一次 AI 回复立即使用。')}catch(error){settingsMessage(error.message,true)}finally{button.disabled=false;}}
   async function saveReplyTemplates() { const button=$('saveReplyTemplates');button.disabled=true;settingsMessage('正在保存回复话术…');try{const response=await fetch('/api/settings/reply-templates',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({movie_reminder_template:$('movieReminderTemplate').value.trim(),order_shipped_template:$('orderShippedTemplate').value.trim()})});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'回复话术保存失败');settingsMessage('回复话术已保存，观影提醒和订单通知立即使用。')}catch(error){settingsMessage(error.message,true)}finally{button.disabled=false;}}
   async function fetchModels() {
     const button=$('fetchModels'); button.disabled=true; catalogMessage('正在从服务商获取模型…');
@@ -733,7 +661,7 @@
       if(!response.ok) throw new Error(data?.detail?.[0]?.msg||data?.detail||'保存失败');
       const policyResponse=await fetch('/api/settings/conversation-policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ai_reply_enabled:$('aiReplyEnabled').checked})}); const policy=await policyResponse.json();
       if(!policyResponse.ok) throw new Error(policy?.detail?.[0]?.msg||policy?.detail||'AI回复开关保存失败');
-      loadedPrompt=data.vision_prompt; $('currentModel').textContent=`上传千问 · URL良票优先（${data.model} / ${data.chat_model}）`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20'; $('chatKeyState').textContent=data.has_chat_api_key?`已保存 ${data.masked_chat_api_key}`:'未配置'; $('chatKeyState').style.color=data.has_chat_api_key?'#29945a':'#b16b20'; $('apiKey').value=''; $('chatApiKey').value=''; $('clearApiKey').checked=false; $('clearChatApiKey').checked=false; updateThinkingHint(); settingsMessage('设置已保存，下一张图片立即使用新配置。');
+      loadedPrompt=data.vision_prompt; $('currentModel').textContent=`${data.model} → ${data.chat_model}`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20'; $('chatKeyState').textContent=data.has_chat_api_key?`已保存 ${data.masked_chat_api_key}`:'未配置'; $('chatKeyState').style.color=data.has_chat_api_key?'#29945a':'#b16b20'; $('apiKey').value=''; $('chatApiKey').value=''; $('clearApiKey').checked=false; $('clearChatApiKey').checked=false; updateThinkingHint(); settingsMessage('设置已保存，下一张图片立即使用新配置。');
     } catch(error) { settingsMessage(error.message,true); }
     finally { button.disabled=false;refreshDiagnostics(); }
   }
@@ -749,7 +677,7 @@
   $('modelSelect').addEventListener('input',updateThinkingHint); $('chatModelSelect').addEventListener('input',updateThinkingHint); $('thinkingToggle').addEventListener('change',updateThinkingHint); $('reasoningEffort').addEventListener('change',updateThinkingHint);
   $('refreshDiagnostics').addEventListener('click',refreshDiagnostics); $('clearDiagnostics').addEventListener('click',clearDiagnostics);
   $('saveSettings').addEventListener('click',saveSettings); $('savePolicy').addEventListener('click',savePolicy); $('saveReplyTemplates').addEventListener('click',saveReplyTemplates); $('saveOperations').addEventListener('click',saveOperations); $('visionPrompt').addEventListener('input',updatePromptLength); $('resetPrompt').addEventListener('click',()=>{$('visionPrompt').value=loadedPrompt;updatePromptLength()});
-  ['pricingEnabled','wplusFridayEnabled','regularMarkup','wplusDiscount','wplusThreshold','vipCost','vipThreshold','vipLowDiscount','vipHighDiscount','roundingIncrement','previewSeatType','previewOriginal','previewMember'].forEach(id=>$(id).addEventListener('input',updatePricingPreview));
+  ['pricingEnabled','wplusFridayEnabled','regularMarkup','wplusDiscount','wplusThreshold','roundingIncrement','previewSeatType','previewOriginal','previewMember'].forEach(id=>$(id).addEventListener('input',updatePricingPreview));
   document.addEventListener('keydown',event=>{if(event.key==='Escape')showSettings(false)});
   showWorkspace(location.hash.replace('#','')||'chat'); updateSend(); loadSettings(); loadOperations(); loadReplyTemplates(); loadKnowledge(); refreshDiagnostics(); setInterval(()=>{if(!document.hidden&&activeWorkspace==='logs')refreshDiagnostics();},4000);
 </script>

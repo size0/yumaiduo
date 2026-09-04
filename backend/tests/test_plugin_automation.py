@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,15 +11,15 @@ import pytest
 from app.errors import ProviderError, RecognitionError
 from app.models import MovieImageInfo, RealQuote
 from app.plugin_automation import (
-    build_action_result_decision,
     PluginAutomation,
     SecureImageLoader,
     _apply_declared_ticket_count,
     _authoritative_order_amount_cents,
     _cinema_venue_hint,
+    _explicit_quote_confirmation,
     _explicit_seats_in_buyer_hint,
-    _latest_inbound_message,
-    _structured_ticket_request,
+    build_action_result_decision,
+    _is_new_flow_transaction,
     validate_image_url,
 )
 from app.reply_template_store import ReplyTemplates
@@ -50,33 +51,30 @@ async def load_image(_: str) -> tuple[bytes, str]:
     return b"image", "image/jpeg"
 
 
+def test_new_flow_is_not_authorized_by_legacy_price_created_order() -> None:
+    envelope = {
+        "id": "event-new-flow",
+        "event": "order.created",
+        "payload": {"flow_version": "V4_NEW_FLOW_V2"},
+    }
+    engine = PluginAutomation(object(), object())
+
+    assert _is_new_flow_transaction(envelope, {"platform_order_id": "order-1"}) is True
+    result = asyncio.run(engine._price_created_order(
+        envelope,
+        {"tenant_id": "tenant-1", "shop_id": "shop-1", "buyer_id": "buyer-1", "chat_id": "chat-1", "order_id": "order-1", "event_id": "event-new-flow"},
+        [],
+        {"platform_order_id": "order-1", "flow_version": "V4_NEW_FLOW_V2"},
+    ))
+    assert result["decision"]["actions"] == []
+    assert result["decision"]["reason"] == "new_flow_reprice_delegated_to_phase_9a"
+
+
 def test_combined_buyer_sentence_separates_cinema_identity_and_seats() -> None:
     value = "佛山南海万达9排17、18有吗"
 
     assert _cinema_venue_hint(value, "佛山") == "佛山南海万达"
     assert _explicit_seats_in_buyer_hint(value) == ("9排17座", "9排18座")
-
-
-def test_natural_language_ticket_request_extracts_venue_movie_showtime_and_seat_preference() -> None:
-    request = _structured_ticket_request("北京怀柔万达广场奥德赛，18:55场，中间座位")
-
-    assert request is not None
-    assert request.city == "北京"
-    assert request.cinema_name == "怀柔万达广场"
-    assert request.movie_name == "奥德赛"
-    assert request.showtime_start == "18:55"
-    assert request.selected_seats == []
-    assert "structured_text_without_specific_seats" in request.warnings
-
-
-@pytest.mark.parametrize("value", [
-    "9排的13 14",
-    "9排的13和14",
-    "9排13 14",
-    "第9排13、14",
-])
-def test_seat_hint_parser_normalizes_natural_language_seat_corrections(value: str) -> None:
-    assert _explicit_seats_in_buyer_hint(value) == ("9排13座", "9排14座")
 
 
 def test_cinema_hint_cleaning_does_not_invent_a_venue_from_city_only_text() -> None:
@@ -194,23 +192,6 @@ def event_body(*, event: str = "order.created", session: dict | None = None, ord
     }
 
 
-@pytest.mark.asyncio
-async def test_legacy_limit_failure_event_never_offers_fixed_before_source_order_closed() -> None:
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image,
-    )
-    body = event_body(event="order.failed")
-    body["envelope"]["payload"].update({
-        "priceMode": "LIMIT", "failReason": "供应商无座",
-    })
-
-    result = await automation.process_event(body)
-
-    text = result["decision"]["actions"][0]["text"]
-    assert "关闭状态" in text
-    assert "确认关闭后" in text
-    assert "是否要换一口价继续出票" not in text
 @pytest.mark.asyncio
 async def test_official_showtime_mismatch_rechecks_image_before_returning_no_quote() -> None:
     class RetryRecognizer:
@@ -451,49 +432,10 @@ async def test_ai_disabled_structured_text_still_reaches_authoritative_quote() -
 
     result = await automation.process_event(body)
 
-    assert quoter.calls == 0
-    assert result["decision"]["reason"] == "ai_assist_disabled_structured_intake_ready"
-    assert result["decision"]["actions"][0].get("rule_governed") is True
-
-
-@pytest.mark.asyncio
-async def test_natural_text_context_merges_followup_ticket_count_into_authoritative_quote() -> None:
-    first = "北京怀柔万达广场奥德赛，18:55场，中间座位"
-    current = "两张多少钱"
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({
-        "messageType": 1, "content": current, "remoteMessageId": "natural-current",
-    })
-    body["recent_messages"] = [
-        {"direction": "inbound", "messageType": 1, "content": first,
-         "messageId": "natural-first", "sentAtMs": 1787579997000},
-        {"direction": "inbound", "messageType": 1, "content": current,
-         "messageId": "natural-current", "sentAtMs": 1787579999000},
-    ]
-
-    class CapturingQuoter:
-        def __init__(self) -> None:
-            self.requests: list[MovieImageInfo] = []
-
-        async def quote(self, request: MovieImageInfo) -> RealQuote:
-            self.requests.append(request)
-            return RealQuote(
-                quote_scope="area_preview", seat_zone_type="W+", seat_type="wplus",
-                base_unit_cents=4_600, unit_quote_cents=4_890,
-                ticket_count=None, needs_ticket_count=True,
-            )
-
-    quoter = CapturingQuoter()
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), quoter, mode="auto", image_loader=load_image,
-        ai_assist_enabled=False,
-    )
-
-    result = await automation.process_event(body)
-
-    assert len(quoter.requests) == 0
-    assert result["decision"]["reason"] == "ai_assist_disabled_structured_intake_ready"
+    assert quoter.calls == 1
+    assert result["decision"]["reason"] == "structured_text_quote_ready"
+    assert "116.60" in result["decision"]["actions"][0]["text"]
+    assert "¥" not in result["decision"]["actions"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -521,69 +463,6 @@ async def test_inbound_image_builds_safe_reply_action() -> None:
     assert quote_records[0]["order_id"] is None
     assert quote_records[0]["date_text"] == "今天 08月25日"
     assert quote_records[0]["status"] == "succeeded"
-
-
-@pytest.mark.asyncio
-async def test_inbound_seat_map_uses_preceding_natural_ticket_context() -> None:
-    image_recognition = recognition().model_copy(update={
-        "city": None,
-        "cinema_name": None,
-        "movie_name": None,
-        "showtime_start": None,
-        "missing_fields": ["city", "cinema_name", "movie_name", "showtime_start"],
-    })
-
-    class CapturingRecognizer(FakeRecognizer):
-        def __init__(self, result: MovieImageInfo) -> None:
-            super().__init__(result)
-            self.buyer_messages: list[str] = []
-
-        async def recognize(self, image: bytes, content_type: str, buyer_message: str = "", *, prior_recognitions=None):
-            self.buyer_messages.append(buyer_message)
-            return await super().recognize(
-                image, content_type, buyer_message, prior_recognitions=prior_recognitions,
-            )
-
-    class CapturingQuoter(FakeQuoter):
-        def __init__(self, result: RealQuote) -> None:
-            super().__init__(result)
-            self.requests: list[MovieImageInfo] = []
-
-        async def quote(self, request: MovieImageInfo) -> RealQuote:
-            self.requests.append(request)
-            return await super().quote(request)
-
-    recognizer = CapturingRecognizer(image_recognition)
-    quoter = CapturingQuoter(exact_quote())
-    body = event_body(event="im.message.received")
-    body["envelope"]["payload"].update({
-        "messageType": 2,
-        "remoteMessageId": "natural-image",
-        "imageUrls": ["https://img.alicdn.com/ticket.jpg"],
-        "content": "[图片]",
-    })
-    body["recent_messages"] = [
-        {"direction": "inbound", "messageType": 1,
-         "content": "北京怀柔万达广场奥德赛，18:55场，中间座位",
-         "messageId": "natural-context", "sentAtMs": 1787579990000},
-        {"direction": "inbound", "messageType": 2,
-         "content": "[图片]", "imageUrls": ["https://img.alicdn.com/ticket.jpg"],
-         "messageId": "natural-image", "sentAtMs": 1787579999000},
-    ]
-    automation = PluginAutomation(
-        recognizer, quoter, mode="auto", image_loader=load_image,
-    )
-
-    result = await automation.process_event(body)
-
-    assert result["decision"]["reason"] == "automatic_reply_ready"
-    assert len(quoter.requests) == 1
-    request = quoter.requests[0]
-    assert request.city == "北京"
-    assert request.cinema_name == "怀柔万达广场"
-    assert request.movie_name == "奥德赛"
-    assert request.showtime_start == "18:55"
-    assert recognizer.buyer_messages == ["北京怀柔万达广场奥德赛，18:55场，中间座位"]
 
 
 @pytest.mark.asyncio
@@ -676,46 +555,12 @@ class FakeChat:
         self.synchronized = (conversation_id, messages, current_message_id)
 
     async def reply(self, text: str, conversation_id: str) -> str:
-        self.last_reply = (text, conversation_id)
+        assert text == "请问多少钱"
+        assert conversation_id == "tenant-1:shop-1:chat-1"
         return "请把当前场次和选座截图发给我，我帮您核价。"
 
 
 @pytest.mark.asyncio
-async def test_generic_ai_failure_returns_grounded_intake_instead_of_silence() -> None:
-    class FailingChat:
-        def sync_platform_history(self, *_args, **_kwargs) -> None:
-            return None
-
-        async def reply(self, *_args, **_kwargs) -> str:
-            raise TimeoutError("model timeout")
-
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({
-        "messageType": 1, "remoteMessageId": "price-question",
-        "content": "多少钱一张", "imageUrls": [],
-    })
-    body["recent_messages"] = [{
-        "direction": "inbound", "messageType": 1, "content": "多少钱一张",
-        "messageId": "price-question", "sentAtMs": 1787579999000, "imageUrls": [],
-    }]
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FailingChat(),
-    )
-
-    result = await automation.process_event(body)
-
-    assert result["decision"]["reason"] == "agent_text_grounded_fallback_ready"
-    assert len(result["decision"]["actions"]) == 1
-    action = result["decision"]["actions"][0]
-    assert action["type"] == "send_message"
-    assert "截图" in action["text"]
-    assert "人工" not in action["text"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(reason="bare acknowledgement no longer drives quote guidance", strict=False)
 async def test_fresh_quote_prevents_an_old_completed_order_from_answering_ok_as_fulfilled() -> None:
     body = event_body(event="im.message.received")
     body["envelope"]["payload"].update({
@@ -750,7 +595,6 @@ async def test_fresh_quote_prevents_an_old_completed_order_from_answering_ok_as_
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="legacy acknowledgement shortcut removed", strict=False)
 async def test_bare_acknowledgement_without_active_transaction_does_not_call_generic_ai() -> None:
     class UnexpectedChat:
         def sync_platform_history(self, *_args, **_kwargs) -> None:
@@ -840,25 +684,6 @@ async def test_generic_ai_numeric_price_claim_is_rejected_without_authoritative_
     }
 
 
-def test_current_webhook_message_is_found_in_newest_first_history_page() -> None:
-    current = {
-        "direction": "inbound", "messageType": 2, "content": "[当前图片]",
-        "messageId": "current-image", "sentAtMs": 1788197154568,
-        "imageUrls": ["https://img.alicdn.com/current.jpg"],
-    }
-    older = [
-        {
-            "direction": "inbound", "messageType": 1, "content": f"旧消息{index}",
-            "messageId": f"older-{index}", "sentAtMs": 1788080000000 - index,
-            "imageUrls": [],
-        }
-        for index in range(22)
-    ]
-    envelope = {"payload": {"remoteMessageId": "current-image"}}
-
-    assert _latest_inbound_message([current, *older], envelope) == current
-
-
 @pytest.mark.asyncio
 async def test_current_webhook_message_wins_when_platform_history_has_not_propagated_yet() -> None:
     body = event_body(event="im.message.received")
@@ -882,16 +707,14 @@ async def test_current_webhook_message_wins_when_platform_history_has_not_propag
 
     result = await automation.process_event(body)
 
-    # A webhook payload not present in buyer history is no longer fabricated as
-    # inbound text; this prevents seller/outbound echoes from triggering rules.
-    assert result["decision"]["reason"] == "current_buyer_message_unavailable"
-    assert result["decision"]["actions"] == []
+    assert result["decision"]["reason"] == "automatic_reply_ready"
+    assert result["decision"]["actions"][0]["text"] == "请把当前场次和选座截图发给我，我帮您核价。"
     assert recognizer.calls == 0
-    assert chat.synchronized is None
+    assert chat.synchronized is not None
+    assert chat.synchronized[2] == "current-not-in-history"
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="legacy greeting shortcut removed", strict=False)
 async def test_simple_greeting_uses_guidance_without_hallucinated_old_context() -> None:
     body = event_body(event="im.message.received")
     body["envelope"]["payload"].update({"messageType": 1, "remoteMessageId": "greeting-current"})
@@ -932,8 +755,8 @@ async def test_custom_keyword_reply_bypasses_gpt_with_deterministic_priority() -
 
     result = await automation.process_event(body)
 
-    assert result["decision"]["reason"] == "automatic_reply_ready"
-    assert result["decision"]["actions"][0]["text"] == "请把当前场次和选座截图发给我，我帮您核价。"
+    assert result["decision"]["reason"] == "custom_keyword_reply_ready"
+    assert result["decision"]["actions"][0]["text"] == "支持万达W+座位代订，请发送截图。"
 
 
 @pytest.mark.asyncio
@@ -961,13 +784,35 @@ async def test_keyword_reply_can_send_tenant_bound_uploaded_image() -> None:
 
     result = await automation.process_event(body)
 
-    assert result["decision"]["reason"] == "automatic_reply_ready"
-    assert [action["type"] for action in result["decision"]["actions"]] == ["send_message"]
-    assert result["decision"]["actions"][0]["text"] == "请把当前场次和选座截图发给我，我帮您核价。"
+    assert result["decision"]["reason"] == "custom_keyword_reply_ready"
+    assert [action["type"] for action in result["decision"]["actions"]] == ["send_message", "send_image"]
+    assert result["decision"]["actions"][1] == {
+        "id": "event-1:keyword-image",
+        "type": "send_image",
+        "image_asset_id": f"ki-{'a' * 40}",
+        "image_filename": "keyword-a.png",
+        "rule_governed": True,
+    }
+
+
+@pytest.mark.parametrize(("message", "count"), [
+    ("确认", None), ("确认报价", None), ("按报价确认", None), ("正确", None),
+    ("确认2张", 2), ("按报价确认两张", 2),
+    ("2张", 2), ("两张", 2), ("需要2张", 2), ("否 两张", 2),
+])
+def test_explicit_quote_confirmation_whitelist(message: str, count: int | None) -> None:
+    assert _explicit_quote_confirmation(message) == count
+
+
+@pytest.mark.parametrize("message", [
+    "好的", "可以", "行", "嗯", "OK",
+    "帮我买", "确认一下价格", "不确认报价",
+])
+def test_ambiguous_or_negative_messages_are_not_transaction_confirmation(message: str) -> None:
+    assert _explicit_quote_confirmation(message) is False
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="legacy confirmation keyword was coupled to quote confirmation", strict=False)
 async def test_correct_uses_configured_purchase_guide_and_paired_image() -> None:
     body = event_body(event="im.message.received")
     body["order"] = None
@@ -1010,114 +855,8 @@ async def test_correct_uses_configured_purchase_guide_and_paired_image() -> None
     ]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("confirmation", "count"), [("确认2张", 2), ("按报价确认两张", 2)])
-@pytest.mark.xfail(reason="natural-language confirmation no longer drives order guidance", strict=False)
-async def test_confirmed_quote_intent_guides_buyer_to_submit_unpaid_order(confirmation: str, count: int) -> None:
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({"messageType": 1, "remoteMessageId": "confirm-current"})
-    body["recent_messages"] = [
-        {"direction": "seller", "messageType": 1, "content": "中间W+区域后台报价单价：49.90一张", "messageId": "quote-1", "sentAtMs": 1787579980000, "imageUrls": []},
-        *([{"direction": "inbound", "messageType": 1, "content": "需要2张", "messageId": "count-1", "sentAtMs": 1787579990000, "imageUrls": []}] if confirmation == "需要" else []),
-        {"direction": "inbound", "messageType": 1, "content": confirmation, "messageId": "confirm-current", "sentAtMs": 1787579999000, "imageUrls": []},
-    ]
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(),
-    )
-
-    result = await automation.process_event(body)
-
-    assert result["decision"]["reason"] == "order_submission_guidance_ready"
-    assert f"按已确认的{count}张" in result["decision"]["actions"][0]["text"]
-    assert "先不要付款" in result["decision"]["actions"][0]["text"]
-    assert "改价已完成" in result["decision"]["actions"][0]["text"]
 
 
-@pytest.mark.asyncio
-async def test_manual_quote_without_durable_record_does_not_confirm_buyer_quantity() -> None:
-    """A human amount after a failed cinema match must stay manual-only."""
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({
-        "messageType": 1, "remoteMessageId": "manual-quantity-current", "content": "两张",
-    })
-    body["recent_messages"] = [
-        {
-            "direction": "seller", "messageType": 1,
-            "content": "万达影院暂时无法核价，人工报价74一张",
-            "messageId": "manual-quote-74", "sentAtMs": 1787579980000,
-        },
-        {
-            "direction": "inbound", "messageType": 1, "content": "两张",
-            "messageId": "manual-quantity-current", "sentAtMs": 1787579999000,
-        },
-    ]
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(), quote_finder=lambda **_: None,
-    )
-
-    result = await automation.process_event(body)
-
-    decision = result["decision"]
-    assert decision["reason"] == "automatic_reply_ready"
-    assert not any(
-        action["type"] in {"change_order_price", "create_order", "submit_order"}
-        for action in decision["actions"]
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("message", "seat_text"), [
-    ("是 2张", "人工会按照您图片中标记的位置出票，请放心下单。"),
-    ("否 两张", "人工会根据实时可售情况安排座位，请放心下单。"),
-])
-@pytest.mark.xfail(reason="ticket count is not implicit confirmation", strict=False)
-async def test_quantity_reply_calculates_total_and_guides_unpaid_order(
-    message: str, seat_text: str,
-) -> None:
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({
-        "messageType": 1, "remoteMessageId": "count-current", "content": message,
-    })
-    body["recent_messages"] = [
-        {
-            "direction": "outbound", "messageType": 1,
-            "content": "W+报价：77.10/张", "messageId": "quote-1",
-            "sentAtMs": 1787579980000,
-        },
-        {
-            "direction": "inbound", "messageType": 1, "content": message,
-            "messageId": "count-current", "sentAtMs": 1787579999000,
-        },
-    ]
-    durable = {
-        "record_id": "quote-1", "quote_scope": "area_preview", "seat_zone_type": "W+",
-        "unit_quote_cents": 7_710, "ticket_count": None,
-    }
-    confirmations: list[dict[str, object]] = []
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(), quote_finder=lambda **_: durable,
-        quote_confirmer=lambda **value: confirmations.append(value) or {
-            **durable, "confirmed_ticket_count": value["ticket_count"],
-        },
-    )
-
-    result = await automation.process_event(body)
-
-    text = result["decision"]["actions"][0]["text"]
-    assert result["decision"]["reason"] == "order_submission_guidance_ready"
-    assert confirmations and confirmations[0]["ticket_count"] == 2
-    assert "77.10一张，合计154.20元" in text
-    assert seat_text in text
-    assert "按已确认的2张" in text
-    assert "先不要付款" in text
-    assert "核算并改价" in text
-    assert "确认报价" not in text
 
 
 @pytest.mark.asyncio
@@ -1126,7 +865,6 @@ async def test_quantity_reply_calculates_total_and_guides_unpaid_order(
     "等一下，我先核对场次",
     "我看看时间，晚点回复",
 ])
-@pytest.mark.xfail(reason="buyer deferral is no longer a hard-coded intent branch", strict=False)
 async def test_buyer_deferral_after_quote_stays_silent_instead_of_asking_quantity(
     buyer_message: str,
 ) -> None:
@@ -1160,7 +898,6 @@ async def test_buyer_deferral_after_quote_stays_silent_instead_of_asking_quantit
     ("7排中间的两张", 7_920, 2, "158.40"),
     ("3", 6_370, 3, "191.10"),
 ])
-@pytest.mark.xfail(reason="quantity text does not authorize order actions", strict=False)
 async def test_quantity_embedded_in_seat_preference_or_bare_prompt_answer_confirms_quote(
     buyer_message: str, unit_quote_cents: int, expected_count: int, expected_total: str,
 ) -> None:
@@ -1200,7 +937,6 @@ async def test_quantity_embedded_in_seat_preference_or_bare_prompt_answer_confir
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="bare numeric text is handled by AI", strict=False)
 async def test_bare_number_without_immediately_preceding_count_prompt_is_not_confirmation() -> None:
     body = event_body(event="im.message.received")
     body["order"] = None
@@ -1238,7 +974,6 @@ def test_quantity_guidance_contains_no_customer_facing_hardcoded_prose() -> None
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="legacy ticket-count shortcut removed", strict=False)
 async def test_ticket_count_sends_purchase_instruction_and_guide_image() -> None:
     body = event_body(event="im.message.received")
     body["order"] = None
@@ -1290,34 +1025,9 @@ async def test_ticket_count_sends_purchase_instruction_and_guide_image() -> None
     }
 
 
-@pytest.mark.asyncio
-@pytest.mark.xfail(reason="legacy ticket-count shortcut removed", strict=False)
-async def test_ticket_count_directly_guides_buyer_to_submit_without_confirmation_phrase() -> None:
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({"messageType": 1, "remoteMessageId": "count-current"})
-    body["recent_messages"] = [
-        {"direction": "outbound", "messageType": 1, "content": "报价合计：77.80元", "messageId": "quote-1", "sentAtMs": 1787579980000},
-        {"direction": "inbound", "messageType": 1, "content": "2张", "messageId": "count-current", "sentAtMs": 1787579999000},
-    ]
-    confirmations: list[dict[str, object]] = []
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(),
-        quote_finder=lambda **_: {"record_id": "quote-1"},
-        quote_confirmer=lambda **value: confirmations.append(value) or {"record_id": "quote-1"},
-    )
-
-    result = await automation.process_event(body)
-
-    assert result["decision"]["reason"] == "order_submission_guidance_ready"
-    assert confirmations and confirmations[0]["ticket_count"] == 2
-    assert "按已确认的2张" in result["decision"]["actions"][0]["text"]
-    assert "确认报价" not in result["decision"]["actions"][0]["text"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="emoji acceptance is not transaction authorization", strict=False)
 async def test_emoji_acceptance_after_unit_quote_asks_for_ticket_count_during_human_handoff() -> None:
     body = event_body(event="im.message.received")
     body["order"] = None
@@ -1348,30 +1058,9 @@ async def test_emoji_acceptance_after_unit_quote_asks_for_ticket_count_during_hu
     }]
 
 
-@pytest.mark.asyncio
-@pytest.mark.xfail(reason="natural-language confirmation no longer drives order guidance", strict=False)
-async def test_exact_quote_confirmation_reuses_authoritative_recognized_ticket_count() -> None:
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({"messageType": 1, "remoteMessageId": "confirm-current"})
-    body["recent_messages"] = [
-        {"direction": "outbound", "messageType": 1, "content": "报价合计：¥77.80", "messageId": "quote-1", "sentAtMs": 1787579980000},
-        {"direction": "inbound", "messageType": 1, "content": "确认", "messageId": "confirm-current", "sentAtMs": 1787579999000},
-    ]
-    durable = {"record_id": "quote-1", "quote_scope": "exact_seats", "ticket_count": 2}
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(), quote_finder=lambda **_: durable,
-    )
-
-    result = await automation.process_event(body)
-
-    assert result["decision"]["reason"] == "order_submission_guidance_ready"
-    assert "按已确认的2张" in result["decision"]["actions"][0]["text"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="quote expiry is evaluated on order events", strict=False)
 async def test_expired_quote_confirmation_requests_a_fresh_screenshot_instead_of_ticket_count() -> None:
     body = event_body(event="im.message.received")
     body["order"] = None
@@ -1392,64 +1081,11 @@ async def test_expired_quote_confirmation_requests_a_fresh_screenshot_instead_of
     assert "几张" not in result["decision"]["actions"][0]["text"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.xfail(reason="quantity text is not implicit confirmation", strict=False)
-async def test_buyer_quantity_does_not_require_confirmation_phrase() -> None:
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({"messageType": 1, "remoteMessageId": "count-current"})
-    body["recent_messages"] = [
-        {"direction": "outbound", "messageType": 1, "content": "W+区域后台报价¥59.90一张", "messageId": "quote-1", "sentAtMs": 1787579980000},
-        {"direction": "inbound", "messageType": 1, "content": "2张", "messageId": "count-current", "sentAtMs": 1787579999000},
-    ]
-    confirmations: list[dict[str, object]] = []
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(),
-        quote_finder=lambda **_: {"record_id": "quote-1"},
-        quote_confirmer=lambda **value: confirmations.append(value) or {"record_id": "quote-1"},
-    )
 
-    result = await automation.process_event(body)
 
-    assert result["decision"]["reason"] == "order_submission_guidance_ready"
-    assert "按已确认的2张" in result["decision"]["actions"][0]["text"]
-    assert "确认报价" not in result["decision"]["actions"][0]["text"]
-    assert confirmations and confirmations[0]["ticket_count"] == 2
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="quantity text is not implicit confirmation", strict=False)
-async def test_current_quantity_skips_confirmation_phrase_even_when_platform_history_lags() -> None:
-    body = event_body(event="im.message.received")
-    body["order"] = None
-    body["envelope"]["payload"].update({
-        "messageType": 1, "remoteMessageId": "count-not-in-history",
-        "content": "2张", "imageUrls": [],
-    })
-    body["recent_messages"] = [{
-        "direction": "outbound", "messageType": 1,
-        "content": "W+专享区后台报价单价：¥59.90", "messageId": "quote-1",
-        "sentAtMs": 1787579980000, "imageUrls": [],
-    }]
-    confirmations: list[dict[str, object]] = []
-    automation = PluginAutomation(
-        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=FakeChat(),
-        quote_finder=lambda **_: {"record_id": "quote-1", "quote_scope": "area_preview"},
-        quote_confirmer=lambda **value: confirmations.append(value) or {"record_id": "quote-1"},
-    )
-
-    result = await automation.process_event(body)
-
-    assert result["decision"]["reason"] == "order_submission_guidance_ready"
-    assert "按已确认的2张" in result["decision"]["actions"][0]["text"]
-    assert "确认报价" not in result["decision"]["actions"][0]["text"]
-    assert confirmations and confirmations[0]["ticket_count"] == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(reason="order writes require platform event authorization", strict=False)
 async def test_buyer_can_confirm_and_price_an_order_created_before_the_quote() -> None:
     body = event_body(event="im.message.received", order={
         "orderId": "order-before-quote", "tenantId": "tenant-1", "accountUnb": "shop-1",
@@ -1604,7 +1240,7 @@ async def test_paid_order_status_question_uses_authoritative_order_instead_of_gp
     )
     body["envelope"]["payload"].update({"messageType": 1, "remoteMessageId": "status-current"})
     body["recent_messages"] = [{
-        "direction": "inbound", "messageType": 1, "content": "出票了吗",
+        "direction": "inbound", "messageType": 1, "content": "OK了吗",
         "messageId": "status-current", "sentAtMs": 1787579999000, "imageUrls": [],
     }]
     chat = FakeChat()
@@ -1620,12 +1256,7 @@ async def test_paid_order_status_question_uses_authoritative_order_instead_of_gp
 
 
 @pytest.mark.asyncio
-async def test_shipped_order_acknowledgement_is_agent_owned_without_reopening_transaction() -> None:
-    class AckChat(FakeChat):
-        async def reply(self, text: str, conversation_id: str) -> str:
-            self.last_reply = (text, conversation_id)
-            return "好的，祝您观影愉快。"
-
+async def test_shipped_order_acknowledgement_never_falls_back_to_pending_payment_gpt_reply() -> None:
     body = event_body(
         event="im.message.received",
         order={
@@ -1639,7 +1270,7 @@ async def test_shipped_order_acknowledgement_is_agent_owned_without_reopening_tr
         "direction": "inbound", "messageType": 1, "content": "OK",
         "messageId": "ack-current", "sentAtMs": 1787579999000, "imageUrls": [],
     }]
-    chat = AckChat()
+    chat = FakeChat()
     automation = PluginAutomation(
         FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
         image_loader=load_image, chat_service=chat,
@@ -1647,10 +1278,8 @@ async def test_shipped_order_acknowledgement_is_agent_owned_without_reopening_tr
 
     result = await automation.process_event(body)
 
-    assert result["decision"]["reason"] == "automatic_reply_ready"
-    assert result["decision"]["actions"] == [{
-        "id": "event-1:reply", "type": "send_message", "text": "好的，祝您观影愉快。",
-    }]
+    assert result["decision"]["reason"] == "authoritative_shipped_status_reply_ready"
+    assert result["decision"]["actions"][0]["text"] == ReplyTemplates().order_shipped_template
 
 
 @pytest.mark.asyncio
@@ -1691,7 +1320,7 @@ async def test_shipped_rule_reply_survives_generic_ai_stage_gate_for_ticket_coll
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("buyer_text", ["OK，我核对了就确认", "谢谢"])
-async def test_shipped_order_acknowledgement_uses_agent_and_blocks_stale_keyword(
+async def test_shipped_order_blocks_stale_confirmation_keyword_and_generic_chat_reply(
     buyer_text: str,
 ) -> None:
     body = event_body(
@@ -1717,21 +1346,17 @@ async def test_shipped_order_acknowledgement_uses_agent_and_blocks_stale_keyword
             "image_tenant_id": "tenant-1",
         }],
     })
-    class AckChat(FakeChat):
-        async def reply(self, text: str, conversation_id: str) -> str:
-            self.last_reply = (text, conversation_id)
-            return "不客气，祝您观影愉快。"
-
     automation = PluginAutomation(
         FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
-        image_loader=load_image, chat_service=AckChat(), template_provider=lambda: templates,
+        image_loader=load_image, chat_service=FakeChat(), template_provider=lambda: templates,
     )
 
     result = await automation.process_event(body)
 
-    assert result["decision"]["reason"] == "automatic_reply_ready"
+    assert result["decision"]["reason"] == "authoritative_shipped_status_reply_ready"
     assert result["decision"]["actions"] == [{
-        "id": "event-1:reply", "type": "send_message", "text": "不客气，祝您观影愉快。",
+        "id": "event-1:reply", "type": "send_message", "text": templates.order_shipped_template,
+        "rule_governed": True,
     }]
 
 
@@ -1821,7 +1446,6 @@ async def test_recent_city_venue_and_seat_question_is_cleaned_before_matching_tr
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="ordinary text is now Agent-owned; contextual image replay moves to Agent tools", strict=False)
 async def test_newer_cinema_text_reprocesses_the_previous_image_as_one_context() -> None:
     class HintQuoter:
         async def complete_cinema(self, value: MovieImageInfo) -> MovieImageInfo:
@@ -1859,7 +1483,6 @@ async def test_newer_cinema_text_reprocesses_the_previous_image_as_one_context()
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="ordinary text is now Agent-owned; contextual image replay moves to Agent tools", strict=False)
 async def test_city_only_message_reprocesses_the_previous_image_instead_of_interrupting_it() -> None:
     class CityHintQuoter:
         async def is_known_city_hint(self, value: str) -> bool:
@@ -1972,7 +1595,6 @@ async def test_city_text_only_requotes_when_it_is_the_next_buyer_message_after_i
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="ordinary text is now Agent-owned; contextual image replay moves to Agent tools", strict=False)
 async def test_city_and_district_message_is_canonicalized_before_reprocessing_previous_image() -> None:
     class CityDistrictQuoter:
         async def canonical_city_hint(self, value: str) -> str | None:
@@ -2011,7 +1633,6 @@ async def test_city_and_district_message_is_canonicalized_before_reprocessing_pr
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="ordinary text is now Agent-owned; contextual image replay moves to Agent tools", strict=False)
 async def test_city_plus_venue_hint_keeps_both_city_and_venue_when_reprocessing_image() -> None:
     class CityVenueQuoter:
         async def canonical_city_hint(self, value: str) -> str | None:
@@ -2269,7 +1890,7 @@ async def test_automation_fails_closed_on_identity_mismatch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_image_area_quote_does_not_reuse_ticket_count_from_unrelated_history() -> None:
+async def test_image_area_quote_reuses_ticket_count_declared_in_earlier_buyer_text() -> None:
     area_quote = RealQuote(
         quote_scope="area_probe", seat_zone_type="W+", unit_quote_cents=5830,
         needs_ticket_count=True, pricing_source="万达官方会员价",
@@ -2288,8 +1909,7 @@ async def test_image_area_quote_does_not_reuse_ticket_count_from_unrelated_histo
     result = await automation.process_event(body)
 
     reply = result["decision"]["actions"][0]["text"]
-    assert "请告诉我需要几张" in reply
-    assert "已记下需要2张票" not in reply
+    assert "请告诉我需要几张" not in reply
     assert "58.30" in reply
     assert "¥" not in reply
 
@@ -2437,14 +2057,3 @@ def test_image_url_allowlist_rejects_unsafe_sources(url: str) -> None:
 
 def test_image_url_allowlist_accepts_xianyu_cdn() -> None:
     assert validate_image_url("https://img.alicdn.com/a.jpg") == "https://img.alicdn.com/a.jpg"
-
-
-def test_liangpiao_order_failure_is_buyer_visible_safety_notice() -> None:
-    result = build_action_result_decision({
-        "event_id": "paid-1", "action_id": "paid-1:create-liangpiao-order",
-        "command_type": "create_liangpiao_order", "order_id": "order-1",
-        "result": {"status": "failed"},
-    }, mode="auto")
-    assert result["actions"][0]["type"] == "send_message"
-    assert result["actions"][0]["safety_notice"] is True
-    assert "出票失败" in result["actions"][0]["text"]

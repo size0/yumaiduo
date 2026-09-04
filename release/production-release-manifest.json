@@ -1,0 +1,641 @@
+{
+  "schema_version": "production-release-manifest.v1",
+  "release_name": "wanda-v4-canonical-message-canary-20260904",
+  "base_commit": "deeff0b36d52a55b3d49428be0d410c7fe18021e",
+  "release_commit": "see git rev-parse HEAD (not self-embedded)",
+  "scope": {
+    "tenant_id": "107",
+    "shop_id": "2313315754",
+    "shop_name": "万达w位置代买",
+    "canonical_quote_enabled": true,
+    "message_canary_only": true
+  },
+  "gates": {
+    "EXTERNAL_WRITES_ENABLED": true,
+    "MESSAGE_SEND_ENABLED": true,
+    "XIANYU_REPRICE_ENABLED": false,
+    "LIANGPIAO_ORDER_CREATE_ENABLED": false,
+    "WANDA_PROVIDER_WRITES_ENABLED": false,
+    "REFUND_ENABLED": false,
+    "SHIP_ENABLED": false,
+    "WANDA_ACTIVE_PROBE_ENABLED": false,
+    "AGENT_ENABLED": false
+  },
+  "allowed_real_operations": [
+    "canonical_recognition",
+    "provider_read",
+    "pricing",
+    "quote_record",
+    "canonical_buyer_reply",
+    "send_message"
+  ],
+  "forbidden_real_operations": [
+    "xianyu_reprice",
+    "liangpiao_order_create",
+    "wanda_fulfillment",
+    "wanda_provider_write",
+    "probe",
+    "payment",
+    "refund",
+    "ship",
+    "agent",
+    "history_replay"
+  ],
+  "artifact_exclusions": [
+    ".tmp/",
+    "backend/tests/",
+    "plugin-runtime/wanda-seat-autoquote/test/",
+    "backend/app/agent/",
+    "backend/app/agent_runtime/",
+    "backend/app/automation_mode.py",
+    "backend/app/recognition_snapshot_store.py",
+    "data/",
+    "logs/",
+    "cache/",
+    "*.sqlite3",
+    "*.json runtime state",
+    "acceptance images"
+  ],
+  "files": [
+    {
+      "path": "backend/app/__init__.py",
+      "sha256": "e0a8ba54e4760b7f399b329570105d05c2d7a4d28c9caf40e8716daeadaa2d64",
+      "size": 53
+    },
+    {
+      "path": "backend/app/canonical_buyer_reply.py",
+      "sha256": "16386bc8f19ff9fd01fc16a1f44aeda3f962a4c481fca4fd75080ac75592c57b",
+      "size": 5863
+    },
+    {
+      "path": "backend/app/chat.py",
+      "sha256": "e852dd4a557a0f1e40e31c3a2e6778e96fc0250a203e54d1cee653cd6ec9250f",
+      "size": 9766
+    },
+    {
+      "path": "backend/app/chat_service.py",
+      "sha256": "5c5a5f14c871d092d18254b3903b23030446776904772ec68580a9356f7dcfae",
+      "size": 26989
+    },
+    {
+      "path": "backend/app/cinema_route_v2/models.py",
+      "sha256": "7ac8a25599a821f55b8caea2a5347b5307475f91b8dd1237bce49e2994ebc440",
+      "size": 1843
+    },
+    {
+      "path": "backend/app/cinema_route_v2/service.py",
+      "sha256": "bfae1de41f2a67b85063707c191b83f0d1506a370bba51fa80fc8078de26ba56",
+      "size": 33176
+    },
+    {
+      "path": "backend/app/cinema_route_v2/wanda_source.py",
+      "sha256": "f3a33e9a8ab4dee585aaac8d8394094a1309c28524a2b9a6c11968063552d2b1",
+      "size": 1182
+    },
+    {
+      "path": "backend/app/cinema_routing.py",
+      "sha256": "5a4ad44a82cda61db1828e247081cd23c6f5be0bad20e9c353a36e0f06783d28",
+      "size": 4356
+    },
+    {
+      "path": "backend/app/cli.py",
+      "sha256": "833165b016655f6444ab26a0d890a2dca404a3149812ef1baecc7ee1932ada49",
+      "size": 1239
+    },
+    {
+      "path": "backend/app/config.py",
+      "sha256": "5d0671a482ae7d9608d418df38e15a829f13c03ca6379c5f1c627addfc2b494f",
+      "size": 7033
+    },
+    {
+      "path": "backend/app/conversation_policy_store.py",
+      "sha256": "516079423b3a3a6a600fdade74487771bc3eb674e0191ea03a84894fdea1c236",
+      "size": 3624
+    },
+    {
+      "path": "backend/app/diagnostics.py",
+      "sha256": "a54b54b4d740dbd167e5ee305dbae994256ff7db9bb640b2edcc25b87dfdebd8",
+      "size": 1596
+    },
+    {
+      "path": "backend/app/errors.py",
+      "sha256": "17fc5eaa7c757c05101eadf800feff96d49b696bbfd7cfa09f7474f5316ead1f",
+      "size": 972
+    },
+    {
+      "path": "backend/app/external_write_gates.py",
+      "sha256": "adf3db4c8ebe6a2b9d7bacd21548fc776c4f8ef8cef489bdfe43f42b71d89c10",
+      "size": 3689
+    },
+    {
+      "path": "backend/app/keyword_image_store.py",
+      "sha256": "c36292c8408d88028b91f5d473ff82352ace52f20c98883180aca70ca3fbec85",
+      "size": 5195
+    },
+    {
+      "path": "backend/app/knowledge_store.py",
+      "sha256": "84531a0543b20dc8d5fe318143829ca2e22c861a8cb3c6d75d378512d6208595",
+      "size": 13699
+    },
+    {
+      "path": "backend/app/liangpiao_callbacks.py",
+      "sha256": "275388203a88ec1184b7f50e9831d58d19199cde3dd40e47bbade78bec29cb3d",
+      "size": 31534
+    },
+    {
+      "path": "backend/app/liangpiao_client.py",
+      "sha256": "cccecbdfd5b458823061be96f2fe2f47cb924b456317696e97302861022ed8a1",
+      "size": 24033
+    },
+    {
+      "path": "backend/app/liangpiao_exact_quote.py",
+      "sha256": "ae915921dedd55df8471e1c1da71aab1bfbb02cf455611ebe6899a0825ce604d",
+      "size": 5148
+    },
+    {
+      "path": "backend/app/liangpiao_order_service.py",
+      "sha256": "f2674551fb927305eb50f839e8b76106d59d5fecca4fe673e3e2aac47a1dd5c4",
+      "size": 44372
+    },
+    {
+      "path": "backend/app/liangpiao_recognition.py",
+      "sha256": "d12805dc44c8374c488f3984542d246eed2754dd84265762129f9ce7a7698ffa",
+      "size": 21602
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "c09dda55680e7f0ae88546e3c827e02ff94d2c782360c5308d11bdd1139bca27",
+      "size": 73956
+    },
+    {
+      "path": "backend/app/model_catalog.py",
+      "sha256": "6d491c97a0657647eb8170ea5920c428f354dd86602fb0f0e4cfda7aafaa2849",
+      "size": 3888
+    },
+    {
+      "path": "backend/app/models.py",
+      "sha256": "1e9103e288285e48e6df6a883ba10aad66d9ac2953c312e94cba077321bb7372",
+      "size": 23375
+    },
+    {
+      "path": "backend/app/observability.py",
+      "sha256": "3932413b2e6f0e011421909a4e354358d62adf2b7f10d1c76eb77376f50695e2",
+      "size": 1787
+    },
+    {
+      "path": "backend/app/order_quote_binding_v2/service.py",
+      "sha256": "7b650ac98a27205ff9318ba939924a71a5d99155fc03e68df0e0dd4a1abf292f",
+      "size": 30872
+    },
+    {
+      "path": "backend/app/payment_validation.py",
+      "sha256": "49f100a0b87fe62403668cb25d7d54f387e6a012d8070507b0ac75a494bcd8bb",
+      "size": 22101
+    },
+    {
+      "path": "backend/app/pending_cinema_candidate_store.py",
+      "sha256": "00bf3649f70ae55d06c9dad91be6778b49b0c760d54fba7031a5b74326d3dbf5",
+      "size": 3439
+    },
+    {
+      "path": "backend/app/plugin_automation.py",
+      "sha256": "ef5c89dbd92f045e08da3e88041cb1c96c220ab1f9349b90e1f5524bdbbf87bf",
+      "size": 104824
+    },
+    {
+      "path": "backend/app/pricing/__init__.py",
+      "sha256": "526981f9ba312ac163b13ea7bcdc28c0cc8c1f9318e67bb11ebcd13b65a3b3c8",
+      "size": 643
+    },
+    {
+      "path": "backend/app/pricing/adapters.py",
+      "sha256": "cbaa61c6f1c78e8afcdc5609729ef2faf6568e3a8fdc509e813a0ccf1e68e87c",
+      "size": 2101
+    },
+    {
+      "path": "backend/app/pricing/compat.py",
+      "sha256": "28bb1899a81c8df83d24e24f826b34d8d46803928605aaf5ca7dcd78c0c223c4",
+      "size": 10230
+    },
+    {
+      "path": "backend/app/pricing/engine.py",
+      "sha256": "3f98cc3539003e0d8d6087678f944ef6f72f70a81dab73e67999960d34db305e",
+      "size": 11870
+    },
+    {
+      "path": "backend/app/pricing/errors.py",
+      "sha256": "f6e14caf30e04b817d702370d39bc4cf591bbfd0002524f864c86d8a2f1b4852",
+      "size": 367
+    },
+    {
+      "path": "backend/app/pricing/models.py",
+      "sha256": "cd6c8842b458ffebd054cb12afda503748da3d9410ff33c92d746dfc1a1e5b18",
+      "size": 17177
+    },
+    {
+      "path": "backend/app/pricing/provider_adapters.py",
+      "sha256": "16d1e9c595698849ceea3e346bcb10dab1a8efa95f19b5db812be40d78374756",
+      "size": 13445
+    },
+    {
+      "path": "backend/app/pricing_store.py",
+      "sha256": "9d3ee7ba806fa0f236e7e4189820349b1c3a7e3a5af4a822e361c8a6d3b5526c",
+      "size": 7026
+    },
+    {
+      "path": "backend/app/probe/__init__.py",
+      "sha256": "3dc9c39bbc8d4a2449029f5de69436986aac353b719d320d739c89782c0b790a",
+      "size": 2210
+    },
+    {
+      "path": "backend/app/probe/account_pool.py",
+      "sha256": "66d1227ff1a2b0882f3a657001d34747b6ee29719bde5868732b44de6ca27939",
+      "size": 2463
+    },
+    {
+      "path": "backend/app/probe/audit.py",
+      "sha256": "332fd65c843282a72288a1cf85fb2833e263113c9d2bcea072caa3386c94fbc9",
+      "size": 2009
+    },
+    {
+      "path": "backend/app/probe/canonical.py",
+      "sha256": "ecd85ffce898567d431cb80251a79ac357b5a7dc7daf5225290c123a1ef59939",
+      "size": 3195
+    },
+    {
+      "path": "backend/app/probe/capture.py",
+      "sha256": "16b408f40246bbee56ac558185ae40419e39a76e4038d69c701037d0f532f0cf",
+      "size": 5483
+    },
+    {
+      "path": "backend/app/probe/capture_reliability.py",
+      "sha256": "dec99ddd4cc74a190c10e2e6030adfc68ac13d145289397d827f92541f9b7573",
+      "size": 27450
+    },
+    {
+      "path": "backend/app/probe/capture_runner.py",
+      "sha256": "1ba2f3d9e12d542fbf614e74b8d9e996a2e584d19689d721ca8f05ba883e37c4",
+      "size": 34061
+    },
+    {
+      "path": "backend/app/probe/comparator.py",
+      "sha256": "ce1e0335c4370ee1c1291857bc3b99227b7b76f026f6c2c0bac4b10a8697407b",
+      "size": 2435
+    },
+    {
+      "path": "backend/app/probe/coordinator.py",
+      "sha256": "7292450239811673ed1db506b44947b2e7c89bab07eb7f060e4fee0520c4258a",
+      "size": 6942
+    },
+    {
+      "path": "backend/app/probe/errors.py",
+      "sha256": "bfc991e05bd6f0a319b7da15bf7f14c302d2ae4683825de4f9f4e27f4daff295",
+      "size": 822
+    },
+    {
+      "path": "backend/app/probe/incident_close.py",
+      "sha256": "c6ffea51fff62edb36edf44d3e2535c1d2e2c8973562ed2d1e0af71541b2311f",
+      "size": 5945
+    },
+    {
+      "path": "backend/app/probe/lease_store.py",
+      "sha256": "84b7fb147c8df78fa1349ed6ea2001d87e35739bf79530aa13c42c586785fcf1",
+      "size": 4235
+    },
+    {
+      "path": "backend/app/probe/models.py",
+      "sha256": "eec12031713627633416135b688c80f13b558dca73e5477badd9163885bba55c",
+      "size": 2654
+    },
+    {
+      "path": "backend/app/probe/official_provider.py",
+      "sha256": "192f7e0bb14f164583e9beb8ec23c6ce6ae3fd294dc1fcb9b988baf3b927f0a2",
+      "size": 3225
+    },
+    {
+      "path": "backend/app/probe/policy.py",
+      "sha256": "16c80c08e03d1a1cff68e1f8a0591e168dd23c6329c2c660783969fd93fc8e71",
+      "size": 6676
+    },
+    {
+      "path": "backend/app/probe/probe_store.py",
+      "sha256": "e7d0830ad5407c622b8d5804af6d8ddc3ab983ba9f981ca5076f6fe35a0c4dab",
+      "size": 8653
+    },
+    {
+      "path": "backend/app/probe/reconciliation.py",
+      "sha256": "f99bfc97ecbdcc532ab2ac8ce86aab14729b19a22f1e0b9c1474e38e6d7de554",
+      "size": 3338
+    },
+    {
+      "path": "backend/app/probe/release_tracker.py",
+      "sha256": "8827fc5163fa5cfda21ee97e2c0cc901f7f5c0b63d3b67f1ea2c3c4b08ea424a",
+      "size": 4803
+    },
+    {
+      "path": "backend/app/probe/replay.py",
+      "sha256": "c6f09648ed0dd99b23042d2ad739465b2a4ae6468c3cc02beb5f1c5ecbe705bd",
+      "size": 3507
+    },
+    {
+      "path": "backend/app/probe/seat_selector.py",
+      "sha256": "0f537700631c80c6525a24af8cb70505dc3337cea404da1efe19d4f24f60ef2b",
+      "size": 2108
+    },
+    {
+      "path": "backend/app/probe/wanda_active_probe.py",
+      "sha256": "3c6d1d021e3b8045505cf396ac009256446852fb5af21edacfdc0703686e341a",
+      "size": 16171
+    },
+    {
+      "path": "backend/app/prompts.py",
+      "sha256": "3f7eea47048d66c38e42c873b5445174c293eff9a6ee20264c0f5507f4d2ca0c",
+      "size": 6517
+    },
+    {
+      "path": "backend/app/quote_record_store.py",
+      "sha256": "7afc63079c0fc74e1aecd3e8198761dea9a2f641f2919a8788e5c8a7392e01ee",
+      "size": 44893
+    },
+    {
+      "path": "backend/app/quote_v2/service.py",
+      "sha256": "f69d32c7833480e6034ff2a42442fe18e1cd1f02865562776fcc663f67b7dcd0",
+      "size": 47114
+    },
+    {
+      "path": "backend/app/quote_v2/wanda_source.py",
+      "sha256": "070fb6cd933236460997fe55e119da3d52f66923885935c7254405536da89b6c",
+      "size": 3649
+    },
+    {
+      "path": "backend/app/recognition_v2/liangpiao.py",
+      "sha256": "1cf96cebc581a1a6b1b875c4d250ed1722cee8f781aa08cfaebd0f1cf677d4cb",
+      "size": 6177
+    },
+    {
+      "path": "backend/app/recognition_v2/manual_mark.py",
+      "sha256": "f6ac4c685097a4e60c915cc59d9074974b441c9f9a8c4189b5ed1259afef3981",
+      "size": 4768
+    },
+    {
+      "path": "backend/app/recognition_v2/models.py",
+      "sha256": "53e8123bba81fab0bba852b3e6a70deedb22b16919b20e5d22c79c204c345f20",
+      "size": 1414
+    },
+    {
+      "path": "backend/app/recognition_v2/service.py",
+      "sha256": "e0fcecdb2c5837f0490e19806244310fe4e136bc96dd9036c3eae5aa1c160618",
+      "size": 5664
+    },
+    {
+      "path": "backend/app/reminder_service.py",
+      "sha256": "d4236f22d8450fdacb6f4167232b757b01837cec3f797880a4d838e7827c726b",
+      "size": 2770
+    },
+    {
+      "path": "backend/app/reminder_store.py",
+      "sha256": "d35b644967be85be89f304c16ca084af1ab6f55377dfcd5cb7413ffdf2f81176",
+      "size": 13089
+    },
+    {
+      "path": "backend/app/reply_template_store.py",
+      "sha256": "479783f707ddf78913e7d08f0d1d1ba2e9967581cad1e4084a483d05c7281686",
+      "size": 30772
+    },
+    {
+      "path": "backend/app/rule_contracts.py",
+      "sha256": "da05db317fac3d82bed0143e3c7eb52642e47aaa1e2e8365bd4c0e8721823a55",
+      "size": 2802
+    },
+    {
+      "path": "backend/app/rule_state_coordinator.py",
+      "sha256": "84b07432cd9a85a36520eee2797983c204cb3eb30cb57be56efccd3f1ad230dc",
+      "size": 32790
+    },
+    {
+      "path": "backend/app/rule_templates.py",
+      "sha256": "d81e83b6d35445b6f045ebc86d36dd73831ee9b4c09867c4d6cf5ef01f4bda5c",
+      "size": 10308
+    },
+    {
+      "path": "backend/app/rules_first_migration.py",
+      "sha256": "7c49d9a0a6874271cb131d0c1a4bb02094633f08b13a9ee5cb1ccd2f00ec78c4",
+      "size": 6249
+    },
+    {
+      "path": "backend/app/rules_first_runtime.py",
+      "sha256": "71d9e10dd1dddb313858ce4edd29ae48a317636067a84a84bd6a89e3bd0a3443",
+      "size": 18762
+    },
+    {
+      "path": "backend/app/rules_first_state_store.py",
+      "sha256": "553692827d8e59432a47388203e67f3a22d43fd20c94992e4de53088601d9892",
+      "size": 15507
+    },
+    {
+      "path": "backend/app/rules_first_store.py",
+      "sha256": "54d058f03348297086333f06bc0d117eacd7bf9e58a9b38060e60b22cb518dcc",
+      "size": 68155
+    },
+    {
+      "path": "backend/app/seat_facts_v2/models.py",
+      "sha256": "eec18173f19da6b2818e23e81f7edd226dc00b4ae82f05bcf9801d759562e34f",
+      "size": 2794
+    },
+    {
+      "path": "backend/app/seat_facts_v2/service.py",
+      "sha256": "c8ec3439857a2e76bd74bd80ef2688a1f0bd64ae36392213bb21e51f31b46874",
+      "size": 13713
+    },
+    {
+      "path": "backend/app/seat_facts_v2/wanda_source.py",
+      "sha256": "228db52007282e5312a32308d9aa5bc25885b2c538e14a580b96ec16deab0bad",
+      "size": 313
+    },
+    {
+      "path": "backend/app/selected_seat_quote_service.py",
+      "sha256": "a1b7f78f59a3c02294b85ecc05ff7dec03192a4fb630fdfcfc39fb9ec21e449f",
+      "size": 20666
+    },
+    {
+      "path": "backend/app/service.py",
+      "sha256": "ddab0b40d51004d5c512ca2b9977cdb41b4f2c2cf57859d054b33496311d58a9",
+      "size": 37606
+    },
+    {
+      "path": "backend/app/settings_store.py",
+      "sha256": "2b0230e76829789bf8b31598e012c35bf3686ac2c73ef03087c4bec64029cdb5",
+      "size": 11139
+    },
+    {
+      "path": "backend/app/shop_automation_store.py",
+      "sha256": "b5a5f37c02762a1f9f1b5a4c69762deb7176d38459cd22fbadf9c579949bd6aa",
+      "size": 6877
+    },
+    {
+      "path": "backend/app/show_resolve_v2/models.py",
+      "sha256": "bac2a87083db475ca2ceb34090e3fcead00980330a07e9716e6ea54edc8eaa9e",
+      "size": 2215
+    },
+    {
+      "path": "backend/app/show_resolve_v2/service.py",
+      "sha256": "d70c37291db8c25a5dc4d66f45008c6ab52ab56209ea61d645eb56ad409d579d",
+      "size": 11426
+    },
+    {
+      "path": "backend/app/show_resolve_v2/wanda_source.py",
+      "sha256": "fa99db182eab199d9435b32a2e7118ef20d2a2fc3e2d2ef09902d2362f30db6b",
+      "size": 330
+    },
+    {
+      "path": "backend/app/transaction_state_store.py",
+      "sha256": "cd4286fa050cbe9309516f4528abc66917668c13f0d42bd2bd67de2aa13d9aa6",
+      "size": 17221
+    },
+    {
+      "path": "backend/app/wanda_cost_v2/models.py",
+      "sha256": "bf0b996b29e1622cea8cc3ee08fbdbc1e36f3a465b079b6fab2716cb4539cbbd",
+      "size": 1663
+    },
+    {
+      "path": "backend/app/wanda_cost_v2/service.py",
+      "sha256": "700b3835a7c8a9eeb3c8e6cc92525078656d6a12e478d50fc3cd2345839969f1",
+      "size": 6610
+    },
+    {
+      "path": "backend/app/wanda_direct_quote.py",
+      "sha256": "1d05b45b4388811c05aab91c76d4580d971c7d747bd206a9425f8e8617000af6",
+      "size": 110257
+    },
+    {
+      "path": "backend/app/wanda_pricing_v2/models.py",
+      "sha256": "156583f4898b9894667afdbd945169fc33c45682accfd18333cbfc3a8a928d2d",
+      "size": 1982
+    },
+    {
+      "path": "backend/app/wanda_pricing_v2/service.py",
+      "sha256": "96de7603f01ebb270f431d699a2ce5d98cb5446eaddad2826b3a7328aed7f84e",
+      "size": 8299
+    },
+    {
+      "path": "backend/app/wplus_fulfillment.py",
+      "sha256": "358d2d86a3fb983fd10c1d44783b023bd1f7d150817ede458cb12ad51b33c3d5",
+      "size": 20235
+    },
+    {
+      "path": "backend/pyproject.toml",
+      "sha256": "e829bd002a74fc615b7fc22baa1b370f6ceddb934b6528bea62ff0ed24af937d",
+      "size": 406
+    },
+    {
+      "path": "backend/requirements.txt",
+      "sha256": "10575e9cbc7701fcee853c076e1475640c29fb289cc9c52eabbd38e8d06a2821",
+      "size": 193
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/Dockerfile",
+      "sha256": "ad4dc932bab025804d64b280ca21a9836ee13f82abd277889151a51c79a0f175",
+      "size": 747
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/README.md",
+      "sha256": "fd43f74438ac1f242e0060ff22aef7c95eedced42e1f259d2248588e733ec037",
+      "size": 5487
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/docs/V2_ARCHITECTURE.md",
+      "sha256": "4021bb4f657db8b94e74059a20bd467dc71c5e165952232bb9b45a28b35b0780",
+      "size": 3982
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/index.mjs",
+      "sha256": "14d7fa89a88e85abd2fab527e42f5da69011607fda8e6e3e83fb52ec1c11994a",
+      "size": 2592
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/package-lock.json",
+      "sha256": "1107daa6a0a3c4026820f855d85b94f2c971a6ed33b9c0b5045de496b605a38f",
+      "size": 1425
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/package.json",
+      "sha256": "fa7a9ef10d9c6a6916b2d7c504048e8fe65e650c32fd69c8616247d57f2c9634",
+      "size": 767
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/actions/change-order-price.mjs",
+      "sha256": "3e374afca6612dcfec339f5dfc451b69f23011e4a4a45a9faa372c2390235a6b",
+      "size": 23035
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/actions/contracts.mjs",
+      "sha256": "5abd3d13fa9a5f94f36e6ff14dec5532a88dd1405bbb586e9ef0c5ad69ed72b9",
+      "size": 18757
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/actions/fulfillment.mjs",
+      "sha256": "86c083abe2a131b19d9027963157acc8ef7d400c34522ab13bcb5824a9d418d0",
+      "size": 7883
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/backend/client.mjs",
+      "sha256": "833861f9660941adddffe00479e19a4bd2acc127c9b863f3f6e362c635b4d7e0",
+      "size": 5493
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/config.mjs",
+      "sha256": "0d7d194ec6eb0735b8934c104a85fb7eb44793db9f3a8b7c4bd47baf4dd55d4e",
+      "size": 5705
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/http/server.mjs",
+      "sha256": "d4dfc5ced8197d606def24c0d7cf1dbe453d2b81517e305d83545074abbdd0b7",
+      "size": 19076
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/platform/runtime.mjs",
+      "sha256": "34fc3c43a07f58ba87ea1bba4d1d4095122481e02e91420dcd01dd191425194e",
+      "size": 2651
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-processor.mjs",
+      "sha256": "78c4cc163f76c8cf540541b2c12bdadefcd0b7bfb62d9f6e0599603f769e6843",
+      "size": 61800
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-store.mjs",
+      "sha256": "ea4e69b996bef542823dbf269c37e535e5b6195f8be4b1b144c8680d3e714218",
+      "size": 20476
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/v4-ui-job-store.mjs",
+      "sha256": "7000e1f6e37a08d25a7f3305ec4e5f551744b7127f187f81ad343c6a00962260",
+      "size": 7493
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/ui/app.js",
+      "sha256": "65dc6870b461fcb7a947f701685c77e7a3805fd86e6966bccbeaa5a3f095f9aa",
+      "size": 76945
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/ui/index.html",
+      "sha256": "3a94c811caecaea74e3e8ce96bfa0c12cfaadb33988c954a79443dd3a3dbc8e5",
+      "size": 45931
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/ui/sdk.js",
+      "sha256": "12052535b47998de4f0bd31733630e6d637ff178329fb4175bb8353fcee586d8",
+      "size": 20597
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/ui/styles.css",
+      "sha256": "7a9c9c726b1adf77c03e6f3457d4923140f331f0e638c0af2ff1ad373f6ee648",
+      "size": 56181
+    },
+    {
+      "path": "plugin-runtime/wanda-seat-autoquote/yumaiduo.plugin.json",
+      "sha256": "1eae10e011723fd039324c12486fe2ada223512b00834aa7b6314b429e7af164",
+      "size": 1483
+    }
+  ]
+}

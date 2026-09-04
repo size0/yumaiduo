@@ -103,7 +103,7 @@ def _wanda_seat(raw: object, index: int) -> PricingSeatFact:
         original_price_cents=original, member_cost_cents=member,
         channel_fee_cents=_cents(_value(raw, "channelFeeCents", "channel_fee_cents"), field="channel_fee_cents") or 0,
         availability_verified=_value(raw, "available", "isAvailable", "availabilityVerified") is not False,
-        cost_source="wanda_official",
+        cost_source=str(_value(raw, "costSource", "cost_source") or "wanda_official"),
     )
 
 

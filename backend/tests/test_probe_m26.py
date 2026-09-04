@@ -58,7 +58,7 @@ async def test_realistic_fixture_replay_runs_active_probe_and_comparator_without
     fixture = _fixture(tmp_path)
     provider = V3CaptureReplayProvider(fixture)
     store = DurableProbeStore(tmp_path / "probe.sqlite3")
-    policy = ProbePolicy(active_probe_enabled=True, agent_harness_read_only=False)
+    policy = ProbePolicy(active_probe_enabled=True, external_writes_enabled=True)
     active = WandaActiveProbe(
         provider, probe_store=store, release_tracker=ReleaseTracker(store, clock=FakeClock()), policy=policy,
     )
@@ -85,7 +85,7 @@ async def test_realistic_fixture_replay_runs_active_probe_and_comparator_without
 @pytest.mark.asyncio
 async def test_create_unknown_reconciler_is_explicitly_unsupported_without_lookup(tmp_path: Path) -> None:
     store = DurableProbeStore(tmp_path / "probe.sqlite3")
-    policy = ProbePolicy(active_probe_enabled=False, agent_harness_read_only=True)
+    policy = ProbePolicy(active_probe_enabled=False, external_writes_enabled=False)
     order = ProbeOrder(
         probe_id="unknown", tenant_id="t", shop_id="s", show_id="show",
         status=ProbeStatus.CREATE_UNKNOWN, account_ref="account", seat_ids=["seat-1"],

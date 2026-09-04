@@ -52,61 +52,6 @@ class PendingCinemaCandidateStore:
             }
             self._write(data)
 
-    def get_show_candidates(self, key: str) -> list[dict[str, Any]]:
-        with self._lock:
-            data = self._read()
-            entry = data.get("entries", {}).get(key)
-            if not isinstance(entry, dict) or self._expired(entry):
-                if entry is not None:
-                    data.get("entries", {}).pop(key, None)
-                    self._write(data)
-                return []
-            values = entry.get("show_candidates")
-            if not isinstance(values, list):
-                return []
-            return [dict(value) for value in values if isinstance(value, dict)][:20]
-
-    def save_show_candidates(self, key: str, candidates: list[dict[str, Any]]) -> None:
-        safe_fields = {
-            "show_id", "showtime_start", "showtime_end", "hall_name", "date_text",
-            "language", "format", "cinema_id", "movie_name",
-            "movie_id",
-        }
-        normalized: list[dict[str, Any]] = []
-        for candidate in candidates[:20]:
-            if not isinstance(candidate, dict):
-                continue
-            public = {
-                str(field): value for field, value in candidate.items()
-                if str(field) in safe_fields and value is not None
-            }
-            show_id = str(public.get("show_id") or "").strip()
-            if not show_id or len(show_id) > 160:
-                continue
-            public["show_id"] = show_id
-            if all(len(str(value)) <= 300 for value in public.values()):
-                normalized.append(public)
-        with self._lock:
-            data = self._read()
-            entries = data.setdefault("entries", {})
-            self._purge(entries)
-            now = datetime.now(timezone.utc)
-            entry = entries.setdefault(key, {})
-            entry["created_at"] = entry.get("created_at") or now.isoformat()
-            entry["expires_at"] = (now + timedelta(seconds=self._ttl)).isoformat()
-            entry["show_candidates"] = normalized
-            self._write(data)
-
-    def delete_show_candidates(self, key: str) -> None:
-        with self._lock:
-            data = self._read()
-            entry = data.get("entries", {}).get(key)
-            if isinstance(entry, dict) and "show_candidates" in entry:
-                entry.pop("show_candidates", None)
-                if "recognition" not in entry:
-                    data["entries"].pop(key, None)
-                self._write(data)
-
     def delete(self, key: str) -> None:
         with self._lock:
             data = self._read()

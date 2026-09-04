@@ -176,6 +176,7 @@ class MovieImageInfo(BaseModel):
     provider_match_level: str | None = Field(default=None, max_length=80)
     provider_no_match_reason: str | None = Field(default=None, max_length=100)
     recognition_blocker: str | None = Field(default=None, max_length=100)
+    resolution_diagnostic: str | None = Field(default=None, max_length=100)
     provider_request_id: str | None = Field(default=None, max_length=160)
     trace_id: str | None = Field(default=None, max_length=128)
     # These three objects form the lossless provider observation. The stable
@@ -257,9 +258,6 @@ class ChatTextRequest(BaseModel):
 
     conversation_id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=2000)
-    # The plugin workbench uses an isolated simulation session. It is never
-    # enabled by platform webhook traffic.
-    simulation: bool = False
 
     @field_validator("conversation_id", "text")
     @classmethod
@@ -283,6 +281,22 @@ class RealSeatQuote(BaseModel):
 
 class RealQuote(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+    # Compatibility projection of Pricing QuoteResult. New quote.preview code
+    # uses QuoteResult directly; these fields preserve canonical route and
+    # lineage when an older transaction boundary still requires RealQuote.
+    quote_id: str | None = None
+    record_id: str | None = None
+    event_id: str | None = None
+    recognition_snapshot_id: str | None = None
+    provider: Literal["WANDA", "LIANGPIAO"] | None = None
+    quote_route: Literal["WANDA_SELF", "LIANGPIAO_LIMIT", "LIANGPIAO_FIXED"] | None = None
+    generation: int | None = Field(default=None, ge=1)
+    quote_expires_at: str | None = None
+    provider_max_amount_cents: int | None = Field(default=None, gt=0)
+    buyer_quote_cents: int | None = Field(default=None, gt=0)
+    order_max_price_cents: int | None = Field(default=None, gt=0)
+    calculation_evidence: dict[str, Any] = Field(default_factory=dict)
 
     quote_scope: Literal["exact_seats", "area_probe", "area_preview"]
     quote_date: CalendarDate | None = None
@@ -330,16 +344,10 @@ class ChatAssistantMessage(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     conversation_id: str = Field(min_length=1, max_length=128)
     role: Literal["assistant"] = "assistant"
-    message_type: Literal[
-        "movie_recognition", "guidance", "ai_reply", "ai_reply_simulation",
-    ]
+    message_type: Literal["movie_recognition", "guidance", "ai_reply"]
     text: str = Field(min_length=1, max_length=2000)
     recognition: MovieImageInfo | None = None
     quote: RealQuote | None = None
-    # Public Agent execution trace for the isolated workbench.  Entries are
-    # bounded summaries (round/tool/result/final action), never chain-of-thought
-    # or raw provider responses.
-    agent_trace: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
 
 
 class ChatMessageResponse(BaseModel):
@@ -354,8 +362,6 @@ class VisionSettingsUpdate(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     chat_base_url: str | None = Field(default=None, max_length=500)
     chat_model: str | None = Field(default=None, max_length=200)
-    chat_max_completion_tokens: int | None = Field(default=None, ge=256, le=3000)
-    chat_context_messages: int | None = Field(default=None, ge=4, le=50)
     enable_thinking: bool = False
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "none"
     vision_prompt: str = Field(min_length=1, max_length=20_000)
@@ -414,8 +420,6 @@ class VisionSettingsView(BaseModel):
     model: str
     chat_base_url: str
     chat_model: str
-    chat_max_completion_tokens: int = 3000
-    chat_context_messages: int = 12
     enable_thinking: bool
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"]
     vision_prompt: str

@@ -32,7 +32,7 @@ SUPPORTED_IMAGE_SIGNATURES = {
 # be able to forge those fields inside its JSON response.
 _PROVIDER_FIELDS = frozenset(MovieImageInfo.model_fields) - {
     "provider_match_level", "provider_no_match_reason", "recognition_blocker",
-    "provider_request_id", "trace_id", "raw_results", "final_results",
+    "resolution_diagnostic", "provider_request_id", "trace_id", "raw_results", "final_results",
     "raw_response",
 }
 _OPTIONAL_TEXT_FIELDS = (

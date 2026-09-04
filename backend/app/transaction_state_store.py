@@ -42,6 +42,21 @@ class StateRevisionConflict(RuntimeError):
     pass
 
 
+class WplusMarkReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=1)
+    tenant_id: str = Field(min_length=1, max_length=200)
+    shop_id: str = Field(min_length=1, max_length=200)
+    buyer_id: str = Field(min_length=1, max_length=200)
+    chat_id: str = Field(min_length=1, max_length=200)
+    purchase_context_id: str = Field(min_length=1, max_length=240)
+    image_reference: str = Field(min_length=1, max_length=2_048)
+    message_id: str | None = Field(default=None, max_length=240)
+    event_id: str = Field(min_length=1, max_length=240)
+    submitted_at: str = Field(min_length=1, max_length=80)
+
+
 class TransactionState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -54,12 +69,22 @@ class TransactionState(BaseModel):
     revision: int = Field(default=0, ge=0)
     flow_state: FlowState = "NEW"
     automation_control: AutomationControl = "active"
+    purchase_context_id: str | None = Field(default=None, max_length=240)
+    quote_request_type: Literal["WPLUS_AREA", "EXACT_SEATS", "LIANGPIAO"] | None = None
+    quote_provider_route: Literal["WANDA_SELF", "LIANGPIAO"] | None = None
     quote_status: QuoteStatus = "none"
     confirmation_status: ConfirmationStatus = "none"
     order_status: OrderStatus = "none"
     price_change_status: PriceChangeStatus = "none"
     payment_status: PaymentStatus = "unpaid"
+    # The protected transaction snapshot is the durable payment-validation
+    # evidence ledger; no parallel payment store is introduced.
+    payment_validation_evidence: dict[str, Any] | None = None
     fulfillment_status: FulfillmentStatus = "none"
+    wplus_mark_status: Literal["not_submitted", "submitted"] = "not_submitted"
+    wplus_mark_revision: int = Field(default=0, ge=0)
+    current_wplus_mark: WplusMarkReference | None = None
+    wplus_mark_history: list[WplusMarkReference] = Field(default_factory=list, max_length=20)
     fixed_switch_status: FixedSwitchStatus = "none"
     fixed_switch_expires_at: str | None = Field(default=None, max_length=80)
     fixed_switch_source_order_no: str | None = Field(default=None, max_length=240)
@@ -94,26 +119,29 @@ class TransactionState(BaseModel):
 
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "NEW": frozenset({"NEW", "COLLECTING", "MANUAL_HOLD"}),
-    "COLLECTING": frozenset({"COLLECTING", "FACTS_READY", "QUOTED", "PRICE_CHANGING", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
-    "FACTS_READY": frozenset({"FACTS_READY", "QUOTED", "COLLECTING", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD"}),
+    "COLLECTING": frozenset({"COLLECTING", "FACTS_READY", "QUOTED", "PRICE_CHANGING", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
+    "FACTS_READY": frozenset({"FACTS_READY", "QUOTED", "COLLECTING", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD"}),
     # A new screenshot can invalidate an earlier quote before a replacement
     # quote is available; keep the conversation recoverable instead of
     # rejecting the event at the state-machine boundary.
-    "QUOTED": frozenset({"QUOTED", "COLLECTING", "CONFIRMED", "PRICE_CHANGING", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
-    "CONFIRMED": frozenset({"CONFIRMED", "ORDER_BOUND", "PRICE_CHANGING", "WAITING_PAYMENT", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
-    "ORDER_BOUND": frozenset({"ORDER_BOUND", "PRICE_CHANGING", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "ORDER_UNVERIFIED", "MANUAL_HOLD", "CANCELLED"}),
-    "PRICE_CHANGING": frozenset({"PRICE_CHANGING", "WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "ORDER_UNVERIFIED", "CANCELLED", "REFUNDED"}),
-    "WAITING_PAYMENT": frozenset({"WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED", "REFUND_PENDING"}),
-    "PAID_WAITING_FULFILLMENT": frozenset({"PAID_WAITING_FULFILLMENT", "FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
-    "FULFILLMENT_IN_PROGRESS": frozenset({"FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
+    "QUOTED": frozenset({"QUOTED", "COLLECTING", "CONFIRMED", "PRICE_CHANGING", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
+    "CONFIRMED": frozenset({"CONFIRMED", "ORDER_BOUND", "PRICE_CHANGING", "WAITING_PAYMENT", "QUOTE_EXPIRED", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
+    "ORDER_BOUND": frozenset({"ORDER_BOUND", "PRICE_CHANGING", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "ORDER_UNVERIFIED", "MANUAL_HOLD", "CANCELLED"}),
+    "PRICE_CHANGING": frozenset({"PRICE_CHANGING", "WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "ORDER_UNVERIFIED", "CANCELLED", "REFUNDED"}),
+    "WAITING_PAYMENT": frozenset({"WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED", "REFUND_PENDING"}),
+    "PAID_WAITING_FULFILLMENT": frozenset({"PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
+    "WAITING_WPLUS_MARK": frozenset({"WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD", "CANCELLED"}),
+    "READY_FOR_MANUAL_TICKETING": frozenset({"READY_FOR_MANUAL_TICKETING", "FULFILLMENT_IN_PROGRESS", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD", "CANCELLED"}),
+    "FULFILLMENT_IN_PROGRESS": frozenset({"FULFILLMENT_IN_PROGRESS", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
     "TICKET_SENT": frozenset({"TICKET_SENT", "COMPLETED", "REFUND_PENDING", "MANUAL_HOLD"}),
     "COMPLETED": frozenset({"COMPLETED"}),
-    "QUOTE_EXPIRED": frozenset({"QUOTE_EXPIRED", "COLLECTING", "FACTS_READY", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD"}),
+    "QUOTE_EXPIRED": frozenset({"QUOTE_EXPIRED", "COLLECTING", "FACTS_READY", "PAID_WAITING_FULFILLMENT", "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD"}),
     "ORDER_UNVERIFIED": frozenset({"ORDER_UNVERIFIED", "ORDER_BOUND", "PAID_WAITING_FULFILLMENT", "TICKET_SENT", "COMPLETED", "MANUAL_HOLD", "CANCELLED"}),
     "MANUAL_HOLD": frozenset({
         "MANUAL_HOLD", "COLLECTING", "QUOTED", "CONFIRMED", "ORDER_BOUND",
         "PRICE_CHANGING", "WAITING_PAYMENT", "ORDER_UNVERIFIED", "PAID_WAITING_FULFILLMENT",
         "TICKET_SENT", "COMPLETED", "CANCELLED", "REFUND_PENDING", "REFUNDED",
+        "WAITING_WPLUS_MARK", "READY_FOR_MANUAL_TICKETING",
     }),
     "CANCELLED": frozenset({"CANCELLED", "REFUND_PENDING", "REFUNDED"}),
     "REFUND_PENDING": frozenset({"REFUND_PENDING", "REFUNDED", "MANUAL_HOLD"}),
@@ -129,7 +157,9 @@ _MUTABLE_FIELDS = frozenset(TransactionState.model_fields) - {
 
 
 class TransactionStateStore:
-    """Encrypted tenant/shop/chat state with revision CAS and event idempotency."""
+    """Legacy encrypted JSON state with revision CAS and event idempotency."""
+
+    authority_name = "legacy_encrypted_json"
 
     def __init__(
         self, path: Path, *, protector: SecretProtector | None = None,

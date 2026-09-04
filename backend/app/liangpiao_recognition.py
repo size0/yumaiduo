@@ -157,12 +157,16 @@ class LiangpiaoRecognitionClient:
                         seat_no=_text(item.get("seatNo") or item.get("seat_no")),
                         status=_text(item.get("status")),
                     ))
-        candidates = _map_candidates(final.get("candidates"))
-        candidate_movies = _map_movie_candidates(final.get("candidates"))
-        candidate_shows = _map_show_candidates(final.get("candidates"))
+        raw_city = _text(raw.get("city"))
+        final_city = _text(final.get("city"))
+        city_conflict = bool(raw_city and final_city and raw_city != final_city)
+        candidate_payload = final.get("candidates")
+        candidates = _map_candidates(candidate_payload, city_name=raw_city)
+        candidate_movies = _map_movie_candidates(candidate_payload)
+        candidate_shows = _map_show_candidates(candidate_payload)
         provider_prices = _map_provider_prices(final.get("prices"))
         no_match_reason = _enum_text(final.get("noMatchReason"))
-        match_level = _enum_text(final.get("matchLevel"))
+        provider_match_level = _enum_text(final.get("matchLevel"))
         seat_matched = _bool(final.get("seatMatched"))
         price_mismatch = _bool(final.get("priceMismatch"))
         recognition_blocker = _recognition_blocker(
@@ -171,10 +175,25 @@ class LiangpiaoRecognitionClient:
             price_mismatch=price_mismatch,
         )
         warnings = ["liangpiao_candidate_cinema"] if candidates else []
-        resolved_city = _text(final.get("city")) or _text(raw.get("city"))
-        resolved_cinema = _text(final.get("cinema")) or _text(raw.get("cinema"))
+        resolved_city = raw_city if city_conflict else final_city or raw_city
+        resolved_cinema = (
+            _text(raw.get("cinema")) if city_conflict
+            else _text(final.get("cinema")) or _text(raw.get("cinema"))
+        )
+        resolved_cinema_id = None if city_conflict else _int(final.get("cinemaId") or final.get("cinema_id"))
         resolved_movie = _text(final.get("film")) or _text(raw.get("film"))
         resolved_hall = _text(final.get("hall")) or _text(raw.get("hall"))
+        match_level = "CANDIDATE" if city_conflict and resolved_cinema else provider_match_level
+        normalized_no_match_reason = None if city_conflict else no_match_reason
+        resolution_diagnostic = _resolution_diagnostic(
+            city_conflict=city_conflict,
+            city=resolved_city,
+            cinema=resolved_cinema,
+            showtime=show_start,
+            show_id=_text(final.get("showId")),
+            seat_matched=seat_matched,
+            match_level=match_level,
+        )
         missing_fields = [
             field for field, value in (
                 ("city", resolved_city), ("cinema_name", resolved_cinema),
@@ -192,7 +211,7 @@ class LiangpiaoRecognitionClient:
             platform=_text(final.get("platform")) or _text(raw.get("platform")),
             is_seat_selection=_bool(raw.get("isSeatSelection")),
             cinema_truncated=_bool(raw.get("cinemaTruncated")),
-            cinema_id=_int(final.get("cinemaId") or final.get("cinema_id")),
+            cinema_id=resolved_cinema_id,
             cinema_name=resolved_cinema,
             cinema_address=_text(final.get("cinemaAddress") or final.get("cinema_address")),
             brand_name=_text(final.get("brandName") or final.get("brand_name")),
@@ -215,10 +234,11 @@ class LiangpiaoRecognitionClient:
             recognition_id=_text(data.get("recognizeId")),
             recognition_cached=_bool(data.get("cached")),
             match_level=match_level,
-            no_match_reason=no_match_reason,
-            provider_match_level=match_level,
+            no_match_reason=normalized_no_match_reason,
+            provider_match_level=provider_match_level,
             provider_no_match_reason=no_match_reason,
             recognition_blocker=recognition_blocker,
+            resolution_diagnostic=resolution_diagnostic,
             provider_request_id=_provider_request_id(data),
             trace_id=_text(data.get("trace_id")),
             raw_results=dict(raw),
@@ -228,7 +248,12 @@ class LiangpiaoRecognitionClient:
                 if isinstance(data.get("raw_response"), Mapping)
                 else {}
             ),
-            cinema_hit_count=_nonnegative_int(final.get("cinemaHitNums")),
+            cinema_hit_count=(
+                len(candidates)
+                if raw_city and isinstance(candidate_payload, Mapping)
+                and isinstance(candidate_payload.get("cinemas"), list)
+                else _nonnegative_int(final.get("cinemaHitNums"))
+            ),
             price_mismatch=price_mismatch,
             seat_matched=seat_matched,
             show_id=_text(final.get("showId")),
@@ -444,13 +469,35 @@ def _normalize_time(value: str) -> str | None:
     return f"{hour:02d}:{match.group('minute')}" if 0 <= hour <= 23 else None
 
 
-def _map_candidates(value: Any) -> list[CinemaCandidate]:
+def _resolution_diagnostic(
+    *, city_conflict: bool, city: str | None, cinema: str | None,
+    showtime: str | None, show_id: str | None, seat_matched: bool | None,
+    match_level: str | None,
+) -> str | None:
+    if city_conflict:
+        return "RESOLVER_WRONG_MATCH"
+    if not city or not cinema:
+        return "RAW_RECOGNITION_INSUFFICIENT"
+    if match_level not in {"EXACT", "RESOLVED"} and not show_id and showtime:
+        return "SHOW_NOT_RESOLVED"
+    if seat_matched is False:
+        return "SEAT_NOT_RESOLVED"
+    return None
+
+
+def _map_candidates(
+    value: Any, *, city_name: str | None = None,
+) -> list[CinemaCandidate]:
     cinemas = value.get("cinemas") if isinstance(value, Mapping) else None
     if not isinstance(cinemas, list):
         return []
+    expected_city = _text(city_name)
     candidates: list[CinemaCandidate] = []
-    for item in cinemas[:5]:
+    for item in cinemas:
         if not isinstance(item, Mapping):
+            continue
+        candidate_city = _text(item.get("cityName") or item.get("city_name"))
+        if expected_city and candidate_city != expected_city:
             continue
         try:
             cinema_id = int(item.get("cinemaId"))
@@ -462,8 +509,10 @@ def _map_candidates(value: Any) -> list[CinemaCandidate]:
         candidates.append(CinemaCandidate(
             cinema_id=cinema_id,
             name=name,
-            city_name=_text(item.get("cityName")),
+            city_name=candidate_city,
             address=_text(item.get("address")),
             score=_float(item.get("score"), default=0),
         ))
+        if len(candidates) >= 5:
+            break
     return candidates

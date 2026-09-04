@@ -64,12 +64,19 @@ class ShopAutomationStore:
                     maximum=200,
                 ) or shop_id
                 previous = stored.get(shop_id) if isinstance(stored.get(shop_id), dict) else {}
-                stored[shop_id] = {"shop_name": shop_name, "enabled": previous.get("enabled", True) is True}
+                stored[shop_id] = {
+                    "shop_name": shop_name,
+                    "enabled": previous.get("enabled", True) is True,
+                    # Canonical quoting is an independent, opt-in canary.  Old
+                    # shop records therefore remain automation-compatible while
+                    # defaulting the new path to OFF.
+                    "canonical_quote_enabled": previous.get("canonical_quote_enabled", False) is True,
+                }
                 accepted += 1
             self._write(data)
             return accepted
 
-    def list_shops(self, tenant_id: str) -> list[dict[str, object]]:
+    def list_shops(self, tenant_id: str, *, include_canonical: bool = False) -> list[dict[str, object]]:
         tenant = self._text(tenant_id, maximum=160)
         if not tenant:
             return []
@@ -77,28 +84,79 @@ class ShopAutomationStore:
             shops = self._read().get("tenants", {}).get(tenant, {}).get("shops", {})
             if not isinstance(shops, dict):
                 return []
+            result: list[dict[str, object]] = []
+            for shop_id, value in shops.items():
+                if not isinstance(value, dict):
+                    continue
+                item: dict[str, object] = {
+                    "shop_id": shop_id,
+                    "shop_name": str(value.get("shop_name") or shop_id),
+                    "enabled": value.get("enabled") is True,
+                }
+                if include_canonical:
+                    item["canonical_quote_enabled"] = value.get("canonical_quote_enabled") is True
+                result.append(item)
             return sorted(
-                [
-                    {"shop_id": shop_id, "shop_name": str(value.get("shop_name") or shop_id), "enabled": value.get("enabled") is True}
-                    for shop_id, value in shops.items()
-                    if isinstance(value, dict)
-                ],
+                result,
                 key=lambda item: (str(item["shop_name"]), str(item["shop_id"])),
             )
 
     def is_enabled(self, tenant_id: str, shop_id: str) -> bool:
         return any(item["shop_id"] == shop_id and item["enabled"] is True for item in self.list_shops(tenant_id))
 
-    def set_enabled(self, tenant_id: str, shop_id: str, enabled: bool) -> dict[str, object]:
+    def is_canonical_quote_enabled(self, tenant_id: str, shop_id: str) -> bool:
         tenant = self._text(tenant_id, maximum=160)
         shop = self._text(shop_id, maximum=200)
-        if not tenant or not shop or not isinstance(enabled, bool):
+        if not tenant or not shop:
+            return False
+        with self._lock:
+            shops = self._read().get("tenants", {}).get(tenant, {}).get("shops", {})
+            value = shops.get(shop) if isinstance(shops, dict) else None
+            return isinstance(value, dict) and value.get("canonical_quote_enabled") is True
+
+    def set_settings(
+        self,
+        tenant_id: str,
+        shop_id: str,
+        *,
+        enabled: bool | None = None,
+        canonical_quote_enabled: bool | None = None,
+    ) -> dict[str, object]:
+        tenant = self._text(tenant_id, maximum=160)
+        shop = self._text(shop_id, maximum=200)
+        if (
+            not tenant or not shop
+            or (enabled is not None and not isinstance(enabled, bool))
+            or (
+                canonical_quote_enabled is not None
+                and not isinstance(canonical_quote_enabled, bool)
+            )
+        ):
             raise KeyError("shop_not_found")
         with self._lock:
             data = self._read()
             shops = data.get("tenants", {}).get(tenant, {}).get("shops", {})
-            if not isinstance(shops, dict) or not isinstance(shops.get(shop), dict):
+            value = shops.get(shop) if isinstance(shops, dict) else None
+            if not isinstance(value, dict):
                 raise KeyError("shop_not_found")
-            shops[shop]["enabled"] = enabled
+            if enabled is not None:
+                value["enabled"] = enabled
+            if canonical_quote_enabled is not None:
+                value["canonical_quote_enabled"] = canonical_quote_enabled
             self._write(data)
-            return {"shop_id": shop, "shop_name": str(shops[shop].get("shop_name") or shop), "enabled": enabled}
+            result: dict[str, object] = {
+                "shop_id": shop,
+                "shop_name": str(value.get("shop_name") or shop),
+                "enabled": value.get("enabled") is True,
+            }
+            if canonical_quote_enabled is not None:
+                result["canonical_quote_enabled"] = value.get("canonical_quote_enabled") is True
+            return result
+
+    def set_canonical_enabled(self, tenant_id: str, shop_id: str, enabled: bool) -> dict[str, object]:
+        return self.set_settings(
+            tenant_id, shop_id, canonical_quote_enabled=enabled,
+        )
+
+    def set_enabled(self, tenant_id: str, shop_id: str, enabled: bool) -> dict[str, object]:
+        return self.set_settings(tenant_id, shop_id, enabled=enabled)

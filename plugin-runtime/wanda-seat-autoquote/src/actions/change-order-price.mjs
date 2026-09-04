@@ -112,6 +112,15 @@ function resultBase(command, idempotency_key) {
     idempotency_key,
     order_id: command.quote.order_id,
     quote_version: command.quote.quote_version,
+    ...(command.quote.quote_id ? { quote_id: command.quote.quote_id } : {}),
+    ...(command.quote.quote_hash ? { quote_hash: command.quote.quote_hash } : {}),
+    ...(Number.isSafeInteger(command.quote.quote_generation)
+      ? { quote_generation: command.quote.quote_generation } : {}),
+    ...(Number.isSafeInteger(command.quote.binding_revision)
+      ? { binding_revision: command.quote.binding_revision } : {}),
+    ...(Number.isSafeInteger(command.quote.transaction_revision)
+      ? { transaction_revision: command.quote.transaction_revision } : {}),
+    ...(command.quote.flow_version ? { flow_version: command.quote.flow_version } : {}),
     target_amount_cents: command.quote.target_amount_cents,
     ...(Number.isSafeInteger(command.quote.observed_order_amount_cents)
       ? { observed_order_amount_cents: command.quote.observed_order_amount_cents }
@@ -155,6 +164,14 @@ export function createPriceChangeExecutor({
       schema_version: 'executor_next.price_change_receipt.v1',
       idempotency_key,
       idempotency_material: {
+        ...(command.quote.flow_version === 'V4_NEW_FLOW_V2' ? {
+          flow_version: command.quote.flow_version,
+          quote_id: command.quote.quote_id,
+          quote_hash: command.quote.quote_hash,
+          quote_generation: command.quote.quote_generation,
+          binding_revision: command.quote.binding_revision,
+          transaction_revision: command.quote.transaction_revision,
+        } : {}),
         tenant_id: command.quote.tenant_id,
         shop_id: command.quote.shop_id,
         buyer_id: command.quote.buyer_id,
@@ -421,8 +438,37 @@ export function createPriceChangeExecutor({
     });
   }
 
+  function semanticRepriceStatus(command, result) {
+    if (command.quote.flow_version !== 'V4_NEW_FLOW_V2') return null;
+    const reason = String(result.reason_code ?? '').trim();
+    if (result.status === 'succeeded') {
+      return ['amount_already_matches', 'idempotent_readback_verified', 'reconciled_before_explicit_retry'].includes(reason)
+        ? 'ALREADY_PRICED' : 'REPRICE_CONFIRMED';
+    }
+    if (result.status === 'unknown') return 'REPRICE_UNKNOWN';
+    if (result.status === 'skipped') {
+      if (reason === 'order_already_paid' || reason === 'order_paid_or_closed'
+        || reason === 'order_refund_in_progress_or_complete' || reason === 'order_status_not_changeable') {
+        return 'ORDER_NOT_UNPAID';
+      }
+      if (reason.includes('ownership_mismatch') || reason.includes('binding_mismatch')
+        || reason === 'tenant_ownership_mismatch' || reason.startsWith('authoritative_')
+        || reason.startsWith('event_')) return 'IDENTITY_MISMATCH';
+    }
+    if (result.status === 'failed') {
+      return reason === 'price_change_verification_failed' ? 'REPRICE_UNCONFIRMED' : 'PROVIDER_FAILED';
+    }
+    return null;
+  }
+
   async function reconcileExisting(receipt, command, base) {
-    for (const field of ['quote_version', 'order_id', 'tenant_id', 'shop_id', 'buyer_id', 'chat_id', 'target_amount_cents']) {
+    const bindingFields = command.quote.flow_version === 'V4_NEW_FLOW_V2'
+      ? ['flow_version', 'source', 'quote_id', 'quote_hash', 'quote_generation', 'binding_revision', 'transaction_revision', 'idempotency_key']
+      : [];
+    for (const field of [
+      'quote_version', 'order_id', 'tenant_id', 'shop_id', 'buyer_id', 'chat_id',
+      'target_amount_cents', ...bindingFields,
+    ]) {
       if (!same(receipt.quote_snapshot?.[field], command.quote[field])) {
         return { ...base, status: 'skipped', reason_code: 'idempotency_receipt_binding_mismatch', action_attempted: false, deduplicated: true };
       }
@@ -499,12 +545,17 @@ export function createPriceChangeExecutor({
   }
 
   async function finalize(receipt, result) {
-    receipt.status = result.status;
+    const reprice_status = semanticRepriceStatus({ quote: receipt.quote_snapshot }, result);
+    const finalResult = {
+      ...result,
+      ...(reprice_status ? { reprice_status } : {}),
+    };
+    receipt.status = finalResult.status;
     receipt.phase = 'finished';
-    receipt.result = result;
+    receipt.result = finalResult;
     receipt.updated_at = now();
     await receipt_store.save(receipt);
-    return result;
+    return finalResult;
   }
 
   return Object.freeze({ execute });

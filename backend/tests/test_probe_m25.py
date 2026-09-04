@@ -151,7 +151,7 @@ async def test_official_adapter_has_no_real_http_path_in_m25() -> None:
 async def test_unknown_create_is_recoverable_and_never_retries_with_another_account(tmp_path: Path) -> None:
     provider = FixtureWandaProvider(create_unknown=True)
     store = DurableProbeStore(tmp_path / "probe.sqlite3")
-    policy = ProbePolicy(active_probe_enabled=True, agent_harness_read_only=False)
+    policy = ProbePolicy(active_probe_enabled=True, external_writes_enabled=True)
     active = WandaActiveProbe(
         provider, probe_store=store, release_tracker=ReleaseTracker(store, clock=FakeClock()), policy=policy,
     )
@@ -192,8 +192,8 @@ def test_multi_worker_show_gate_and_lease_expiry_recovery(tmp_path: Path) -> Non
     assert not probes.try_acquire_show("show-1", "probe-d", now=now + timedelta(days=1), lease_expires_at=expiry)
 
 
-def test_read_only_wins_over_active_switch_and_liangpiao_flag_is_independent() -> None:
-    settings = Settings(agent_harness_read_only=True, wanda_active_probe_enabled=True)
-    with pytest.raises(ProbeError, match="agent_harness_read_only"):
+def test_active_probe_default_is_independent_from_liangpiao_flags() -> None:
+    settings = Settings(wanda_active_probe_enabled=False)
+    with pytest.raises(ProbeError, match="active_probe_disabled"):
         ProbePolicy.from_settings(settings).ensure_allowed()
-    assert Settings(agent_harness_read_only=True, wanda_active_probe_enabled=False).liangpiao_selected_seat_quote_enabled is False
+    assert Settings(wanda_active_probe_enabled=False).liangpiao_selected_seat_quote_enabled is False

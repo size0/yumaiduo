@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from .observability import LOGGER
@@ -21,17 +21,6 @@ class RuleCoordinator(Protocol):
     def record_action_result(self, *, tenant_id: str, body: Mapping[str, Any]) -> object | None: ...
 
 
-TRANSACTION_WRITE_COMMAND_TYPES = frozenset({
-    "change_order_price",
-    "create_liangpiao_order",
-    "cancel_failed_liangpiao_source_order",
-    "cancel_order",
-    "submit_fulfillment",
-    "send_ticket",
-    "refund_or_intercept",
-})
-
-
 class RulesFirstRuntime:
     """Durable event reducer and command producer.
 
@@ -43,16 +32,20 @@ class RulesFirstRuntime:
         self, store: RulesFirstStore, rule_engine: EventRuleEngine,
         coordinator: RuleCoordinator, state_store: TransactionStateStore,
         *, event_preprocessor: Callable[[Mapping[str, Any]], object] | None = None,
-        idle_seconds: float = 0.1, max_concurrent_events: int = 8,
+        fulfillment_mark_handler: Callable[[Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
+        payment_validation_handler: Callable[[Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
+        liangpiao_fulfillment_handler: Callable[[Mapping[str, Any], Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
+        idle_seconds: float = 0.1,
     ) -> None:
         self._store = store
         self._engine = rule_engine
         self._coordinator = coordinator
         self._states = state_store
         self._event_preprocessor = event_preprocessor
+        self._fulfillment_mark_handler = fulfillment_mark_handler
+        self._payment_validation_handler = payment_validation_handler
+        self._liangpiao_fulfillment_handler = liangpiao_fulfillment_handler
         self._idle_seconds = max(0.01, float(idle_seconds))
-        self._max_concurrent_events = max(1, min(int(max_concurrent_events), 32))
-        self._session_locks: dict[str, asyncio.Lock] = {}
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._stopping = False
@@ -61,6 +54,70 @@ class RulesFirstRuntime:
         accepted = self._store.enqueue_event(body)
         self._wake.set()
         return accepted
+
+    def accept_canonical_result(
+        self, body: Mapping[str, Any], result: Mapping[str, Any],
+    ) -> dict[str, object]:
+        """Durably commit a synchronously produced canonical reply.
+
+        Canonical image processing is intentionally read-only and runs before
+        this method.  This method only uses the existing RulesFirst inbox,
+        transaction reducer, and command outbox; it never calls a provider or
+        a platform sender.
+        """
+        accepted = self._store.enqueue_event(body)
+        if accepted.get("duplicate") is True:
+            return {**accepted, "canonical_result_duplicate": True, "commands": []}
+        envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
+        tenant_id = str(envelope.get("tenantId") or envelope.get("tenant_id") or "").strip()
+        event_id = str(envelope.get("id") or envelope.get("eventId") or "").strip()
+        if not tenant_id or not event_id:
+            return {**accepted, "canonical_result_error": "identity_incomplete", "commands": []}
+        claimed = self._store.claim_event(
+            tenant_id=tenant_id, event_id=event_id,
+        )
+        if claimed is None:
+            return {**accepted, "canonical_result_pending": True, "commands": []}
+        rendered_text = str(result.get("current_runtime_reply") or "").strip()
+        actions: list[dict[str, object]] = []
+        if rendered_text:
+            actions.append({
+                "id": f"{event_id}:canonical-reply",
+                "type": "send_message",
+                "text": rendered_text,
+                "rule_governed": True,
+                "source": "canonical_quote_runtime",
+                "canonical_reply_kind": str(result.get("canonical_reply_kind") or ""),
+                "dedupe_key": f"canonical-reply:{event_id}",
+            })
+        canonical_result = dict(result)
+        canonical_result["decision"] = {
+            "mode": "canonical",
+            "reason": "canonical_quote_reply_ready",
+            "actions": actions,
+        }
+        try:
+            reduced = self._coordinator.record_event_decision(body, canonical_result)
+            decision = reduced.get("decision") if isinstance(reduced.get("decision"), Mapping) else {}
+            final_actions = [item for item in decision.get("actions", []) if isinstance(item, Mapping)]
+            rule = reduced.get("rule_decision") if isinstance(reduced.get("rule_decision"), Mapping) else {}
+            revision = rule.get("state_revision") if isinstance(rule.get("state_revision"), int) else 0
+            commands = self._store.complete_event(
+                claimed["inbox_id"], claimed["lease_token"], commands=final_actions,
+                state_revision=revision,
+                result={
+                    "transition_code": rule.get("transition_code"),
+                    "state_after": rule.get("state_after"),
+                },
+            )
+            return {
+                **accepted, "canonical_result": reduced,
+                "current_runtime_reply": rendered_text,
+                "commands": commands,
+            }
+        except Exception as error:
+            self._store.fail_event(claimed["inbox_id"], claimed["lease_token"], str(error))
+            raise
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -76,133 +133,91 @@ class RulesFirstRuntime:
             await self._task
             self._task = None
 
-    @staticmethod
-    def _session_key(body: Mapping[str, Any]) -> str:
-        envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
-        payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
-        session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
-        values = (
-            session.get("accountUnb") or payload.get("accountUnb") or "",
-            session.get("chatId") or payload.get("chatId") or "",
-            session.get("peerUnb") or payload.get("peerUnb") or "",
-        )
-        return "\0".join(str(value) for value in values) or str(envelope.get("id") or "unknown")
-
     async def _run(self) -> None:
-        active: set[asyncio.Task[bool]] = set()
-        try:
-            while not self._stopping:
-                while not self._stopping and len(active) < self._max_concurrent_events:
-                    try:
-                        claimed = self._store.claim_event(lease_seconds=300)
-                    except Exception as error:
-                        # A transient SQLite lock must not permanently kill the
-                        # worker; retry the durable queue after a short delay.
-                        LOGGER.error("event=rules_first_claim_failed error_type=%s", type(error).__name__)
-                        await asyncio.sleep(self._idle_seconds)
-                        break
-                    if claimed is None:
-                        break
-                    active.add(asyncio.create_task(
-                        self._process_claimed(claimed), name=f"rules-first-event-{claimed['event_id'][:12]}",
-                    ))
-                if active:
-                    done, active = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
-                    for task in done:
-                        try:
-                            task.result()
-                        except Exception as error:
-                            LOGGER.error("event=rules_first_worker_task_failed error_type=%s", type(error).__name__)
-                    continue
-                self._wake.clear()
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=self._idle_seconds)
-                except TimeoutError:
-                    pass
-        finally:
-            if active:
-                await asyncio.gather(*active, return_exceptions=True)
-
-    async def _process_claimed(self, claimed: Mapping[str, Any]) -> bool:
-        body = claimed["body"]
-        lock = self._session_locks.setdefault(self._session_key(body), asyncio.Lock())
-        async with lock:
+        while not self._stopping:
+            processed = await self.drain_once()
+            if processed:
+                continue
+            self._wake.clear()
             try:
-                if self._event_preprocessor is not None:
-                    self._event_preprocessor(body)
-                result = await self._engine.process_event(body)
-                reduced = self._coordinator.record_event_decision(body, result)
-                decision = reduced.get("decision") if isinstance(reduced.get("decision"), Mapping) else {}
-                actions = decision.get("actions") if isinstance(decision.get("actions"), list) else []
-                rule = reduced.get("rule_decision") if isinstance(reduced.get("rule_decision"), Mapping) else {}
-                revision = rule.get("state_revision") if isinstance(rule.get("state_revision"), int) else 0
-                handoff_reason = str(rule.get("handoff_reason") or "").strip()
-                state_after = str(rule.get("state_after") or "").strip()
-                if state_after == "MANUAL_HOLD" and handoff_reason:
-                    self._create_manual_task_from_event(body, revision, handoff_reason)
-                elif state_after:
-                    self._resolve_manual_tasks_from_event(
-                        body, revision, state_after, str(rule.get("transition_code") or "state_transition"),
-                    )
-                action_types = [
-                    str(item.get("type") or "unknown")
-                    for item in actions if isinstance(item, Mapping)
-                ]
-                ai_called = bool(decision.get("ai_called"))
-                reply_route = str(decision.get("reply_route") or "").strip() or (
-                    "agent" if ai_called else "rule" if action_types else "none"
-                )
-                reason = str(decision.get("reason") or "").strip() or None
-                self._store.complete_event(
-                    claimed["inbox_id"], claimed["lease_token"],
-                    commands=[item for item in actions if isinstance(item, Mapping)],
-                    state_revision=revision,
-                    result={
-                        "automation_mode": decision.get("automation_mode"),
-                        "reply_route": reply_route,
-                        "rule_code": decision.get("rule_code") or rule.get("transition_code") or reason,
-                        "ai_called": ai_called,
-                        "order_state": decision.get("order_state") or rule.get("state_after"),
-                        "quote_state": decision.get("quote_state"),
-                        "suppressed_reason": decision.get("suppressed_reason") or (reason if not action_types else None),
-                        "action_types": action_types,
-                        "transition_code": rule.get("transition_code"),
-                        "state_after": rule.get("state_after"),
-                    },
-                )
-                return True
-            except Exception as error:
-                LOGGER.error(
-                    "event=rules_first_event_failed event_id=%s error_type=%s",
-                    claimed.get("event_id"), type(error).__name__,
-                )
-                self._store.fail_event(claimed["inbox_id"], claimed["lease_token"], str(error))
-                await asyncio.sleep(self._idle_seconds)
-                return True
+                await asyncio.wait_for(self._wake.wait(), timeout=self._idle_seconds)
+            except TimeoutError:
+                pass
 
     async def drain_once(self) -> bool:
-        claimed = self._store.claim_event(lease_seconds=300)
+        claimed = self._store.claim_event()
         if claimed is None:
             return False
-        return await self._process_claimed(claimed)
+        try:
+            body = claimed["body"]
+            if self._event_preprocessor is not None:
+                self._event_preprocessor(body)
+            result = None
+            if self._fulfillment_mark_handler is not None:
+                result = await self._fulfillment_mark_handler(body)
+            if result is None and self._payment_validation_handler is not None:
+                result = await self._payment_validation_handler(body)
+            if (
+                result is not None
+                and result.get("validation_status") == "VERIFIED_PAID"
+                and not result.get("duplicate")
+                and self._liangpiao_fulfillment_handler is not None
+            ):
+                fulfillment = await self._liangpiao_fulfillment_handler(body, result)
+                if fulfillment is not None:
+                    result = fulfillment
+            if result is None:
+                result = await self._engine.process_event(body)
+                reduced = self._coordinator.record_event_decision(body, result)
+            else:
+                reduced = result
+            decision = reduced.get("decision") if isinstance(reduced.get("decision"), Mapping) else {}
+            actions = decision.get("actions") if isinstance(decision.get("actions"), list) else []
+            rule = reduced.get("rule_decision") if isinstance(reduced.get("rule_decision"), Mapping) else {}
+            revision = rule.get("state_revision") if isinstance(rule.get("state_revision"), int) else 0
+            handoff_reason = str(rule.get("handoff_reason") or "").strip()
+            if rule.get("state_after") == "MANUAL_HOLD" and handoff_reason:
+                self._create_manual_task_from_event(body, revision, handoff_reason)
+            self._store.complete_event(
+                claimed["inbox_id"], claimed["lease_token"],
+                commands=[item for item in actions if isinstance(item, Mapping)],
+                state_revision=revision,
+                result={
+                    "transition_code": rule.get("transition_code"),
+                    "state_after": rule.get("state_after"),
+                },
+            )
+            return True
+        except Exception as error:
+            LOGGER.error(
+                "event=rules_first_event_failed event_id=%s error_type=%s",
+                claimed.get("event_id"), type(error).__name__,
+            )
+            self._store.fail_event(claimed["inbox_id"], claimed["lease_token"], str(error))
+            await asyncio.sleep(self._idle_seconds)
+            return True
 
-    def claim_commands(self, *, limit: int = 10) -> list[dict[str, Any]]:
-        return self._store.claim_commands(limit=limit, lease_seconds=60)
-
-    def open_write_fuse(self) -> int:
-        """Cancel every pending external command (legacy emergency fuse)."""
-        return self._open_write_fuse("external_write_fuse_open")
-
-    def open_transaction_write_fuse(self) -> int:
-        """Cancel only transaction writes while preserving send_message commands."""
-        return self._open_write_fuse(
-            "agent_harness_read_only",
-            command_types=TRANSACTION_WRITE_COMMAND_TYPES,
+    def claim_commands(
+        self, *, limit: int = 10, command_types: frozenset[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._store.claim_commands(
+            limit=limit, lease_seconds=60, command_types=command_types,
         )
 
-    def _open_write_fuse(
-        self, reason: str, *, command_types: frozenset[str] | None = None,
-    ) -> int:
+    def open_transaction_write_fuse(self) -> int:
+        return self._open_write_fuse(
+            "agent_harness_read_only",
+            command_types=frozenset({
+                "change_order_price", "create_liangpiao_order",
+                "cancel_failed_liangpiao_source_order", "cancel_paid_amount_mismatch",
+                "cancel_order", "submit_fulfillment", "send_ticket", "refund_or_intercept",
+            }),
+        )
+
+    def open_write_fuse(self) -> int:
+        return self._open_write_fuse("external_write_fuse_open")
+
+    def _open_write_fuse(self, reason: str, *, command_types: frozenset[str] | None = None) -> int:
         commands = self._store.cancel_pending_commands(reason, command_types=command_types)
         for command in commands:
             context = command.get("context") if isinstance(command.get("context"), Mapping) else {}
@@ -236,6 +251,7 @@ class RulesFirstRuntime:
         if command is None:
             raise KeyError("command_missing")
         recorded = self._store.record_command_result(command_id, lease_token, result)
+        self._ensure_new_flow_transaction(command)
         if recorded["status"] == "reconciling":
             return {"ok": True, **recorded, "actions_created": 0}
 
@@ -245,6 +261,7 @@ class RulesFirstRuntime:
             "action_id": action.get("id"),
             "command_type": command.get("command_type"),
             "order_id": action.get("order_id"),
+            "action": dict(action),
             "result": dict(result),
         }
         follow_up = self._engine.process_action_result(body)
@@ -255,33 +272,11 @@ class RulesFirstRuntime:
         rule_handoff = str(getattr(rule, "handoff_reason", "") or "").strip()
         if rule_state_after == "MANUAL_HOLD" and rule_handoff:
             self._create_manual_task(command, revision, reason=rule_handoff)
-        elif rule_state_after:
-            context = command.get("context") if isinstance(command.get("context"), Mapping) else {}
-            self._resolve_manual_tasks_from_event(
-                context, revision, rule_state_after,
-                f"command-result:{command_id}",
-            )
-        if final_status in {"failed", "unknown"} and not (
-            rule_state_after == "MANUAL_HOLD" and rule_handoff
-        ):
+        elif final_status in {"failed", "unknown"}:
             self._create_manual_task(command, revision, reason=f"{command['command_type']}_{final_status}")
-        actions = list(follow_up.get("actions")) if isinstance(follow_up.get("actions"), list) else []
-        rule_actions = getattr(rule, "actions", None)
-        if isinstance(rule_actions, list):
-            known_ids = {
-                str(item.get("id") or "") for item in actions if isinstance(item, Mapping)
-            }
-            actions.extend(
-                item for item in rule_actions
-                if isinstance(item, Mapping) and str(item.get("id") or "") not in known_ids
-            )
+        actions = follow_up.get("actions") if isinstance(follow_up.get("actions"), list) else []
         if rule_state_after == "MANUAL_HOLD":
-            # A safety notice explaining a failed provider write is still safe
-            # and must reach the buyer; ordinary follow-up automation remains held.
-            actions = [
-                action for action in actions
-                if isinstance(action, Mapping) and action.get("safety_notice") is True
-            ]
+            actions = []
         created = self._store.append_commands(
             tenant_id=command["tenant_id"], event_id=command["event_id"],
             commands=[item for item in actions if isinstance(item, Mapping)],
@@ -289,27 +284,43 @@ class RulesFirstRuntime:
         ) if actions else []
         return {"ok": True, **recorded, "actions_created": len(created)}
 
-    def _resolve_manual_tasks_from_event(
-        self, body: Mapping[str, Any], revision: int, state_after: str, event_id: str,
-    ) -> None:
-        envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
-        payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
-        session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
-        identity = {
-            "tenant_id": str(envelope.get("tenantId") or "").strip(),
-            "shop_id": str(session.get("accountUnb") or payload.get("accountUnb") or "").strip(),
-            "buyer_id": str(session.get("peerUnb") or payload.get("peerUnb") or "").strip(),
-            "chat_id": str(session.get("chatId") or payload.get("chatId") or "").strip(),
-        }
-        if not all(identity.values()):
+    def _ensure_new_flow_transaction(self, command: Mapping[str, Any]) -> None:
+        action = command.get("action") if isinstance(command.get("action"), Mapping) else {}
+        snapshot = action.get("quote_snapshot") if isinstance(action.get("quote_snapshot"), Mapping) else {}
+        if snapshot.get("flow_version") != "V4_NEW_FLOW_V2":
             return
+        if getattr(self._states, "authority_name", None) != "rules_first_sqlite":
+            raise ValueError("new_flow_transaction_state_authority_invalid")
+        identity = {
+            field: str(action.get(field) or snapshot.get(field) or "").strip()
+            for field in ("tenant_id", "shop_id", "buyer_id", "chat_id")
+        }
+        order_id = str(action.get("platform_order_id") or snapshot.get("order_id") or "").strip()
+        target = snapshot.get("target_amount_cents")
+        if not all(identity.values()) or not order_id or not isinstance(target, int) or isinstance(target, bool):
+            raise ValueError("new_flow_command_identity_invalid")
         current = self._states.get(**identity)
         if current is None:
+            current = self._states.get_or_create(**identity)
+        if current.flow_state in {"PRICE_CHANGING", "WAITING_PAYMENT", "PAID_WAITING_FULFILLMENT", "TICKET_SENT"}:
             return
-        self._store.resolve_manual_tasks_after_state_transition(
-            tenant_id=identity["tenant_id"], transaction_id=current.state_id,
-            state_revision=revision, state_after=state_after,
-            event_id=str(envelope.get("id") or event_id),
+        if current.order_id and current.order_id != order_id:
+            return
+        if current.flow_state in {"COMPLETED", "CANCELLED", "REFUNDED", "MANUAL_HOLD"}:
+            return
+        self._states.transition(
+            **identity, expected_revision=current.revision,
+            event_id=f"{command['event_id']}:new-flow-command",
+            transition_code="new_flow_reprice_command_created",
+            flow_state="PRICE_CHANGING",
+            updates={
+                "quote_status": "ready", "confirmation_status": "confirmed",
+                "order_status": "bound", "price_change_status": "pending",
+                "order_id": order_id, "target_amount_cents": target,
+                "price_change_command_id": str(action.get("id") or command["command_id"]),
+                "expected_inputs": [],
+            },
+            allow_compatible_bootstrap=True,
         )
 
     def _create_manual_task_from_event(

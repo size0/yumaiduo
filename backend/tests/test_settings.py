@@ -178,12 +178,11 @@ def test_saved_settings_apply_to_the_next_recognition_without_restart(tmp_path: 
 def test_default_chat_prompt_integrates_wplus_context_and_authority_rules() -> None:
     assert "【店铺背景】" in DEFAULT_CHAT_PROMPT
     assert "支持代订万达W+会员座位" in DEFAULT_CHAT_PROMPT
-    assert "先明确回复“可以买”" not in DEFAULT_CHAT_PROMPT
+    assert "先明确回复“可以买”" in DEFAULT_CHAT_PROMPT
     assert "不得重复索要截图或已知字段" not in DEFAULT_CHAT_PROMPT
     assert "不重复索要截图或已知字段" in DEFAULT_CHAT_PROMPT
     assert "不得自行计算或生成价格" in DEFAULT_CHAT_PROMPT
     assert "新会话只做正常问候" in DEFAULT_CHAT_PROMPT
-    assert "主动解释其含义、选择方式和核验流程" not in DEFAULT_CHAT_PROMPT
 
 
 def test_knowledge_api_supports_seed_edit_enable_and_delete(tmp_path: Path) -> None:
@@ -193,7 +192,7 @@ def test_knowledge_api_supports_seed_edit_enable_and_delete(tmp_path: Path) -> N
     listed = client.get("/api/settings/knowledge")
     assert listed.status_code == 200
     entries = listed.json()["entries"]
-    assert len(entries) == 18
+    assert len(entries) == 16
     entry = entries[0]
     updated = client.put(f"/api/settings/knowledge/{entry['id']}", json={"enabled": False})
     assert updated.status_code == 200
