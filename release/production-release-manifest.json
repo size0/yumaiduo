@@ -64,8 +64,8 @@
     },
     {
       "path": "backend/app/canonical_buyer_reply.py",
-      "sha256": "16386bc8f19ff9fd01fc16a1f44aeda3f962a4c481fca4fd75080ac75592c57b",
-      "size": 5863
+      "sha256": "240aad4733e960c3e03476d007de5eaea9d75df021a43f9baab831912aff2733",
+      "size": 6430
     },
     {
       "path": "backend/app/chat.py",

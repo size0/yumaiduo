@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 
@@ -12,6 +13,39 @@ def _amount(value: object) -> str | None:
 
 def _text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _date_label(value: object) -> str:
+    text = _text(value)
+    match = re.fullmatch(r"\d{4}-(\d{1,2})-(\d{1,2})", text)
+    return f"{int(match.group(1))}月{int(match.group(2))}日" if match else text
+
+
+def _purchase_summary(quote: Mapping[str, Any]) -> str | None:
+    cinema = _text(quote.get("cinema") or quote.get("cinema_name"))
+    movie = _text(quote.get("movie") or quote.get("movie_name"))
+    show_date = _date_label(quote.get("quote_date") or quote.get("show_date"))
+    start_time = _text(quote.get("showtime_start") or quote.get("start_time"))
+    if not all((cinema, movie, show_date, start_time)):
+        return None
+    return f"{cinema}《{movie}》{show_date}{start_time}这场"
+
+
+def _seat_labels(quote: Mapping[str, Any]) -> list[str]:
+    items = quote.get("seat_quotes")
+    if not isinstance(items, list):
+        items = quote.get("selected_seats")
+    if not isinstance(items, list):
+        return []
+    labels = []
+    for item in items:
+        if isinstance(item, Mapping):
+            label = _text(item.get("seat_label") or item.get("seat_number") or item.get("seat_no"))
+        else:
+            label = _text(item)
+        if label:
+            labels.append(label)
+    return labels
 
 
 class CanonicalBuyerReplyRenderer:
@@ -37,46 +71,33 @@ class CanonicalBuyerReplyRenderer:
         if quote is not None:
             provider_route = _text(quote.get("provider_route"))
             request_type = _text(quote.get("request_type"))
+            summary = _purchase_summary(quote)
             if request_type == "WPLUS_AREA":
                 unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
                 count = quote.get("ticket_count")
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 1 and total and unit:
+                    prefix = f"{summary}，" if summary else ""
                     return {
                         "kind": "QUOTE_READY_WPLUS",
-                        "text": f"W+这场{unit}/张，共{count}张{total}，直接拍就行哈",
+                        "text": f"{prefix}W+ {unit}/张，共{count}张{total}，直接拍就行哈",
                     }
                 if unit:
+                    prefix = f"{summary}，" if summary else ""
                     return {
                         "kind": "QUOTE_PREVIEW_WPLUS",
-                        "text": f"W+这场{unit}/张，需要几张呀",
+                        "text": f"{prefix}W+ {unit}/张，需要几张呀",
                     }
             elif request_type == "EXACT_SEATS":
-                seat_quotes = quote.get("seat_quotes")
-                entries = []
-                if isinstance(seat_quotes, list):
-                    for item in seat_quotes:
-                        if not isinstance(item, Mapping):
-                            continue
-                        label = _text(item.get("seat_label") or item.get("seat_number"))
-                        price = _amount(item.get("sell_price_fen") or item.get("unit_quote_cents"))
-                        if label and price:
-                            entries.append(f"{label} {price}")
-                if not entries and isinstance(quote.get("selected_seats"), list):
-                    unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
-                    if unit:
-                        entries = [
-                            f"{_text(item.get('seat_no') or item.get('seat_number') or item.get('seat_label'))} {unit}"
-                            for item in quote["selected_seats"]
-                            if isinstance(item, Mapping)
-                            and _text(item.get("seat_no") or item.get("seat_number") or item.get("seat_label"))
-                        ]
+                labels = _seat_labels(quote)
+                unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
-                if entries and total:
-                    text = f"{'、'.join(entries)}，直接拍就行哈"
-                    if len(entries) > 1:
-                        text = f"{'、'.join(entries)}，合计{total}，直接拍就行哈"
-                    return {"kind": "QUOTE_READY_EXACT", "text": text}
+                if labels and unit and total:
+                    prefix = f"{summary}，" if summary else ""
+                    return {
+                        "kind": "QUOTE_READY_EXACT",
+                        "text": f"{prefix}{'、'.join(labels)}，{unit}/张，共{total}，直接拍就行哈",
+                    }
             if provider_route == "LIANGPIAO" and not quote.get("selected_seats"):
                 return {
                     "kind": "SELECTED_SEATS_REQUIRED",
@@ -103,7 +124,12 @@ class CanonicalBuyerReplyRenderer:
                 "kind": "SELECTED_SEATS_REQUIRED",
                 "text": "这场需要先选好座位，把选座截图发我就可以哈",
             }
-        if status in {"SHOW_UNRESOLVED", "SEAT_FACTS_UNAVAILABLE", "PRICING_UNAVAILABLE"}:
+        if status == "SEAT_FACTS_UNAVAILABLE":
+            return {
+                "kind": "SEAT_FACTS_UNAVAILABLE",
+                "text": "这场座位信息暂时没取到，我再帮你核一下哈",
+            }
+        if status in {"SHOW_UNRESOLVED", "PRICING_UNAVAILABLE"}:
             return {
                 "kind": "UNRESOLVED_REQUIRED_FIELD",
                 "text": "当前场次暂时无法取得可核验价格，请发送最新场次截图后再核价哈。",

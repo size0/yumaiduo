@@ -39,32 +39,63 @@ def test_canonical_renderer_uses_structured_quote_without_keyword_parsing() -> N
     result = renderer.render({
         "status": "QUOTED", "quote": {
             "provider_route": "LIANGPIAO", "request_type": "EXACT_SEATS",
+            "cinema": "上海青浦万达茂店", "movie": "奥德赛",
+            "quote_date": "2026-09-06", "showtime_start": "18:50",
             "selected_seats": [{"seat_no": "10排16座"}],
             "unit_sell_price_fen": 4640, "total_sell_price_fen": 4640,
         },
     })
-    assert result == {"kind": "QUOTE_READY_EXACT", "text": "10排16座 46.4，直接拍就行哈"}
+    assert result == {"kind": "QUOTE_READY_EXACT", "text": "上海青浦万达茂店《奥德赛》9月6日18:50这场，10排16座，46.4/张，共46.4，直接拍就行哈"}
 
 
 def test_canonical_renderer_uses_buyer_safe_wanda_exact_quote() -> None:
     result = CanonicalBuyerReplyRenderer().render({
         "status": "QUOTED", "quote": {
             "provider_route": "WANDA_SELF", "request_type": "EXACT_SEATS",
+            "cinema": "牡丹江万达", "movie": "坠落2",
+            "quote_date": "2026-09-05", "showtime_start": "19:55",
+            "selected_seats": [{"seat_number": "8排8座"}],
             "seat_quotes": [{"seat_label": "8排8座", "sell_price_fen": 3910}],
-            "total_sell_price_fen": 3910,
+            "unit_sell_price_fen": 3910, "total_sell_price_fen": 3910,
         },
     })
-    assert result["text"] == "8排8座 39.1，直接拍就行哈"
+    assert result["text"] == "牡丹江万达《坠落2》9月5日19:55这场，8排8座，39.1/张，共39.1，直接拍就行哈"
 
 
 def test_canonical_renderer_uses_buyer_safe_wplus_preview() -> None:
     result = CanonicalBuyerReplyRenderer().render({
         "status": "QUOTED", "quote": {
             "provider_route": "WANDA_SELF", "request_type": "WPLUS_AREA",
+            "cinema": "牡丹江万达", "movie": "坠落2",
+            "quote_date": "2026-09-05", "showtime_start": "19:55",
             "unit_sell_price_fen": 3730,
         },
     })
-    assert result["text"] == "W+这场37.3/张，需要几张呀"
+    assert result["text"] == "牡丹江万达《坠落2》9月5日19:55这场，W+ 37.3/张，需要几张呀"
+
+
+def test_canonical_renderer_includes_wplus_purchase_summary_when_ready() -> None:
+    result = CanonicalBuyerReplyRenderer().render({
+        "status": "QUOTED", "quote": {
+            "provider_route": "WANDA_SELF", "request_type": "WPLUS_AREA",
+            "cinema": "牡丹江万达", "movie": "坠落2",
+            "quote_date": "2026-09-05", "showtime_start": "19:55",
+            "unit_sell_price_fen": 2800, "total_sell_price_fen": 5600,
+            "ticket_count": 2,
+        },
+    })
+    assert result["text"] == "牡丹江万达《坠落2》9月5日19:55这场，W+ 28/张，共2张56，直接拍就行哈"
+    assert "座" not in result["text"]
+
+
+def test_canonical_renderer_keeps_seat_failure_buyer_safe_without_price() -> None:
+    result = CanonicalBuyerReplyRenderer().render({
+        "status": "SEAT_FACTS_UNAVAILABLE", "reason": "TARGET_SEAT_NOT_AVAILABLE",
+    })
+    assert result == {
+        "kind": "SEAT_FACTS_UNAVAILABLE",
+        "text": "这场座位信息暂时没取到，我再帮你核一下哈",
+    }
 
 
 def test_canonical_renderer_asks_liangpiao_buyer_to_select_seats() -> None:
