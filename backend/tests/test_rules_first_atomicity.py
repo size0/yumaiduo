@@ -42,14 +42,14 @@ def test_selected_seat_real_write_gates_read_explicit_environment(monkeypatch) -
 def test_rules_store_applies_versioned_snapshot_migration_and_backup(tmp_path: Path) -> None:
     path = tmp_path / "rules.sqlite3"
     runtime = RulesFirstStore(path)
-    assert runtime.schema_version() == 4
+    assert runtime.schema_version() == 5
 
     with sqlite3.connect(path) as connection:
         versions = [row[0] for row in connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         )]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(transactions)")}
-        connection.execute("DELETE FROM schema_migrations WHERE version=4")
+        connection.execute("DELETE FROM schema_migrations WHERE version=5")
 
     expected_columns = {
         "provider", "provider_show_id", "selected_seats_json",
@@ -59,16 +59,16 @@ def test_rules_store_applies_versioned_snapshot_migration_and_backup(tmp_path: P
         "out_order_no", "provider_order_no", "provider_payload_hash",
         "provider_status",
     }
-    assert versions == [1, 2, 3, 4]
+    assert versions == [1, 2, 3, 4, 5]
     assert expected_columns <= columns
 
     RulesFirstStore(path)
 
-    backup = path.with_name(f"{path.name}.pre-migration-v4.bak")
+    backup = path.with_name(f"{path.name}.pre-migration-v5.bak")
     assert backup.exists()
     assert check_sqlite_integrity(path) is True
     assert check_sqlite_integrity(backup) is True
     with sqlite3.connect(path) as connection:
         assert connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        ).fetchall() == [(1,), (2,), (3,), (4,)]
+        ).fetchall() == [(1,), (2,), (3,), (4,), (5,)]

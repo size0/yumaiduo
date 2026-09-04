@@ -428,6 +428,13 @@ class VisionSettingsView(BaseModel):
     masked_api_key: str
     has_chat_api_key: bool
     masked_chat_api_key: str
+    provider: str = "OpenAI-compatible"
+    config_id: str = "environment-legacy"
+    config_revision: int = Field(default=0, ge=0)
+    scope: Literal["GLOBAL", "TENANT", "SHOP", "ENVIRONMENT"] = "GLOBAL"
+    scope_tenant_id: str | None = None
+    scope_shop_id: str | None = None
+    supported_capabilities: list[str] = Field(default_factory=list)
     updated_at: str | None = None
 
 

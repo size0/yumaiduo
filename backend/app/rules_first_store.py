@@ -15,7 +15,7 @@ from .settings_store import SecretProtector, default_secret_protector
 
 _RECONCILIATION_DELAYS_SECONDS = (5, 30, 120)
 _FINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 
 def backup_sqlite_database(path: Path, backup_path: Path | None = None) -> Path:
@@ -393,6 +393,11 @@ class RulesFirstStore:
                     reply_origin TEXT,
                     failure_reason TEXT,
                     cancel_reason TEXT,
+                    model_config_id TEXT,
+                    model_config_revision INTEGER,
+                    model_provider TEXT,
+                    model_base_url_host TEXT,
+                    model_name TEXT,
                     context_protected TEXT,
                     command_id TEXT,
                     sent_message_id TEXT,
@@ -437,6 +442,16 @@ class RulesFirstStore:
             for name, declaration in (("lease_until", "TEXT"), ("claimed_by", "TEXT")):
                 if name not in manual_columns:
                     connection.execute(f"ALTER TABLE manual_tasks ADD COLUMN {name} {declaration}")
+            agent_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(agent_runs)")}
+            for name, declaration in (
+                ("model_config_id", "TEXT"),
+                ("model_config_revision", "INTEGER"),
+                ("model_provider", "TEXT"),
+                ("model_base_url_host", "TEXT"),
+                ("model_name", "TEXT"),
+            ):
+                if name not in agent_columns:
+                    connection.execute(f"ALTER TABLE agent_runs ADD COLUMN {name} {declaration}")
 
             versions = {
                 int(row[0]) for row in connection.execute(
@@ -494,6 +509,11 @@ class RulesFirstStore:
                             "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                             (3, _now().isoformat()),
                         )
+                    if 4 not in versions:
+                        connection.execute(
+                            "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                            (4, _now().isoformat()),
+                        )
                     if _SCHEMA_VERSION not in versions:
                         connection.execute(
                             "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
@@ -518,7 +538,9 @@ class RulesFirstStore:
         self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
         event_id: str, status: str = "running", reply_origin: str | None = None,
         context: Mapping[str, Any] | None = None, run_id: str | None = None,
-        now: datetime | None = None,
+        model_config_id: str | None = None, model_config_revision: int | None = None,
+        model_provider: str | None = None, model_base_url_host: str | None = None,
+        model_name: str | None = None, now: datetime | None = None,
     ) -> dict[str, Any]:
         """Create (or return) one durable Canonical Agent execution record.
 
@@ -549,11 +571,14 @@ class RulesFirstStore:
             connection.execute(
                 """INSERT OR IGNORE INTO agent_runs(
                     run_id,tenant_id,shop_id,buyer_id,chat_id,event_id,status,
-                    reply_origin,context_protected,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    reply_origin,model_config_id,model_config_revision,model_provider,
+                    model_base_url_host,model_name,context_protected,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     rid, identity[0], identity[1], identity[2], identity[3], identity[4],
-                    normalized_status, normalized_origin, protected_context, timestamp, timestamp,
+                    normalized_status, normalized_origin, _text(model_config_id),
+                    model_config_revision, _text(model_provider), _text(model_base_url_host),
+                    _text(model_name), protected_context, timestamp, timestamp,
                 ),
             )
             row = connection.execute("SELECT * FROM agent_runs WHERE run_id=?", (rid,)).fetchone()
@@ -741,6 +766,11 @@ class RulesFirstStore:
             "chat_id": str(row["chat_id"]), "event_id": str(row["event_id"]),
             "status": str(row["status"]), "reply_origin": row.get("reply_origin"),
             "failure_reason": row.get("failure_reason"), "cancel_reason": row.get("cancel_reason"),
+            "model_config_id": row.get("model_config_id"),
+            "model_config_revision": row.get("model_config_revision"),
+            "model_provider": row.get("model_provider"),
+            "model_base_url_host": row.get("model_base_url_host"),
+            "model_name": row.get("model_name"),
             "context": self._unprotect(row.get("context_protected")),
             "command_id": row.get("command_id"), "sent_message_id": row.get("sent_message_id"),
             "created_at": str(row["created_at"]), "updated_at": str(row["updated_at"]),

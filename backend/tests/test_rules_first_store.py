@@ -62,7 +62,7 @@ def test_manual_mark_results_are_determinate_and_owned_by_rules_first_store(tmp_
     assert runtime.get_manual_mark_result(
         image_hash, detector_version="manual-mark-v1",
     ) == saved
-    assert runtime.schema_version() == 4
+    assert runtime.schema_version() == 5
 
 
 def test_event_inbox_uses_wal_and_deduplicates_event_and_platform_message(tmp_path: Path) -> None:

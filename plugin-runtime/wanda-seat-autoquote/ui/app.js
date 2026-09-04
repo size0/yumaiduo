@@ -18,7 +18,9 @@ async function gatewaySafeImage(file){
   return new File([blob],`${file.name.replace(/\.[^.]+$/,'')||'movie-ticket'}.webp`,{type:'image/webp',lastModified:file.lastModified});
 }
 async function serializeFormData(form){const entries=[];for(const [name,value] of form.entries()){if(value instanceof File){const image=await gatewaySafeImage(value);entries.push({name,file:{name:image.name,type:image.type,base64:bytesToBase64(new Uint8Array(await image.arrayBuffer()))}});}else{entries.push({name,value:String(value)});}}return {_wanda_v4_formdata:true,entries};}
-async function v4Fetch(path,options={}){await fishMoreReady;const normalized=String(path).replace(/^\/+/, '');const request={...options};if(request.body instanceof FormData){request.headers={...(request.headers||{}),'content-type':'application/json'};request.body=JSON.stringify(await serializeFormData(request.body));}return fishMoreSdk.authedFetch(`ui/v4/${normalized}`,request);}
+let modelConfigScope='global';
+let modelConfigShopId='';
+async function v4Fetch(path,options={}){await fishMoreReady;const normalized=String(path).replace(/^\/+/, '');const request={...options};request.headers={...(request.headers||{}),'x-wanda-model-scope':modelConfigScope,...(modelConfigShopId?{'x-wanda-shop-id':modelConfigShopId}:{})};if(request.body instanceof FormData){request.headers['content-type']='application/json';request.body=JSON.stringify(await serializeFormData(request.body));}return fishMoreSdk.authedFetch(`ui/v4/${normalized}`,request);}
 async function v4ImageFetch(form){
   await fishMoreReady;
   const started=await fishMoreSdk.authedFetch('ui/v4/jobs/image-message',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(await serializeFormData(form))});
@@ -214,7 +216,7 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
       summary.append(element('span',`diagnostic-event${run.failure?.reason?' diagnostic-error':''}`,run.failure?.reason||auditStatusLabel(run.status)));
       summary.append(element('span','diagnostic-meta',[run.flow,run.buyer_id,run.chat_id,run.message_time].filter(Boolean).join(' · ')));detail.append(summary);
       const facts=element('div','audit-facts');
-      [['买家',run.buyer_id],['店铺',run.shop_id],['聊天ID',run.chat_id],['事件ID',run.event_id],['消息时间',run.message_time],['流程',run.flow||'CANONICAL_CONVERSATION_AGENT'],['运行状态',auditStatusLabel(run.status)],['Agent模型',`${run.agent_model?.provider||'OpenAI-compatible'} · ${run.agent_model?.model||$('currentModel')?.textContent||'当前配置'}`]].forEach(([label,value])=>facts.append(recordFact(label,value)));
+      [['买家',run.buyer_id],['店铺',run.shop_id],['聊天ID',run.chat_id],['事件ID',run.event_id],['消息时间',run.message_time],['流程',run.flow||'CANONICAL_CONVERSATION_AGENT'],['运行状态',auditStatusLabel(run.status)],['Agent模型',`${run.agent_model?.provider||'OpenAI-compatible'} · ${run.agent_model?.model||$('currentModel')?.textContent||'当前配置'}`],['模型配置',run.agent_model?.config_id],['配置修订',run.agent_model?.config_revision],['配置主机',run.agent_model?.base_url_host]].forEach(([label,value])=>facts.append(recordFact(label,value)));
       detail.append(facts);
       const context=element('div','audit-context');appendAuditContext(context,'IM history',run.context?.im_history);appendAuditContext(context,'Recognition',run.context?.recognition);appendAuditContext(context,'Purchase Context',run.context?.purchase_context);appendAuditContext(context,'Quote / Same-Type Reference',{quote:run.context?.quote,same_type_reference:run.context?.same_type_reference});appendAuditContext(context,'Transaction State',run.context?.transaction_state);appendAuditContext(context,'Human / Manual Context',run.context?.human_manual_context);detail.append(context);
       const tools=run.tool_calls||[];const toolTitle=element('h4','audit-section-title',`Tool calls（${tools.length}）`);detail.append(toolTitle);
@@ -541,9 +543,20 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     $('qwenThinkingGroup').hidden=!visionModel.startsWith('qwen'); $('gptReasoningGroup').hidden=!chatModel.startsWith('gpt-5');
     $('thinkingHint').textContent=enabled?'已开启模型思考，响应时间可能增加。':'思考模式已关闭，优先降低延迟。';
   }
+  async function loadModelConfigScopes() {
+    const select=$('modelConfigScope');
+    try {
+      const response=await v4Fetch('/api/plugin/shops'); const data=await response.json();
+      if(!response.ok)throw new Error(data?.detail||'读取店铺失败');
+      [...(data.shops||[])].forEach(shop=>{const option=document.createElement('option');option.value=`shop:${shop.shop_id}`;option.textContent=`店铺：${shop.shop_name||shop.shop_id}（${shop.shop_id}）`;select.append(option);});
+    } catch(error) { catalogMessage(error.message,true); }
+  }
   async function loadSettings() {
     settingsMessage('正在读取设置…');
     try {
+      const selectedScope=$('modelConfigScope').value;
+      modelConfigScope=selectedScope.startsWith('shop:')?'shop':selectedScope;
+      modelConfigShopId=selectedScope.startsWith('shop:')?selectedScope.slice(5):'';
       const response=await v4Fetch('/api/settings/vision'); const data=await response.json(); if(!response.ok) throw new Error(data?.detail||'读取设置失败');
       $('baseUrl').value=data.base_url; $('modelSelect').value=data.model; $('chatBaseUrl').value=data.chat_base_url||data.base_url; $('chatModelSelect').value=data.chat_model||data.model; $('thinkingToggle').checked=data.enable_thinking; $('reasoningEffort').value=data.reasoning_effort||'none'; $('visionPrompt').value=data.vision_prompt; $('chatPrompt').value=data.chat_prompt;
       loadedPrompt=data.vision_prompt; $('currentModel').textContent=`${data.model} → ${data.chat_model||data.model}`; $('keyState').textContent=data.has_api_key?`已保存 ${data.masked_api_key}`:'未配置'; $('keyState').style.color=data.has_api_key?'#29945a':'#b16b20';
@@ -588,6 +601,7 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     button.addEventListener('keydown',event=>{let next=index;if(event.key==='ArrowRight')next=(index+1)%workspaceButtons.length;else if(event.key==='ArrowLeft')next=(index-1+workspaceButtons.length)%workspaceButtons.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=workspaceButtons.length-1;else return;event.preventDefault();showWorkspace(workspaceButtons[next].dataset.workspace,true)});
   });
   $('openSettings').addEventListener('click',()=>showSettings(true)); $('closeSettings').addEventListener('click',()=>showSettings(false)); $('settingsBackdrop').addEventListener('click',()=>showSettings(false));
+  $('modelConfigScope').addEventListener('change',()=>{const selected=$('modelConfigScope').value;modelConfigScope=selected.startsWith('shop:')?'shop':selected;modelConfigShopId=selected.startsWith('shop:')?selected.slice(5):'';loadSettings();});
   $('modelSettingsTab').addEventListener('click',()=>switchSettingsTab('model')); $('operationsSettingsTab').addEventListener('click',()=>switchSettingsTab('operations'));
   $('useAirelvo').addEventListener('click',()=>{$('baseUrl').value='https://airelvo.cc/v1';catalogMessage('识图接口已切换到 Airelvo。');}); $('fetchModels').addEventListener('click',fetchModels);
   $('useChatAirelvo').addEventListener('click',()=>{$('chatBaseUrl').value='https://airelvo.cc/v1';catalogMessage('AI 回复接口已切换到 Airelvo。',false,'chatModelFetchMessage');}); $('fetchChatModels').addEventListener('click',fetchChatModels);
@@ -598,4 +612,4 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   document.querySelectorAll('[data-template-variable]').forEach(button=>button.addEventListener('click',async()=>{try{await copyTemplateVariable(button.dataset.templateVariable);templateMessage(`已复制 ${button.dataset.templateVariable}`);}catch{templateMessage('复制失败，请选中变量后复制。',true);}}));
   $('saveSettings').addEventListener('click',saveSettings); $('saveOperations').addEventListener('click',saveOperations); $('saveTemplates').addEventListener('click',saveTemplates); $('saveConversationPolicy').addEventListener('click',saveConversationPolicy); $('visionPrompt').addEventListener('input',updatePromptLength); $('resetPrompt').addEventListener('click',()=>{$('visionPrompt').value=loadedPrompt;updatePromptLength()});
   document.addEventListener('keydown',event=>{if(event.key==='Escape')showSettings(false)});
-  showWorkspace(location.hash.replace('#','')||'chat'); updateSend(); initLiangpiaoRules(); initWandaRules(); loadSettings(); loadOperations(); loadConversationPolicy(); loadKnowledge(); refreshDiagnostics(); setInterval(()=>{if(!document.hidden&&activeWorkspace==='logs')refreshDiagnostics();},4000);
+  showWorkspace(location.hash.replace('#','')||'chat'); updateSend(); initLiangpiaoRules(); initWandaRules(); loadModelConfigScopes().finally(loadSettings); loadOperations(); loadConversationPolicy(); loadKnowledge(); refreshDiagnostics(); setInterval(()=>{if(!document.hidden&&activeWorkspace==='logs')refreshDiagnostics();},4000);

@@ -163,11 +163,15 @@ function decodeV4FormData(rawBody) {
   return form;
 }
 
-async function requestV4({ method, pathname, rawBody, contentType, config, fetchImpl, tenantId }) {
+async function requestV4({ method, pathname, rawBody, contentType, config, fetchImpl, tenantId, shopId, modelScope }) {
   const targetPath = pathname.slice('/ui/v4'.length);
   if (!targetPath.startsWith('/api/')) return null;
   let requestBody = rawBody || undefined;
-  const headers = { 'x-wanda-tenant-id': String(tenantId) };
+  const headers = {
+    'x-wanda-tenant-id': String(tenantId),
+    ...(shopId ? { 'x-wanda-shop-id': String(shopId) } : {}),
+    ...(modelScope ? { 'x-wanda-model-scope': String(modelScope) } : {}),
+  };
   if (rawBody && /^application\/json(?:\s*;|$)/i.test(contentType ?? '')) {
     const form = decodeV4FormData(rawBody);
     if (form) requestBody = form;
@@ -190,9 +194,9 @@ function sendV4Result(res, result) {
   res.writeHead(result.status, { ...securityHeaders(), 'content-type': result.contentType, 'content-length': result.body.length });
   res.end(result.body);
 }
-async function proxyV4(req, res, pathname, rawBody, config, fetchImpl, tenantId) {
+async function proxyV4(req, res, pathname, rawBody, config, fetchImpl, tenantId, shopId, modelScope) {
   return sendV4Result(res, await requestV4({
-    method: req.method, pathname, rawBody, contentType: header(req, 'content-type'), config, fetchImpl, tenantId,
+    method: req.method, pathname, rawBody, contentType: header(req, 'content-type'), config, fetchImpl, tenantId, shopId, modelScope,
   }));
 }
 
@@ -348,7 +352,7 @@ export function createV2HttpServer({
         }
         if (isV4Api) return proxyV4(
           req, res, normalizedUiPath, rawBody, config, fetchImpl,
-          header(req, 'x-yumaiduo-tenant-id'),
+          header(req, 'x-yumaiduo-tenant-id'), header(req, 'x-wanda-shop-id'), header(req, 'x-wanda-model-scope'),
         );
         if (isV4Job && req.method === 'POST' && normalizedUiPath === '/ui/v4/jobs/image-message') {
           const id = await startImageJob(rawBody, header(req, 'content-type'), header(req, 'x-yumaiduo-tenant-id'), header(req, 'x-yumaiduo-user-id'));

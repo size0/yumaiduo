@@ -509,11 +509,17 @@ def create_app(
     )
     configured_conversation_agent = canonical_conversation_agent
     if configured_conversation_agent is None and canonical_conversation_agent_enabled:
+        bootstrap_agent_config = persistent_settings.resolve_model_config(
+            None, None, purpose="conversation_agent",
+        )
         configured_agent_model = OpenAICompatibleAgentModel(
-            api_key=runtime_settings.chat_api_key,
-            base_url=runtime_settings.chat_base_url,
-            model=runtime_settings.chat_model,
-            timeout_seconds=runtime_settings.request_timeout_seconds,
+            api_key=bootstrap_agent_config.api_key,
+            base_url=bootstrap_agent_config.base_url,
+            model=bootstrap_agent_config.model,
+            timeout_seconds=bootstrap_agent_config.timeout_seconds,
+            temperature=bootstrap_agent_config.temperature,
+            max_tokens=bootstrap_agent_config.max_tokens,
+            config_metadata=bootstrap_agent_config.audit_view(),
         )
         configured_tool_backend = canonical_agent_tool_backend or CanonicalAgentToolBackend(
             quote_runtime=configured_canonical_quote_runtime,
@@ -529,6 +535,7 @@ def create_app(
             configured_agent_model,
             tool_backend=configured_tool_backend,
             audit_store=persistent_rules_store,
+            model_resolver=persistent_settings.resolve_model_config,
         )
     limiter = rate_limiter or FixedWindowRateLimiter(
         limit=int(os.getenv("RECOGNITION_RATE_LIMIT_PER_MINUTE", "20")),
@@ -731,6 +738,22 @@ def create_app(
             raise HTTPException(status_code=401, detail="panel_tenant_required")
         return tenant_id
 
+    def model_settings_scope(
+        tenant_header: str | None, shop_header: str | None, scope_header: str | None,
+    ) -> tuple[str | None, str | None]:
+        scope = str(scope_header or "").strip().lower()
+        tenant = str(tenant_header or "").strip() or None
+        shop = str(shop_header or "").strip() or None
+        if scope == "global":
+            return None, None
+        if scope not in {"", "tenant", "shop"}:
+            raise HTTPException(status_code=422, detail="model_scope_invalid")
+        if scope == "shop" and not shop:
+            raise HTTPException(status_code=422, detail="model_shop_required")
+        if shop and not tenant:
+            raise HTTPException(status_code=422, detail="model_tenant_required")
+        return tenant, shop if scope == "shop" or not scope else None
+
     def safe_agent_audit_view(run: Mapping[str, Any]) -> dict[str, Any]:
         """Expose a redacted, read-only projection of one Canonical Agent run."""
         context = run.get("context") if isinstance(run.get("context"), Mapping) else {}
@@ -776,7 +799,13 @@ def create_app(
             "created_at": run.get("created_at"), "updated_at": run.get("updated_at"),
             "flow": "CANONICAL_CONVERSATION_AGENT",
             "status": run.get("status"), "reply_origin": run.get("reply_origin"),
-            "agent_model": {"provider": "OpenAI-compatible", "model_source": "current_chat_settings"},
+            "agent_model": {
+                "provider": run.get("model_provider") or "OpenAI-compatible",
+                "model": run.get("model_name"),
+                "config_id": run.get("model_config_id"),
+                "config_revision": run.get("model_config_revision"),
+                "base_url_host": run.get("model_base_url_host"),
+            },
             "context": {
                 "im_history": {"available": bool(context.get("fishmore_history_available", False)), "message_count": len(history)},
                 "recognition": facts(recognition), "purchase_context": facts(purchase), "quote": facts(quote),
@@ -1365,8 +1394,13 @@ def create_app(
         return {"ok": True}
 
     @app.get("/api/settings/vision", response_model=VisionSettingsView)
-    async def get_vision_settings() -> VisionSettingsView:
-        return persistent_settings.view()
+    async def get_vision_settings(
+        x_wanda_tenant_id: str | None = Header(default=None),
+        x_wanda_shop_id: str | None = Header(default=None),
+        x_wanda_model_scope: str | None = Header(default=None),
+    ) -> VisionSettingsView:
+        tenant_id, shop_id = model_settings_scope(x_wanda_tenant_id, x_wanda_shop_id, x_wanda_model_scope)
+        return persistent_settings.view(tenant_id, shop_id)
 
     @app.get("/api/settings/operations", response_model=PricingRulesView)
     async def get_operations_settings() -> PricingRulesView:
@@ -1517,8 +1551,14 @@ def create_app(
         return saved
 
     @app.post("/api/settings/vision/models", response_model=ModelCatalogResponse)
-    async def list_provider_models(request: ModelCatalogRequest) -> ModelCatalogResponse:
-        stored = persistent_settings.current()
+    async def list_provider_models(
+        request: ModelCatalogRequest,
+        x_wanda_tenant_id: str | None = Header(default=None),
+        x_wanda_shop_id: str | None = Header(default=None),
+        x_wanda_model_scope: str | None = Header(default=None),
+    ) -> ModelCatalogResponse:
+        tenant_id, shop_id = model_settings_scope(x_wanda_tenant_id, x_wanda_shop_id, x_wanda_model_scope)
+        stored = persistent_settings.current_for_scope(tenant_id, shop_id)
         stored_key = stored.chat_api_key if request.provider == "chat" else stored.api_key
         api_key = request.api_key or stored_key
         if not api_key:
@@ -1530,8 +1570,17 @@ def create_app(
         return await catalog_service.list_models(request.base_url, api_key)
 
     @app.put("/api/settings/vision", response_model=VisionSettingsView)
-    async def save_vision_settings(update: VisionSettingsUpdate) -> VisionSettingsView:
-        saved = persistent_settings.save(update)
+    async def save_vision_settings(
+        update: VisionSettingsUpdate,
+        x_wanda_tenant_id: str | None = Header(default=None),
+        x_wanda_shop_id: str | None = Header(default=None),
+        x_wanda_model_scope: str | None = Header(default=None),
+    ) -> VisionSettingsView:
+        tenant_id, shop_id = model_settings_scope(x_wanda_tenant_id, x_wanda_shop_id, x_wanda_model_scope)
+        try:
+            saved = persistent_settings.save(update, tenant_id=tenant_id, shop_id=shop_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
         LOGGER.info(
             "event=vision_settings_saved vision_model=%s chat_model=%s thinking=%s reasoning_effort=%s has_api_key=%s",
             saved.model,

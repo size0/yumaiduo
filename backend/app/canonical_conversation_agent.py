@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 
 import httpx
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
+from urllib.parse import urlparse
 
 from .quote_v2.service import CanonicalQuoteRequest
 
@@ -178,6 +179,13 @@ class AgentModel(Protocol):
     async def complete(self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]) -> Mapping[str, Any]: ...
 
 
+class _UnavailableAgentModel:
+    """Fail closed when the UI-owned model authority cannot be resolved."""
+
+    async def complete(self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]) -> Mapping[str, Any]:
+        raise RuntimeError("model_config_resolution_failed")
+
+
 @dataclass(frozen=True)
 class AgentContext:
     tenant_id: str
@@ -235,11 +243,31 @@ class AgentContext:
 class OpenAICompatibleAgentModel:
     """Small read-only chat-completions adapter; no platform tools are exposed."""
 
-    def __init__(self, *, api_key: str, base_url: str, model: str, timeout_seconds: float = 30) -> None:
+    def __init__(
+        self, *, api_key: str, base_url: str, model: str, timeout_seconds: float = 30,
+        temperature: float = 0, max_tokens: int | None = None,
+        config_metadata: Mapping[str, Any] | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout = timeout_seconds
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._config_metadata = dict(config_metadata or {})
+        self._transport = transport
+
+    def audit_view(self) -> dict[str, Any]:
+        """Return model identity without credentials or authorization material."""
+        metadata = dict(self._config_metadata)
+        metadata.setdefault("provider", "OpenAI-compatible")
+        metadata.setdefault("model", self._model)
+        metadata.setdefault("base_url", self._base_url)
+        metadata.setdefault("timeout_seconds", self._timeout)
+        metadata.setdefault("temperature", self._temperature)
+        metadata.setdefault("max_tokens", self._max_tokens)
+        return metadata
 
     @staticmethod
     def _completion_url(base_url: str) -> str:
@@ -253,11 +281,18 @@ class OpenAICompatibleAgentModel:
     async def complete(self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]) -> Mapping[str, Any]:
         if not self._api_key:
             return {"reply": "当前无法读取会话状态，请稍等人工确认。"}
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        client_options = {"timeout": self._timeout}
+        if self._transport is not None:
+            client_options["transport"] = self._transport
+        async with httpx.AsyncClient(**client_options) as client:
             response = await client.post(
                 self._completion_url(self._base_url),
                 headers={"Authorization": f"Bearer {self._api_key}"},
-                json={"model": self._model, "messages": messages, "tools": list(tools), "temperature": 0},
+                json={
+                    "model": self._model, "messages": messages,
+                    "tools": list(tools), "temperature": self._temperature,
+                    **({"max_tokens": self._max_tokens} if self._max_tokens is not None else {}),
+                },
             )
         response.raise_for_status()
         message = response.json().get("choices", [{}])[0].get("message", {})
@@ -633,6 +668,7 @@ class CanonicalConversationAgent:
         max_tool_rounds: int = 4,
         reply_guard: AgentReplyGuard | None = None,
         audit_store: Any | None = None,
+        model_resolver: Callable[[str, str, str], Any] | None = None,
     ) -> None:
         self._context_builder = context_builder
         self._model = model
@@ -640,10 +676,12 @@ class CanonicalConversationAgent:
         self._max_tool_rounds = max(1, min(int(max_tool_rounds), 8))
         self._reply_guard = reply_guard or AgentReplyGuard()
         self._audit_store = audit_store
+        self._model_resolver = model_resolver
 
     async def process(self, body: Mapping[str, Any]) -> dict[str, Any]:
         context = await self._context_builder.build(body)
-        run_id = self._start_audit_run(context, body)
+        model, model_metadata = self._resolve_model(context)
+        run_id = self._start_audit_run(context, body, model_metadata)
         if body.get("authoritative_history_available") is False:
             result = {
                 "status": "AGENT_REPLY_UNAVAILABLE", "reason": "conversation_snapshot_unavailable",
@@ -667,7 +705,7 @@ class CanonicalConversationAgent:
         trace: list[dict[str, Any]] = []
         for _ in range(self._max_tool_rounds):
             try:
-                response = await self._model.complete(messages, AGENT_TOOL_SCHEMAS)
+                response = await model.complete(messages, AGENT_TOOL_SCHEMAS)
             except Exception:
                 result = {
                     "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_model_failed",
@@ -721,7 +759,37 @@ class CanonicalConversationAgent:
         self._finish_audit_run(run_id, result, context)
         return result
 
-    def _start_audit_run(self, context: AgentContext, body: Mapping[str, Any]) -> str | None:
+    def _resolve_model(self, context: AgentContext) -> tuple[AgentModel, dict[str, Any]]:
+        """Resolve the active UI-owned config once per run; never put its key in context."""
+        fallback = self._model
+        metadata = _safe_model_metadata(fallback)
+        resolver = self._model_resolver
+        if not callable(resolver):
+            return fallback, metadata
+        try:
+            resolved = resolver(context.tenant_id, context.shop_id, "conversation_agent")
+        except Exception:
+            return _UnavailableAgentModel(), {"config_resolution_failed": True}
+        if isinstance(resolved, Mapping):
+            candidate = resolved.get("model")
+            candidate_metadata = resolved.get("metadata")
+            if hasattr(candidate, "complete"):
+                return candidate, _safe_metadata_mapping(candidate_metadata, candidate)
+        if hasattr(resolved, "complete"):
+            return resolved, _safe_model_metadata(resolved)
+        if all(hasattr(resolved, name) for name in ("api_key", "base_url", "model")):
+            audit = resolved.audit_view() if callable(getattr(resolved, "audit_view", None)) else {}
+            return OpenAICompatibleAgentModel(
+                api_key=str(resolved.api_key or ""), base_url=str(resolved.base_url), model=str(resolved.model),
+                timeout_seconds=float(getattr(resolved, "timeout_seconds", 30)),
+                temperature=float(getattr(resolved, "temperature", 0)),
+                max_tokens=getattr(resolved, "max_tokens", None), config_metadata=audit,
+            ), _safe_metadata_mapping(audit, None)
+        return _UnavailableAgentModel(), {"config_resolution_failed": True}
+
+    def _start_audit_run(
+        self, context: AgentContext, body: Mapping[str, Any], model_metadata: Mapping[str, Any] | None = None,
+    ) -> str | None:
         store = self._audit_store
         create = getattr(store, "create_agent_run", None) if store is not None else None
         if not callable(create):
@@ -733,6 +801,11 @@ class CanonicalConversationAgent:
                 tenant_id=context.tenant_id, shop_id=context.shop_id,
                 buyer_id=context.buyer_id, chat_id=context.chat_id,
                 event_id=event_id, status="running", context=context.to_dict(),
+                model_config_id=_text(model_metadata.get("config_id")) if model_metadata else None,
+                model_config_revision=_safe_int(model_metadata.get("config_revision")) if model_metadata else None,
+                model_provider=_text(model_metadata.get("provider")) if model_metadata else None,
+                model_base_url_host=_url_host(model_metadata.get("base_url")) if model_metadata else None,
+                model_name=_text(model_metadata.get("model")) if model_metadata else None,
             )
             return _text(record.get("run_id")) if isinstance(record, Mapping) else None
         except Exception:
@@ -817,6 +890,33 @@ class CanonicalConversationAgent:
         if name in defaults:
             return {"status": "success", "data": defaults[name]}
         return {"status": "error", "reason": "tool_backend_unavailable"}
+
+
+def _safe_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _url_host(value: Any) -> str | None:
+    try:
+        host = urlparse(str(value or "")).hostname
+    except ValueError:
+        host = None
+    return host or None
+
+
+def _safe_metadata_mapping(value: Any, model: Any | None) -> dict[str, Any]:
+    source = value if isinstance(value, Mapping) else _safe_model_metadata(model)
+    return {
+        key: source[key] for key in (
+            "config_id", "config_revision", "scope", "purpose", "provider", "base_url", "model",
+            "timeout_seconds", "temperature", "max_tokens", "supported_capabilities",
+        ) if key in source
+    }
+
+
+def _safe_model_metadata(model: Any) -> dict[str, Any]:
+    audit = getattr(model, "audit_view", None)
+    return _safe_metadata_mapping(audit() if callable(audit) else {}, None)
 
 
 def _confirmed_facts(quote: Mapping[str, Any] | None, transaction: Mapping[str, Any] | None) -> dict[str, Any]:
