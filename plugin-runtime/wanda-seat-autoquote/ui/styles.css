@@ -312,3 +312,16 @@ body { height:auto; padding-bottom:0; }
 @media (max-width:760px) {
   .audit-toolbar { align-items:stretch; flex-direction:column; }.audit-facts,.audit-context { grid-template-columns:1fr 1fr; }
 }
+
+/* Settings pages use the page canvas directly; only the chat workspace keeps a shell card. */
+.settings-drawer { overflow:visible; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.settings-head { padding:0 0 18px; border-bottom:0; background:transparent; }
+.settings-head h2 { font-size:24px; color:var(--text-main); }
+.settings-head p { color:var(--text-muted); }
+.settings-body { padding:0 0 28px; background:transparent; overflow-y:auto; }
+.settings-footer { padding:0 0 20px; border-top:0; background:transparent; }
+@media (max-width:760px) {
+  .settings-head { padding:0 0 14px; }
+  .settings-head h2 { font-size:20px; }
+  .settings-body { padding-bottom:20px; }
+}

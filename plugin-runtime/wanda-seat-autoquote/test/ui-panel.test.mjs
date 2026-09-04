@@ -192,6 +192,9 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(styles, /\.site-navigation\s*\{[^}]*position:fixed[^}]*left:0/u);
     assert.match(styles, /\.site-nav-list\s*\{[^}]*flex-direction:column/u);
     assert.match(styles, /@media \(max-width:900px\)[\s\S]*\.site-navigation\s*\{[^}]*position:sticky/u);
+    assert.match(styles, /\.settings-drawer \{ overflow:visible; border:0; border-radius:0; background:transparent; box-shadow:none; \}/u);
+    assert.match(styles, /\.settings-head \{ padding:0 0 18px; border-bottom:0; background:transparent; \}/u);
+    assert.match(styles, /\.settings-body \{ padding:0 0 28px; background:transparent; overflow-y:auto; \}/u);
     assert.match(styles, /\.settings-drawer \{[^}]*position:relative/u);
     assert.match(styles, /\.settings-body \{[^}]*overflow-y:auto/u);
     assert.match(styles, /\.pricing-rule-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)/u);
