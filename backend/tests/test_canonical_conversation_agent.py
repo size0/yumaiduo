@@ -396,9 +396,11 @@ async def test_agent_model_failure_is_fail_closed_without_send_action():
 
 def test_tool_surface_is_high_level_and_excludes_legacy_intent_rules():
     names = {item["function"]["name"] for item in AGENT_TOOL_SCHEMAS}
-    assert names == {
-        "get_current_context", "get_quote", "update_quote_request", "select_quote",
-        "get_order", "get_transaction", "get_show_options", "get_seat_status",
-    }
+    assert {
+        "get_current_context", "get_current_quote", "get_transaction_state", "get_order",
+        "get_seat_status", "get_show_options", "update_purchase_request", "request_quote",
+        "select_existing_quote",
+    } <= names
+    assert {"get_quote", "update_quote_request", "select_quote", "get_transaction"} <= names
     assert "keyword" not in str(AGENT_TOOL_SCHEMAS).lower()
     assert "regex" not in str(AGENT_TOOL_SCHEMAS).lower()

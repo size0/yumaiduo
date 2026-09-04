@@ -20,6 +20,11 @@ AGENT_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     {"type": "function", "function": {"name": "get_transaction", "description": "Read the authoritative transaction state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_show_options", "description": "Read show options for an already identified movie and cinema.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_seat_status", "description": "Read authoritative realtime seat status for the current request.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "get_current_quote", "description": "Alias for get_quote: read the current valid quote and lifecycle state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "get_transaction_state", "description": "Alias for get_transaction: read authoritative transaction state.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "update_purchase_request", "description": "Alias for update_quote_request: add structured purchase fields; backend validates and prices them.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "request_quote", "description": "Request a quote for the current structured purchase request; backend calculates the result.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "select_existing_quote", "description": "Alias for select_quote: select an existing quote for the current purchase context.", "parameters": {"type": "object", "properties": {"quote_index": {"type": "integer", "minimum": 0}}, "required": ["quote_index"], "additionalProperties": False}}},
 )
 
 
@@ -454,6 +459,9 @@ class CanonicalAgentToolBackend:
             "quotes": context.get("quote_records") or [],
         }
 
+    async def get_current_quote(self, arguments: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.get_quote(arguments, context)
+
     async def get_transaction(
         self, _arguments: Mapping[str, Any], context: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -467,6 +475,9 @@ class CanonicalAgentToolBackend:
             except Exception:
                 return {"status": "error", "reason": "transaction_read_failed"}
         return {"status": "success", "transaction": context.get("transaction_state")}
+
+    async def get_transaction_state(self, arguments: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.get_transaction(arguments, context)
 
     async def get_order(
         self, arguments: Mapping[str, Any], context: Mapping[str, Any],
@@ -504,6 +515,15 @@ class CanonicalAgentToolBackend:
         if index < 0 or index >= len(quotes):
             return {"status": "error", "reason": "quote_index_out_of_range"}
         return {"status": "success", "quote": quotes[index], "selected_quote_index": index}
+
+    async def select_existing_quote(self, arguments: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.select_quote(arguments, context)
+
+    async def update_purchase_request(self, updates: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.update_quote_request(updates, context)
+
+    async def request_quote(self, updates: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.update_quote_request(updates, context)
 
     async def _read_external(
         self, reader: Any | None, arguments: Mapping[str, Any], context: Mapping[str, Any],
@@ -787,6 +807,8 @@ class CanonicalConversationAgent:
             "get_show_options": {"status": "success", "options": []},
             "get_seat_status": {"status": "success", "seat_facts": context.candidate_facts.get("seat_facts")},
         }
+        defaults["get_current_quote"] = defaults["get_quote"]
+        defaults["get_transaction_state"] = defaults["get_transaction"]
         if name in defaults:
             return {"status": "success", "data": defaults[name]}
         return {"status": "error", "reason": "tool_backend_unavailable"}

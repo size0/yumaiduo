@@ -1,8 +1,8 @@
 {
   "schema_version": "production-release-manifest.v1",
-  "release_name": "wanda-v4-canonical-wplus-preview-20260904",
+  "release_name": "wanda-v4-canonical-conversation-canary-20260904",
   "base_commit": "deeff0b36d52a55b3d49428be0d410c7fe18021e",
-  "release_commit": "1d6bd38ce585d894c4659ced6c70881e9c9196d4",
+  "release_commit": "c17a900e6508fc128b0c7dc53a29281289c80852",
   "scope": {
     "tenant_id": "107",
     "shop_id": "2313315754",
@@ -64,8 +64,13 @@
     },
     {
       "path": "backend/app/canonical_buyer_reply.py",
-      "sha256": "3f799a1df0fdf981612d138f12a224dd359a88904a8a1cf46a5f9471ab767895",
-      "size": 7856
+      "sha256": "dcb082d8f22b075c903e9d13d9ac4f2e014e005184955d250af35c288e9eb4f0",
+      "size": 8300
+    },
+    {
+      "path": "backend/app/canonical_conversation_agent.py",
+      "sha256": "0be62dfdf2109a70db9653b110f4975a0b14a13efc924f8f6f613e84c72204fe",
+      "size": 49040
     },
     {
       "path": "backend/app/chat.py",
@@ -164,8 +169,8 @@
     },
     {
       "path": "backend/app/main.py",
-      "sha256": "f80e69c5fee190468a0157b349afe6b16e235db8513e34c13030d50e235be584",
-      "size": 74063
+      "sha256": "dd1e7d5cd258939a4f45f2a16ab9cef7260a0b1de06bcb33f84c062fd801b490",
+      "size": 80575
     },
     {
       "path": "backend/app/model_catalog.py",
@@ -354,13 +359,13 @@
     },
     {
       "path": "backend/app/quote_record_store.py",
-      "sha256": "7afc63079c0fc74e1aecd3e8198761dea9a2f641f2919a8788e5c8a7392e01ee",
-      "size": 44893
+      "sha256": "be9d7c3033159a5226a8612eb8562c15044194384095701b889b51dfa046c26b",
+      "size": 44969
     },
     {
       "path": "backend/app/quote_v2/service.py",
-      "sha256": "d3d4a63b0bfd419a5e71b6bc767807bcb3ab840bdddcfb551f055fad10db8432",
-      "size": 48404
+      "sha256": "dc1a567d123757dcc560c22705ac1aa2c7d196e4a872f5be4aa882e5010c87e2",
+      "size": 50821
     },
     {
       "path": "backend/app/quote_v2/wanda_source.py",
@@ -424,8 +429,8 @@
     },
     {
       "path": "backend/app/rules_first_runtime.py",
-      "sha256": "a5f4e873863dd3c6ff713e26a007b0c2073f06c8bf420ded036f01aff79978a4",
-      "size": 19976
+      "sha256": "171aa4fae747e0f11941ac64f08cfe1f62d0e69548c817437e82d3b3f790a31c",
+      "size": 22686
     },
     {
       "path": "backend/app/rules_first_state_store.py",
@@ -434,18 +439,18 @@
     },
     {
       "path": "backend/app/rules_first_store.py",
-      "sha256": "4b6aa199997d9530e1e33e0c1a590d24b831df012cd7acd2a42ea522f122b620",
-      "size": 72023
+      "sha256": "0c6e199a9c6fae5f6a1c249871d9ccf656e22a77c7c9175ad9c5520aa62b90f4",
+      "size": 89752
     },
     {
       "path": "backend/app/seat_facts_v2/models.py",
-      "sha256": "eec18173f19da6b2818e23e81f7edd226dc00b4ae82f05bcf9801d759562e34f",
-      "size": 2794
+      "sha256": "08e3f3f0993e571d5abd8daad67132e5b2074429766ecc88043c12435174fbb3",
+      "size": 2984
     },
     {
       "path": "backend/app/seat_facts_v2/service.py",
-      "sha256": "c8ec3439857a2e76bd74bd80ef2688a1f0bd64ae36392213bb21e51f31b46874",
-      "size": 13713
+      "sha256": "4817168a4de75b370571664046f28c3aeb0e1c33cb8b926f6fcb97633f5e042e",
+      "size": 17575
     },
     {
       "path": "backend/app/seat_facts_v2/wanda_source.py",
@@ -499,13 +504,13 @@
     },
     {
       "path": "backend/app/wanda_cost_v2/service.py",
-      "sha256": "700b3835a7c8a9eeb3c8e6cc92525078656d6a12e478d50fc3cd2345839969f1",
-      "size": 6610
+      "sha256": "a5fa559319cf75ffca5dc1401521b63c17c91d268f120727d34d94172b7ad72d",
+      "size": 7807
     },
     {
       "path": "backend/app/wanda_direct_quote.py",
-      "sha256": "1d05b45b4388811c05aab91c76d4580d971c7d747bd206a9425f8e8617000af6",
-      "size": 110257
+      "sha256": "3ab16994db403c5a09ace3d4aa6b164670202cb97ddf13fa69afe5b2e31f4ab9",
+      "size": 110605
     },
     {
       "path": "backend/app/wanda_pricing_v2/models.py",
@@ -514,8 +519,8 @@
     },
     {
       "path": "backend/app/wanda_pricing_v2/service.py",
-      "sha256": "96de7603f01ebb270f431d699a2ce5d98cb5446eaddad2826b3a7328aed7f84e",
-      "size": 8299
+      "sha256": "6d306d7f506f86ff1adddd1d344d76e023424f427c24ac9eefa2d98f24f05893",
+      "size": 8611
     },
     {
       "path": "backend/app/wplus_fulfillment.py",
@@ -589,8 +594,8 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/http/server.mjs",
-      "sha256": "d4dfc5ced8197d606def24c0d7cf1dbe453d2b81517e305d83545074abbdd0b7",
-      "size": 19076
+      "sha256": "abed6f05c28fd80221f79dae9b14be22260014a8fc1c3acd46f3032aab231e49",
+      "size": 24208
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/platform/runtime.mjs",
@@ -599,13 +604,13 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-processor.mjs",
-      "sha256": "cd5e02047be2ffc7d3c39cfbff3d10e31b03bbf3eed026830070d8f0fad0cc5b",
-      "size": 64313
+      "sha256": "a494b58c5ab645e8dd6e27cc54d99e25c7a0843ef99e04043fcea37fa86d38ef",
+      "size": 66744
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-store.mjs",
-      "sha256": "ea4e69b996bef542823dbf269c37e535e5b6195f8be4b1b144c8680d3e714218",
-      "size": 20476
+      "sha256": "afc51b996f50b73d3b695c7c74ff68b1a24ddd55c8b5cb81e6968c339e23af27",
+      "size": 21795
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/v4-ui-job-store.mjs",
