@@ -2,7 +2,7 @@
   "schema_version": "production-release-manifest.v1",
   "release_name": "wanda-v4-canonical-conversation-canary-20260904",
   "base_commit": "deeff0b36d52a55b3d49428be0d410c7fe18021e",
-  "release_commit": "c17a900e6508fc128b0c7dc53a29281289c80852",
+  "release_commit": "f86cb410c3dd082a80ad7c7f9d299c0ada8839e2",
   "scope": {
     "tenant_id": "107",
     "shop_id": "2313315754",
