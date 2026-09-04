@@ -94,7 +94,7 @@ def test_canonical_renderer_keeps_seat_failure_buyer_safe_without_price() -> Non
     })
     assert result == {
         "kind": "SEAT_FACTS_UNAVAILABLE",
-        "text": "这场座位信息暂时没取到，我再帮你核一下哈",
+        "text": "这几个座位现在已经没有了，可以重新选一下座位发我哈",
     }
 
 
