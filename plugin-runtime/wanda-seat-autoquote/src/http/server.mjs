@@ -74,6 +74,69 @@ function parseOrderLimit(requestUrl) {
   }
   return limit;
 }
+function parseImHistoryRequest(requestUrl) {
+  const accountUnb = String(requestUrl.searchParams.get('accountUnb') ?? '').trim();
+  const chatId = String(requestUrl.searchParams.get('chatId') ?? '').trim();
+  if (!accountUnb || accountUnb.length > 160 || !chatId || chatId.length > 160) {
+    throw Object.assign(new Error('im_history_identity_invalid'), { status: 400, code: 'im_history_identity_invalid' });
+  }
+  return { accountUnb, chatId, limit: parseOrderLimit(requestUrl) };
+}
+function firstMessageValue(message, ...keys) {
+  for (const key of keys) {
+    const value = message?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+  }
+  return null;
+}
+function messageTimestamp(message) {
+  const value = firstMessageValue(message, 'sentAt', 'sent_at', 'createdAt', 'created_at', 'timestamp');
+  if (value !== null && Number.isFinite(Number(value)) && String(value).trim().length >= 10) {
+    const date = new Date(Number(value));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  if (value !== null) {
+    const date = new Date(String(value));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  const milliseconds = firstMessageValue(message, 'sentAtMs', 'sent_at_ms');
+  if (milliseconds !== null && Number.isFinite(Number(milliseconds))) {
+    const date = new Date(Number(milliseconds));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  return null;
+}
+function summarizeMessageText(message) {
+  const content = message?.content;
+  const text = typeof content === 'string'
+    ? content
+    : firstMessageValue(content, 'text', 'content', 'message')
+      ?? firstMessageValue(message, 'text', 'message');
+  const normalized = String(text ?? '').replace(/\s+/gu, ' ').trim();
+  if (normalized) return normalized.slice(0, 160);
+  const messageType = Number(firstMessageValue(message, 'messageType', 'message_type', 'type'));
+  return messageType === 2 ? '[图片]' : '';
+}
+function sanitizeImHistoryMessage(message) {
+  const directionValue = String(firstMessageValue(message, 'direction', 'senderType', 'sender_type') ?? '').toLowerCase();
+  const direction = ['buyer', 'inbound', 'receive', 'received'].includes(directionValue)
+    ? 'buyer'
+    : ['seller', 'outbound', 'send', 'sent'].includes(directionValue) ? 'seller' : 'unknown';
+  const senderUnb = String(firstMessageValue(message, 'senderUnb', 'sender_unb') ?? '').trim();
+  const accountUnb = String(firstMessageValue(message, 'accountUnb', 'account_unb') ?? '').trim();
+  const senderClassification = senderUnb && accountUnb && senderUnb === accountUnb
+    ? 'self' : direction === 'buyer' ? 'buyer' : direction === 'seller' ? 'seller' : 'unknown';
+  const rawType = firstMessageValue(message, 'messageType', 'message_type', 'type');
+  const numericType = rawType === null ? null : Number(rawType);
+  return {
+    messageId: String(firstMessageValue(message, 'messageId', 'message_id', 'remoteMessageId', 'remote_message_id', 'id') ?? ''),
+    timestamp: messageTimestamp(message),
+    direction,
+    senderClassification,
+    messageType: Number.isFinite(numericType) ? numericType : null,
+    textSummary: summarizeMessageText(message),
+  };
+}
 function gatewayRequest(req, platform, rawBody) {
   return platform.verifyGateway?.({
     pluginId: header(req, 'x-yumaiduo-plugin-id'),
@@ -263,11 +326,22 @@ export function createV2HttpServer({
       const isUiApi = normalizedUiPath.startsWith('/ui/api/');
       const isV4Api = normalizedUiPath.startsWith('/ui/v4/api/');
       const isV4Job = normalizedUiPath.startsWith('/ui/v4/jobs/');
+      const isImHistoryDiagnostic = normalizedUiPath === '/ui/api/diagnostics/im-history';
       if (uiAsset || isUiApi || isV4Api || isV4Job) {
         const rawBody = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method ?? '')
           ? await body(req, (isV4Api || isV4Job) ? config.maxUiBodyBytes : config.maxWebhookBodyBytes)
           : '';
-        if (!gatewayRequest(req, platform, rawBody)) return json(res, 401, { ok: false, error: 'invalid_gateway_signature' });
+        const gatewayAuthorized = gatewayRequest(req, platform, rawBody);
+        const operationalAuthorization = isImHistoryDiagnostic && !gatewayAuthorized
+          ? wandaOrderApiAuthorized(req, config) : null;
+        if (!gatewayAuthorized && !operationalAuthorization?.tenantId) {
+          if (operationalAuthorization?.status) {
+            return json(res, operationalAuthorization.status, { ok: false, error: operationalAuthorization.error });
+          }
+          return json(res, 401, { ok: false, error: 'invalid_gateway_signature' });
+        }
+        const authorizedTenantId = gatewayAuthorized
+          ? header(req, 'x-yumaiduo-tenant-id') : operationalAuthorization?.tenantId;
         if (uiAsset) {
           if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method_not_allowed' });
           return (await file(res, uiAsset[0], uiAsset[1])) || json(res, 404, { ok: false, error: 'not_found' });
@@ -292,6 +366,26 @@ export function createV2HttpServer({
         if (isV4Job) return json(res, 405, { ok: false, error: 'method_not_allowed' });
         if (req.method === 'GET' && normalizedUiPath === '/ui/api/overview') {
           return json(res, 200, { ok: true, data: overview(config.manifest, await health()) });
+        }
+        if (req.method === 'GET' && normalizedUiPath === '/ui/api/diagnostics/im-history') {
+          const tenantId = authorizedTenantId;
+          if (tenantId !== '107') return json(res, 403, { ok: false, error: 'diagnostic_tenant_forbidden' });
+          const requestUrl = new URL(req.url ?? '/', 'http://v2.local');
+          const { accountUnb, chatId, limit } = parseImHistoryRequest(requestUrl);
+          if (typeof platform.createClient !== 'function') {
+            return json(res, 503, { ok: false, error: 'im_history_runtime_unavailable' });
+          }
+          try {
+            const client = platform.createClient(tenantId);
+            const page = await client.im.listMessages({ accountUnb, chatId, pageSize: limit });
+            const items = Array.isArray(page?.items) ? page.items : Array.isArray(page) ? page : [];
+            return json(res, 200, {
+              ok: true, accountUnb, chatId,
+              messages: items.slice(0, limit).map(sanitizeImHistoryMessage),
+            });
+          } catch {
+            return json(res, 503, { ok: false, error: 'im_history_unavailable' });
+          }
         }
         if (req.method === 'POST' && normalizedUiPath === '/ui/api/shops/sync') {
           if (typeof syncShops !== 'function') return json(res, 503, { ok: false, error: 'shop_sync_unavailable' });

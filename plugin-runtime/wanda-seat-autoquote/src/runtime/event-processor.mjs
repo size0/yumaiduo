@@ -20,6 +20,7 @@ const BACKEND_EVENT_PAYLOAD_FIELDS = new Set([
   'buyerUnb', 'buyer_unb', 'orderId', 'order_id', 'platformOrderId', 'platform_order_id',
   'itemId', 'item_id', 'orderStatus', 'order_status', 'messageType', 'message_type', 'remoteMessageId', 'remote_message_id',
   'messageId', 'message_id', 'content', 'text', 'imageUrls', 'image_urls', 'sentAtMs', 'sent_at_ms',
+  'direction', 'sender', 'senderType', 'fromRole', 'role', 'agent_generated',
 ]);
 function backendPayload(payload) {
   const source = objectPayload(payload);
@@ -267,7 +268,11 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     void drain();
   }
   async function start() {
-    await store.initialize(); stopped = false; requestDrain();
+    await store.initialize();
+    if (typeof store.listSelfMessageIds === 'function') {
+      for (const messageId of await store.listSelfMessageIds()) sentAgentMessageIds.add(messageId);
+    }
+    stopped = false; requestDrain();
     if (typeof backend.claimCommands === 'function') {
       commandTimer = setInterval(() => void pollCommands(), 250);
       commandTimer.unref?.();
@@ -291,6 +296,20 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
   }
   async function health() { return { ok: !stopped, running, limit: config.maxConcurrentRuns, ...(await store.health()) }; }
   async function enqueue(envelope) { const result = await store.enqueue(envelope); requestDrain(); return result; }
+
+  async function rememberSelfMessage(messageId, { session = null, eventId = null, actionId = null } = {}) {
+    const id = text(messageId);
+    if (!id) return;
+    sentAgentMessageIds.add(id);
+    if (typeof store.saveSelfMessage !== 'function') return;
+    await store.saveSelfMessage({
+      messageId: id, eventId, actionId,
+      tenantId: session?.tenantId ?? session?.tenant_id,
+      accountUnb: session?.accountUnb ?? session?.account_unb,
+      peerUnb: session?.peerUnb ?? session?.peer_unb,
+      chatId: session?.chatId ?? session?.chat_id,
+    }).catch((error) => logger.warn('self message persistence deferred', { messageId: id, error }));
+  }
 
   async function pollCommands() {
     if (stopped || commandPolling || typeof backend.claimCommands !== 'function') return { processed: 0 };
@@ -675,7 +694,9 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     await assertPreflight();
     const startedAt = Date.now();
     try {
-      return await client.im.sendMessage({ ...session, text: message });
+      const sent = await client.im.sendMessage({ ...session, text: message });
+      await rememberSelfMessage(platformMessageId(sent), { session, eventId, actionId });
+      return sent;
     } catch (error) {
       logger.warn('v2 message send deferred', {
         eventId, actionId, status: error?.status, errorCode: error?.code ?? error?.errorCode, error,
@@ -690,13 +711,18 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
           && platformMessageText(item) === message
           && messageTime(item) >= startedAt - 5_000
         ));
-        if (matching) return { messageId: platformMessageId(matching), reconciled: true };
+        if (matching) {
+          await rememberSelfMessage(platformMessageId(matching), { session, eventId, actionId });
+          return { messageId: platformMessageId(matching), reconciled: true };
+        }
       }
       // HTTP 429 is an explicit rejection by the core and therefore safe to retry
       // once after proving that no matching outbound message entered history.
       if (Number(error?.status) === 429) {
         await assertPreflight();
-        return client.im.sendMessage({ ...session, text: message });
+        const sent = await client.im.sendMessage({ ...session, text: message });
+        await rememberSelfMessage(platformMessageId(sent), { session, eventId, actionId });
+        return sent;
       }
       throw error;
     }
@@ -1095,7 +1121,7 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
               if (result?.status === 'failed') return finishAndReport(result);
               const sent = await client.im.sendImage({ ...session, ...uploaded });
               const messageId = platformMessageId(sent);
-              if (messageId) sentAgentMessageIds.add(messageId);
+              await rememberSelfMessage(messageId, { session, eventId: envelope.id, actionId });
               result = {
                 status: 'succeeded', message_id: messageId, image_asset_id: assetId,
               };

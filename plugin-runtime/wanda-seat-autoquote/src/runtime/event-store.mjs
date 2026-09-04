@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-function blank() { return { version: 2, events: {}, priceChangeReceipts: {}, actionReports: {}, keywordImageUploads: {}, wandaFulfillments: {} }; }
+function blank() { return { version: 2, events: {}, priceChangeReceipts: {}, actionReports: {}, keywordImageUploads: {}, wandaFulfillments: {}, selfMessages: {} }; }
 function key(envelope) { return `${String(envelope.tenantId)}:${String(envelope.id)}`; }
 function chatKey(envelope) { const p = envelope.payload ?? {}; return [p.accountUnb ?? p.account_unb, p.chatId ?? p.chat_id, p.peerUnb ?? p.peer_unb].map((value) => String(value ?? '').trim()).join(':'); }
 function seal(value, keyBytes) { const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', keyBytes, iv); const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]); return { iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), data: encrypted.toString('base64') }; }
@@ -25,6 +25,7 @@ function fulfillmentKey(tenantId, orderId) {
   if (!tenant || !order) throw new TypeError('fulfillment tenant and order ids are required');
   return `${tenant}:${order}`;
 }
+function selfMessageKey(messageId) { return createHash('sha256').update(String(messageId)).digest('hex'); }
 
 export class V2EventStore {
   #file; #key; #writes = Promise.resolve();
@@ -33,6 +34,7 @@ export class V2EventStore {
     await mkdir(dirname(this.#file), { recursive: true });
     try { await this.#read(); } catch (error) { if (error.code !== 'ENOENT') throw error; await this.#write(blank()); }
     await this.#mutate((state) => {
+      state.selfMessages ??= {};
       const now = new Date().toISOString();
       for (const record of Object.values(state.events)) {
         if (record.status !== 'processing') continue;
@@ -50,6 +52,31 @@ export class V2EventStore {
         report.updatedAt = now;
       }
       return null;
+    });
+  }
+  async listSelfMessageIds() {
+    const state = await this.#read();
+    return Object.values(state.selfMessages ?? {}).map((value) => open(value, this.#key).messageId).filter(Boolean);
+  }
+  async saveSelfMessage(value) {
+    const messageId = String(value?.messageId ?? '').trim();
+    if (!messageId) throw new TypeError('self message id is required');
+    const record = {
+      messageId,
+      tenantId: String(value?.tenantId ?? '').trim() || null,
+      accountUnb: String(value?.accountUnb ?? '').trim() || null,
+      peerUnb: String(value?.peerUnb ?? '').trim() || null,
+      chatId: String(value?.chatId ?? '').trim() || null,
+      eventId: String(value?.eventId ?? '').trim() || null,
+      actionId: String(value?.actionId ?? '').trim() || null,
+      savedAt: new Date().toISOString(),
+    };
+    return this.#mutate((state) => {
+      state.selfMessages ??= {};
+      state.selfMessages[selfMessageKey(messageId)] = seal(record, this.#key);
+      const ids = Object.keys(state.selfMessages);
+      for (const oldId of ids.slice(0, Math.max(0, ids.length - 2_000))) delete state.selfMessages[oldId];
+      return structuredClone(record);
     });
   }
   async getKeywordImageUpload(identity) {

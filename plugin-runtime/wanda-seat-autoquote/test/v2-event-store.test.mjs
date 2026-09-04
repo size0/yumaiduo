@@ -143,6 +143,22 @@ test('price change receipt claims are atomic for one executor idempotency key', 
   assert.equal(claims.every((claim) => claim.receipt.idempotency_key === initial.idempotency_key), true);
 });
 
+test('known self message ids persist across plugin restarts without plaintext leakage', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-self-message-'));
+  const statePath = join(dataDir, 'events.v2.json');
+  const key = Buffer.alloc(32, 15);
+  const first = new V2EventStore(statePath, key);
+  await first.initialize();
+  await first.saveSelfMessage({
+    messageId: 'sent-agent-1', tenantId: 'tenant-a', accountUnb: 'shop-a',
+    peerUnb: 'buyer-a', chatId: 'chat-a', eventId: 'event-a', actionId: 'action-a',
+  });
+  const restarted = new V2EventStore(statePath, key);
+  await restarted.initialize();
+  assert.deepEqual(await restarted.listSelfMessageIds(), ['sent-agent-1']);
+  assert.equal((await readFile(statePath, 'utf8')).includes('sent-agent-1'), false);
+});
+
 test('price change receipts persist encrypted updates across store restarts', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ai-v2-receipt-restart-'));
   const statePath = join(dataDir, 'events.v2.json');

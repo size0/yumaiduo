@@ -6,10 +6,10 @@ import test from 'node:test';
 
 import { createV2HttpServer } from '../src/http/server.mjs';
 
-function signedHeaders() {
+function signedHeaders(tenantId = 'tenant-test') {
   return {
     'x-yumaiduo-plugin-id': 'wanda-seat-autoquote',
-    'x-yumaiduo-tenant-id': 'tenant-test',
+    'x-yumaiduo-tenant-id': tenantId,
     'x-yumaiduo-user-id': 'user-test',
     'x-yumaiduo-timestamp': String(Date.now()),
     'x-yumaiduo-signature': 'valid-signature',
@@ -25,6 +25,7 @@ async function withServer(run, {
   fulfillmentEnabled = false,
   orderApiKey = '',
   orderApiTenantId = '',
+  platformClient = { im: { listMessages: async () => ({ items: [] }) } },
 } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-ui-panel-'));
   const server = createV2HttpServer({
@@ -48,12 +49,13 @@ async function withServer(run, {
     platform: {
       verifyGateway: ({ pluginId, tenantId, userId, signature, rawBody }) => (
         pluginId === 'wanda-seat-autoquote'
-        && tenantId === 'tenant-test'
+        && ['tenant-test', '107'].includes(tenantId)
         && userId === 'user-test'
         && signature === 'valid-signature'
         && typeof rawBody === 'string'
       ),
       verifyWebhook: () => false,
+      createClient: () => platformClient,
     },
     enqueue: async () => ({ created: true }),
     syncShops,
@@ -70,6 +72,72 @@ async function withServer(run, {
   const address = await server.listen({ port: 0, host: '127.0.0.1' });
   try { await run(`http://127.0.0.1:${address.port}`); } finally { await server.close(); }
 }
+
+test('signed IM history diagnostics use the registered runtime client and return redacted messages', async () => {
+  const calls = [];
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/ui/api/diagnostics/im-history?accountUnb=2313315754&chatId=66050332180&limit=2`, {
+      headers: signedHeaders('107'),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      accountUnb: '2313315754',
+      chatId: '66050332180',
+      messages: [{
+        messageId: '4292079529566.PNM',
+        timestamp: '2026-09-04T11:03:42.000Z',
+        direction: 'seller',
+        senderClassification: 'self',
+        messageType: 1,
+        textSummary: '这几个座位现在已经没有了，可以重新选一下座位发我哈',
+      }],
+    });
+  }, {
+    platformClient: {
+      im: {
+        listMessages: async (query) => {
+          calls.push(query);
+          return { items: [{
+            messageId: '4292079529566.PNM', direction: 'seller', messageType: 1,
+            accountUnb: '2313315754', senderUnb: '2313315754',
+            sentAt: '2026-09-04T11:03:42.000Z', content: { text: '这几个座位现在已经没有了，可以重新选一下座位发我哈' },
+            authorization: 'must-not-be-returned',
+          }] };
+        },
+      },
+    },
+  });
+  assert.deepEqual(calls, [{ accountUnb: '2313315754', chatId: '66050332180', pageSize: 2 }]);
+});
+
+test('IM history diagnostics can use the existing tenant-pinned operational API key', async () => {
+  const calls = [];
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/ui/api/diagnostics/im-history?accountUnb=2313315754&chatId=66050332180&limit=1`, {
+      headers: { authorization: 'Bearer order-api-secret' },
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).ok, true);
+  }, {
+    orderApiKey: 'order-api-secret', orderApiTenantId: '107',
+    platformClient: { im: { listMessages: async (query) => { calls.push(query); return { items: [] }; } } },
+  });
+  assert.deepEqual(calls, [{ accountUnb: '2313315754', chatId: '66050332180', pageSize: 1 }]);
+});
+
+test('IM history diagnostics reject unsupported tenant and invalid limit', async () => {
+  await withServer(async (baseUrl) => {
+    const tenant = await fetch(`${baseUrl}/ui/api/diagnostics/im-history?accountUnb=2313315754&chatId=66050332180&limit=2`, {
+      headers: signedHeaders('tenant-test'),
+    });
+    assert.equal(tenant.status, 403);
+    const limit = await fetch(`${baseUrl}/ui/api/diagnostics/im-history?accountUnb=2313315754&chatId=66050332180&limit=0`, {
+      headers: signedHeaders('107'),
+    });
+    assert.equal(limit.status, 400);
+  });
+});
 
 test('FishMore panel and relative assets require a signed gateway request', async () => {
   await withServer(async (baseUrl) => {

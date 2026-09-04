@@ -82,6 +82,7 @@ class RulesFirstRuntime:
             return {**accepted, "canonical_result_pending": True, "commands": []}
         rendered_text = str(result.get("current_runtime_reply") or "").strip()
         rendered_replies = result.get("current_runtime_replies")
+        agent_run_id = str(result.get("agent_run_id") or "").strip()
         actions: list[dict[str, object]] = []
         if isinstance(rendered_replies, list) and rendered_replies:
             for index, item in enumerate(rendered_replies, start=1):
@@ -101,6 +102,7 @@ class RulesFirstRuntime:
                     "canonical_reply_kind": f"{result.get('canonical_reply_kind') or ''}:{kind}",
                     "canonical_reply_sequence": index,
                     "dedupe_key": f"canonical-reply:{event_id}:{suffix}",
+                    **({"agent_run_id": agent_run_id} if agent_run_id else {}),
                 })
         elif rendered_text:
             actions.append({
@@ -111,6 +113,7 @@ class RulesFirstRuntime:
                 "source": source,
                 "canonical_reply_kind": str(result.get("canonical_reply_kind") or ""),
                 "dedupe_key": f"canonical-reply:{event_id}",
+                **({"agent_run_id": agent_run_id} if agent_run_id else {}),
             })
         canonical_result = dict(result)
         canonical_result["decision"] = {
@@ -147,7 +150,10 @@ class RulesFirstRuntime:
     ) -> dict[str, object]:
         """Commit an agent reply through the same inbox/outbox path as quotes."""
         normalized = dict(result)
-        normalized["current_runtime_reply"] = str(result.get("reply") or "").strip()
+        normalized["current_runtime_reply"] = (
+            str(result.get("reply") or "").strip()
+            if result.get("status") == "AGENT_REPLY_READY" else ""
+        )
         normalized.setdefault("canonical_reply_kind", "canonical_conversation_agent")
         return self.accept_canonical_result(
             body, normalized, source="canonical_conversation_agent",
@@ -286,6 +292,7 @@ class RulesFirstRuntime:
         if command is None:
             raise KeyError("command_missing")
         recorded = self._store.record_command_result(command_id, lease_token, result)
+        self._record_agent_delivery(command, result, recorded)
         self._ensure_new_flow_transaction(command)
         if recorded["status"] == "reconciling":
             return {"ok": True, **recorded, "actions_created": 0}
@@ -318,6 +325,41 @@ class RulesFirstRuntime:
             state_revision=revision,
         ) if actions else []
         return {"ok": True, **recorded, "actions_created": len(created)}
+
+    def _record_agent_delivery(
+        self, command: Mapping[str, Any], result: Mapping[str, Any], recorded: Mapping[str, Any],
+    ) -> None:
+        action = command.get("action") if isinstance(command.get("action"), Mapping) else {}
+        run_id = str(action.get("agent_run_id") or "").strip()
+        if not run_id:
+            return
+        try:
+            if str(recorded.get("status")) == "succeeded":
+                message_id = str(
+                    result.get("message_id") or result.get("messageId")
+                    or result.get("sent_message_id") or result.get("sentMessageId") or ""
+                ).strip()
+                if message_id:
+                    self._store.record_agent_run_delivery(
+                        run_id, command_id=str(command.get("command_id") or ""),
+                        sent_message_id=message_id, status="sent",
+                    )
+                else:
+                    self._store.update_agent_run(
+                        run_id, status="delivered_without_message_id",
+                        command_id=str(command.get("command_id") or ""),
+                    )
+            elif str(recorded.get("status")) in {"failed", "unknown", "cancelled"}:
+                self._store.update_agent_run(
+                    run_id, status="delivery_failed",
+                    command_id=str(command.get("command_id") or ""),
+                    failure_reason=f"message_{recorded.get('status')}",
+                )
+        except Exception:
+            LOGGER.warning(
+                "event=agent_delivery_audit_failed command_id=%s run_id=%s",
+                command.get("command_id"), run_id,
+            )
 
     def _ensure_new_flow_transaction(self, command: Mapping[str, Any]) -> None:
         action = command.get("action") if isinstance(command.get("action"), Mapping) else {}

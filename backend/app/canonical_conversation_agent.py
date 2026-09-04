@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 import httpx
 from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol
+
+from .quote_v2.service import CanonicalQuoteRequest
 
 
 AGENT_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
@@ -18,6 +21,156 @@ AGENT_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     {"type": "function", "function": {"name": "get_show_options", "description": "Read show options for an already identified movie and cinema.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_seat_status", "description": "Read authoritative realtime seat status for the current request.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
 )
+
+
+@dataclass(frozen=True)
+class ReplyGuardResult:
+    """Result of validating model prose against authoritative facts.
+
+    The guard is deliberately a post-generation safety boundary.  It does
+    not classify the buyer's intent and it never creates business facts; it
+    only prevents a free-form model response from asserting a transaction
+    fact that was not present in the context or returned by a successful
+    high-level tool.
+    """
+
+    allowed: bool
+    reason: str | None = None
+    violations: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "allowed": self.allowed,
+            "reason": self.reason,
+            "violations": list(self.violations),
+        }
+
+
+class AgentReplyGuard:
+    """Fail closed on unsupported price/order/seat/payment assertions."""
+
+    _PRICE_RE = re.compile(r"(?:[¥￥]\s*)?(\d+(?:\.\d{1,2})?)\s*(?:元|块|人民币)")
+    _SEAT_RE = re.compile(r"\d+\s*(?:排|行)\s*\d+\s*座")
+    _PRICE_ASSERTION_RE = re.compile(r"(?:价格|报价|单价|总价|合计|费用).{0,12}(?:是|为|：|:|[¥￥]|\d)")
+    _SEAT_ASSERTION_RE = re.compile(r"(?:可售|有票|无票|售罄|不可售|已售|锁定|空闲)")
+    _ORDER_ASSERTION_RE = re.compile(r"(?:订单(?:号|已|状态)|已下单|出票(?:中|成功|完成)?|已出票|发货|退款(?:中|成功|完成)?)")
+    _PAYMENT_ASSERTION_RE = re.compile(r"(?:已支付|已付款|支付成功|付款成功|已到账|未付款|待支付|支付失败|付款失败)")
+    _UNCERTAINTY_RE = re.compile(r"(?:无法|暂未|不确定|待确认|请人工|稍等|没有查询到|无法确认|需要确认|尚未查到)")
+
+    def validate(
+        self,
+        reply: str,
+        context: AgentContext,
+        tool_trace: list[Mapping[str, Any]] | None = None,
+    ) -> ReplyGuardResult:
+        text = _text(reply)
+        if not text:
+            return ReplyGuardResult(False, "reply_empty", ("empty_reply",))
+
+        evidence = self._authoritative_evidence(context, tool_trace or [])
+        violations: list[str] = []
+        prices = self._prices(text)
+        if prices and not prices.issubset(evidence["prices"]):
+            violations.append("unverified_price")
+        elif self._PRICE_ASSERTION_RE.search(text) and not evidence["prices"] and not self._is_uncertain(text):
+            violations.append("price_without_quote_evidence")
+
+        seats = {_normalize_seat(item) for item in self._SEAT_RE.findall(text)}
+        if seats and not seats.issubset(evidence["seats"]):
+            violations.append("unverified_seat")
+        if self._SEAT_ASSERTION_RE.search(text) and not evidence["seat_status"] and not self._is_uncertain(text):
+            violations.append("seat_status_without_evidence")
+
+        if self._ORDER_ASSERTION_RE.search(text) and not evidence["order"] and not self._is_uncertain(text):
+            violations.append("order_without_evidence")
+        if self._PAYMENT_ASSERTION_RE.search(text) and not evidence["payment"] and not self._is_uncertain(text):
+            violations.append("payment_without_evidence")
+
+        if violations:
+            return ReplyGuardResult(False, "reply_fact_unverified", tuple(violations))
+        return ReplyGuardResult(True)
+
+    def _authoritative_evidence(
+        self, context: AgentContext, tool_trace: list[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Extract only backend-owned views; candidate recognition is excluded."""
+        roots: list[Any] = [
+            context.confirmed_facts,
+            context.current_quote,
+            context.authoritative_order,
+            context.transaction_state,
+            context.payment_validation_evidence,
+            context.provider_fulfillment_state,
+            context.same_type_reference_quote,
+        ]
+        for item in tool_trace:
+            tool_name = str(item.get("tool") or "") if isinstance(item, Mapping) else ""
+            # Context/options helpers are informational only.  In particular,
+            # get_current_context and the fallback seat reader may contain
+            # candidate recognition and must never become authority merely
+            # because the model invoked a tool.
+            if tool_name in {"get_current_context", "get_show_options"}:
+                continue
+            result = item.get("result") if isinstance(item, Mapping) else None
+            if not isinstance(result, Mapping) or result.get("status") not in {"success", "QUOTED", "QUOTE_UPDATED", "QUOTE_SELECTED"}:
+                continue
+            if tool_name == "get_seat_status" and result.get("authoritative") is not True:
+                continue
+            roots.append(result)
+        prices: set[int] = set()
+        seats: set[str] = set()
+        seat_status = False
+        order = False
+        payment = False
+
+        def visit(value: Any, key: str = "") -> None:
+            nonlocal seat_status, order, payment
+            if isinstance(value, Mapping):
+                for child_key, child in value.items():
+                    name = str(child_key).lower()
+                    if _is_price_key(name):
+                        amount = _amount_to_fen(child, is_fen=name.endswith("_fen") or name.endswith("fen"))
+                        if amount is not None:
+                            prices.add(amount)
+                    if name in {"selected_seats", "seats", "seat_labels"} and isinstance(child, (list, tuple)):
+                        seats.update(_normalize_seat(item) for item in child if _normalize_seat(item))
+                    if name in {"seat_available", "seat_status", "seat_facts", "availability", "available_seats"}:
+                        seat_status = True
+                    if name in {"order", "order_id", "platform_order_id", "order_status", "out_order_no"} and child not in (None, "", [], {}):
+                        order = True
+                    if name in {"payment", "payment_status", "payment_validation_evidence", "validation_status"} and child not in (None, "", [], {}):
+                        payment = True
+                    visit(child, name)
+            elif isinstance(value, (list, tuple)):
+                for child in value:
+                    visit(child, key)
+
+        for root in roots:
+            visit(root)
+        return {"prices": prices, "seats": seats, "seat_status": seat_status, "order": order, "payment": payment}
+
+    def _prices(self, text: str) -> set[int]:
+        values: set[int] = set()
+        for match in self._PRICE_RE.finditer(text):
+            try:
+                values.add(round(float(match.group(1)) * 100))
+            except ValueError:
+                continue
+        return values
+
+    def _is_uncertain(self, text: str) -> bool:
+        if not self._UNCERTAINTY_RE.search(text):
+            return False
+        # An uncertainty preface must not launder a definitive claim in the
+        # same reply (for example, "无法确认，但已支付").
+        definitive = re.compile(
+            r"(?:已支付|已付款|支付成功|付款成功|已到账|未付款|待支付|支付失败|付款失败|"
+            r"已下单|出票(?:中|成功|完成)?|已出票|发货|退款(?:中|成功|完成)?|"
+            r"(?:可售|有票|无票|售罄|不可售|已售|锁定|空闲)|"
+            r"(?:价格|报价|单价|总价|合计|费用).{0,12}(?:是|为|：|:|[¥￥]|\d)"
+            r")"
+        )
+        return not definitive.search(text)
 
 
 class AgentModel(Protocol):
@@ -47,6 +200,8 @@ class AgentContext:
     payment_validation_evidence: dict[str, Any] = field(default_factory=dict)
     provider_fulfillment_state: dict[str, Any] = field(default_factory=dict)
     human_manual_context: list[dict[str, Any]] = field(default_factory=list)
+    same_type_reference_quote: dict[str, Any] | None = None
+    manual_mark_result: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +226,8 @@ class AgentContext:
             "payment_validation_evidence": self.payment_validation_evidence,
             "provider_fulfillment_state": self.provider_fulfillment_state,
             "human_manual_context": self.human_manual_context,
+            "same_type_reference_quote": self.same_type_reference_quote,
+            "manual_mark_result": self.manual_mark_result,
         }
 
 
@@ -144,6 +301,18 @@ class AgentContextBuilder:
         quote_records = _list_of_mappings(body.get("quote_records"))
         current_quote = _mapping_or_none(body.get("current_quote"))
         purchase_context = _mapping(body.get("current_purchase_context"))
+        # Carry the inbound event identity into the ephemeral context so each
+        # distinct buyer message gets a stable idempotency key while retries of
+        # the same event remain safe.
+        event_id = _pick(envelope, "id", "eventId", "event_id")
+        message_id = _pick(payload, "remoteMessageId", "remote_message_id", "messageId", "message_id")
+        if event_id or message_id:
+            purchase_context = {
+                **dict(purchase_context),
+                "request_id": purchase_context.get("request_id") or event_id or message_id,
+                "event_id": purchase_context.get("event_id") or event_id,
+                "message_id": purchase_context.get("message_id") or message_id,
+            }
         if current_quote is None:
             current_quote = _mapping_or_none(purchase_context.get("current_quote"))
         if current_quote is None and self._quote_store is not None and all(identity.values()):
@@ -159,6 +328,13 @@ class AgentContextBuilder:
         if current_quote is not None and not quote_records:
             quote_records = [dict(current_quote)]
 
+        same_type_reference = _mapping_or_none(body.get("same_type_reference_quote"))
+        if same_type_reference is None:
+            same_type_reference = _mapping_or_none(body.get("same_type_reference"))
+        if same_type_reference is None:
+            same_type_reference = _mapping_or_none(purchase_context.get("same_type_reference"))
+        if same_type_reference is None and current_quote is not None:
+            same_type_reference = _mapping_or_none(current_quote.get("same_type_reference"))
         transaction = _mapping_or_none(body.get("transaction_state"))
         if transaction is None and self._transaction_store is not None and all(identity.values()):
             try:
@@ -176,6 +352,9 @@ class AgentContextBuilder:
                     recognition = latest.model_dump(mode="json") if hasattr(latest, "model_dump") else _mapping_or_none(latest)
             except Exception:
                 recognition = None
+        manual_mark_result = body.get("manual_mark_result")
+        if manual_mark_result is None and recognition is not None:
+            manual_mark_result = recognition.get("manual_mark_result")
         confirmed = _confirmed_facts(current_quote, transaction)
         candidate = dict(recognition or {})
         expired = _list_of_mappings(body.get("expired_facts"))
@@ -197,7 +376,220 @@ class AgentContextBuilder:
             payment_validation_evidence=_mapping(body.get("payment_validation_evidence")),
             provider_fulfillment_state=_mapping(body.get("provider_fulfillment_state")),
             human_manual_context=human_messages,
+            same_type_reference_quote=same_type_reference,
+            manual_mark_result=manual_mark_result,
         )
+
+
+class CanonicalAgentToolBackend:
+    """Deterministic backend for the agent's high-level tools.
+
+    The model only supplies changes to a purchase request.  This adapter
+    combines those changes with the already-built context and delegates quote
+    calculation to :class:`CanonicalQuoteRuntime`; prices and provider facts
+    never cross the model boundary.  Read tools use the existing stores when
+    available and otherwise expose the context snapshot assembled for this
+    event.
+    """
+
+    def __init__(
+        self,
+        *,
+        quote_runtime: Any | None = None,
+        quote_store: Any | None = None,
+        transaction_store: Any | None = None,
+        order_reader: Any | None = None,
+        show_options_reader: Any | None = None,
+        seat_status_reader: Any | None = None,
+    ) -> None:
+        self._quote_runtime = quote_runtime
+        self._quote_store = quote_store
+        self._transaction_store = transaction_store
+        self._order_reader = order_reader
+        self._show_options_reader = show_options_reader
+        self._seat_status_reader = seat_status_reader
+
+    async def update_quote_request(
+        self, updates: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if self._quote_runtime is None or not callable(
+            getattr(self._quote_runtime, "quote_structured", None),
+        ):
+            return {"status": "error", "reason": "quote_runtime_unavailable"}
+        request, missing = self._quote_request(updates, context)
+        if missing:
+            return {"status": "QUOTE_REQUEST_INCOMPLETE", "missing_fields": missing}
+        try:
+            result = self._quote_runtime.quote_structured(request)
+            if hasattr(result, "__await__"):
+                result = await result
+        except (TypeError, ValueError):
+            return {"status": "QUOTE_REQUEST_INVALID"}
+        except Exception:
+            # Provider/runtime failures are a semantic tool failure.  Do not
+            # leak provider details into the model prompt.
+            return {"status": "QUOTE_REQUEST_FAILED"}
+        return _tool_result(result)
+
+    async def get_current_context(
+        self, _arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return {"status": "success", "data": dict(context)}
+
+    async def get_quote(
+        self, _arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        identity = _context_identity(context)
+        if self._quote_store is not None and all(identity.values()):
+            try:
+                quote_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")}
+                status, quotes = self._quote_store.list_current_quotes(
+                    **quote_identity, at=datetime.now(timezone.utc),
+                )
+                return {"status": "success", "quote_status": status, "quotes": quotes}
+            except Exception:
+                return {"status": "error", "reason": "quote_read_failed"}
+        return {
+            "status": "success", "quote": context.get("current_quote"),
+            "quotes": context.get("quote_records") or [],
+        }
+
+    async def get_transaction(
+        self, _arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        identity = _context_identity(context)
+        if self._transaction_store is not None and all(identity.values()):
+            try:
+                transaction_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")}
+                state = self._transaction_store.get(**transaction_identity)
+                value = state.model_dump(mode="json") if hasattr(state, "model_dump") else state
+                return {"status": "success", "transaction": value or {"status": "absent"}}
+            except Exception:
+                return {"status": "error", "reason": "transaction_read_failed"}
+        return {"status": "success", "transaction": context.get("transaction_state")}
+
+    async def get_order(
+        self, arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        value = await self._read_external(self._order_reader, arguments, context)
+        if value is not None:
+            return _tool_result(value)
+        return {"status": "success", "order": context.get("authoritative_order")}
+
+    async def get_show_options(
+        self, arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        value = await self._read_external(self._show_options_reader, arguments, context)
+        if value is not None:
+            return _tool_result(value)
+        purchase = _mapping(context.get("current_purchase_context"))
+        return {"status": "success", "options": purchase.get("show_options") or []}
+
+    async def get_seat_status(
+        self, arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        value = await self._read_external(self._seat_status_reader, arguments, context)
+        if value is not None:
+            return _tool_result(value)
+        candidate = _mapping(context.get("candidate_facts"))
+        return {"status": "success", "seat_facts": candidate.get("seat_facts")}
+
+    async def select_quote(
+        self, arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        quotes = context.get("quote_records")
+        index = arguments.get("quote_index") if isinstance(arguments, Mapping) else None
+        if not isinstance(quotes, list) or isinstance(index, bool) or not isinstance(index, int):
+            return {"status": "error", "reason": "quote_index_invalid"}
+        if index < 0 or index >= len(quotes):
+            return {"status": "error", "reason": "quote_index_out_of_range"}
+        return {"status": "success", "quote": quotes[index], "selected_quote_index": index}
+
+    async def _read_external(
+        self, reader: Any | None, arguments: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> Any | None:
+        if not callable(reader):
+            return None
+        value = reader(dict(arguments), dict(context))
+        if hasattr(value, "__await__"):
+            value = await value
+        return value
+
+    @staticmethod
+    def _quote_request(
+        updates: Mapping[str, Any], context: Mapping[str, Any],
+    ) -> tuple[CanonicalQuoteRequest | None, list[str]]:
+        identity = _context_identity(context)
+        purchase = _mapping(context.get("current_purchase_context"))
+        quote = _mapping(context.get("current_quote"))
+        recognition = _mapping(context.get("recent_canonical_recognition"))
+        confirmed = _mapping(context.get("confirmed_facts"))
+        candidate = _mapping(context.get("candidate_facts"))
+        sources = (quote, purchase, confirmed, recognition, candidate)
+
+        def value(*keys: str) -> Any:
+            for source in sources:
+                for key in keys:
+                    item = source.get(key)
+                    if item is not None and item != "":
+                        return item
+            return None
+
+        def updated(name: str, *aliases: str) -> Any:
+            for key in (name, *aliases):
+                item = updates.get(key) if isinstance(updates, Mapping) else None
+                if item is not None and item != "":
+                    return item
+            return value(name, *aliases)
+
+        selected = updated("selected_seats", "seats")
+        if selected is not None and not isinstance(selected, list):
+            selected = None
+        request_type = str(value("seat_request_type", "request_type", "quote_scope") or "").upper()
+        if request_type not in {"WPLUS_AREA", "EXACT_SEATS"}:
+            request_type = "EXACT_SEATS" if selected else "WPLUS_AREA"
+        required = {
+            "tenant_id": identity.get("tenant_id"),
+            "shop_id": identity.get("shop_id"),
+            "buyer_id": identity.get("buyer_id"),
+            "chat_id": identity.get("chat_id"),
+            "purchase_context_id": identity.get("purchase_context_id"),
+            "city": value("city", "city_text"),
+            "cinema": value("cinema", "cinema_text"),
+            "movie": value("movie"),
+            "quote_date": value("quote_date", "show_date", "date"),
+            "showtime_start": updated("showtime_start", "start_time", "showtime"),
+        }
+        missing = [name for name, item in required.items() if not str(item or "").strip()]
+        if missing:
+            return None, missing
+        request_id = str(
+            purchase.get("request_id") or purchase.get("event_id") or purchase.get("message_id")
+            or value("request_id", "event_id", "message_id")
+            or f'agent:{identity["purchase_context_id"]}'
+        ).strip()
+        ticket_count = updated("ticket_count", "quantity")
+        if ticket_count is not None:
+            try:
+                ticket_count = int(ticket_count)
+            except (TypeError, ValueError):
+                return None, ["ticket_count"]
+        return CanonicalQuoteRequest(
+            tenant_id=str(identity["tenant_id"]), shop_id=str(identity["shop_id"]),
+            buyer_id=str(identity["buyer_id"]), chat_id=str(identity["chat_id"]),
+            purchase_context_id=str(identity["purchase_context_id"]), request_id=request_id,
+            city=str(required["city"]), cinema=str(required["cinema"]),
+            movie=str(required["movie"]), quote_date=str(required["quote_date"]),
+            showtime_start=str(required["showtime_start"]),
+            hall=_optional_text(updated("hall")),
+            dimension=_optional_text(value("dimension", "format")),
+            language=_optional_text(value("language")), seat_request_type=request_type,
+            ticket_count=ticket_count, ticket_mode=str(value("ticket_mode") or "STANDARD"),
+            area_quote_strategy=_optional_text(value("area_quote_strategy")),
+            selected_seats=[str(item) for item in selected] if selected else None,
+            has_manual_mark=value("has_manual_mark"), image_url=_optional_text(value("image_url")),
+            message_id=_optional_text(purchase.get("message_id") or value("message_id")),
+        ), []
 
 
 class CanonicalConversationAgent:
@@ -207,19 +599,33 @@ class CanonicalConversationAgent:
     tools. It cannot invoke provider/order/payment/fulfillment operations.
     """
 
-    def __init__(self, context_builder: AgentContextBuilder, model: AgentModel, *, tool_backend: Any | None = None, max_tool_rounds: int = 4) -> None:
+    def __init__(
+        self,
+        context_builder: AgentContextBuilder,
+        model: AgentModel,
+        *,
+        tool_backend: Any | None = None,
+        max_tool_rounds: int = 4,
+        reply_guard: AgentReplyGuard | None = None,
+        audit_store: Any | None = None,
+    ) -> None:
         self._context_builder = context_builder
         self._model = model
         self._tool_backend = tool_backend
         self._max_tool_rounds = max(1, min(int(max_tool_rounds), 8))
+        self._reply_guard = reply_guard or AgentReplyGuard()
+        self._audit_store = audit_store
 
     async def process(self, body: Mapping[str, Any]) -> dict[str, Any]:
         context = await self._context_builder.build(body)
+        run_id = self._start_audit_run(context, body)
         if body.get("authoritative_history_available") is False:
-            return {
+            result = {
                 "status": "AGENT_REPLY_UNAVAILABLE", "reason": "conversation_snapshot_unavailable",
-                "context": context.to_dict(), "tool_trace": [], "actions": [],
+                "context": context.to_dict(), "tool_trace": [], "actions": [], "agent_run_id": run_id,
             }
+            self._finish_audit_run(run_id, result, context)
+            return result
         current_text = _current_text(body)
         system = (
             "你是Canonical购票会话助手。只根据后端提供的上下文和高层工具工作；"
@@ -235,7 +641,16 @@ class CanonicalConversationAgent:
         ]
         trace: list[dict[str, Any]] = []
         for _ in range(self._max_tool_rounds):
-            response = await self._model.complete(messages, AGENT_TOOL_SCHEMAS)
+            try:
+                response = await self._model.complete(messages, AGENT_TOOL_SCHEMAS)
+            except Exception:
+                result = {
+                    "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_model_failed",
+                    "reply": "", "context": context.to_dict(), "tool_trace": trace, "actions": [],
+                    "agent_run_id": run_id,
+                }
+                self._finish_audit_run(run_id, result, context)
+                return result
             tool_calls = response.get("tool_calls") if isinstance(response, Mapping) else None
             if isinstance(tool_calls, list) and tool_calls:
                 assistant_message = {"role": "assistant", "tool_calls": tool_calls}
@@ -244,30 +659,108 @@ class CanonicalConversationAgent:
                     result = await self._invoke_tool(call, context)
                     name = _tool_name(call)
                     trace.append({"tool": name, "result": result})
+                    self._record_tool_audit(run_id, name, call, result)
                     messages.append({
                         "role": "tool", "name": name,
+                        "tool_call_id": _tool_call_id(call),
                         "content": json.dumps(result, ensure_ascii=False, separators=(",", ":")),
                     })
                 continue
             reply = _text(response.get("reply")) if isinstance(response, Mapping) else None
             if reply:
-                return {
+                guard = self._reply_guard.validate(reply, context, trace)
+                if not guard.allowed:
+                    result = {
+                        "status": "AGENT_REPLY_UNAVAILABLE", "reason": guard.reason,
+                        "reply": "", "reply_guard": guard.to_dict(),
+                        "context": context.to_dict(), "tool_trace": trace, "actions": [], "agent_run_id": run_id,
+                    }
+                    self._finish_audit_run(run_id, result, context)
+                    return result
+                result = {
                     "status": "AGENT_REPLY_READY", "reply": reply,
-                    "context": context.to_dict(), "tool_trace": trace,
+                    "context": context.to_dict(), "tool_trace": trace, "agent_run_id": run_id,
                     "actions": [{
-                        "type": "send_message", "text": reply,
+                    "type": "send_message", "text": reply,
                         "source": "canonical_conversation_agent", "rule_governed": True,
+                        **({"agent_run_id": run_id} if run_id else {}),
                     }],
                 }
+                self._finish_audit_run(run_id, result, context)
+                return result
             break
-        return {
-            "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_response_missing",
-            "context": context.to_dict(), "tool_trace": trace, "actions": [],
+        result = {
+            "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_response_missing", "reply": "",
+            "context": context.to_dict(), "tool_trace": trace, "actions": [], "agent_run_id": run_id,
         }
+        self._finish_audit_run(run_id, result, context)
+        return result
+
+    def _start_audit_run(self, context: AgentContext, body: Mapping[str, Any]) -> str | None:
+        store = self._audit_store
+        create = getattr(store, "create_agent_run", None) if store is not None else None
+        if not callable(create):
+            return None
+        envelope = _mapping(body.get("envelope"))
+        event_id = _pick(envelope, "id", "eventId", "event_id")
+        try:
+            record = create(
+                tenant_id=context.tenant_id, shop_id=context.shop_id,
+                buyer_id=context.buyer_id, chat_id=context.chat_id,
+                event_id=event_id, status="running", context=context.to_dict(),
+            )
+            return _text(record.get("run_id")) if isinstance(record, Mapping) else None
+        except Exception:
+            return None
+
+    def _record_tool_audit(
+        self, run_id: str | None, name: str, call: Any, result: Mapping[str, Any],
+    ) -> None:
+        store = self._audit_store
+        append = getattr(store, "append_agent_tool_call", None) if store is not None else None
+        if not run_id or not callable(append):
+            return
+        arguments = call.get("arguments", {}) if isinstance(call, Mapping) else {}
+        if isinstance(call, Mapping) and isinstance(call.get("function"), Mapping):
+            arguments = call["function"].get("arguments", arguments)
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = {}
+        try:
+            append(
+                run_id, tool_name=name,
+                arguments=arguments if isinstance(arguments, Mapping) else {},
+                result=dict(result), status=("succeeded" if result.get("status") in {"success", "QUOTED", "QUOTE_UPDATED", "QUOTE_SELECTED"} else "failed"),
+                error_reason=_text(result.get("reason")),
+            )
+        except Exception:
+            return
+
+    def _finish_audit_run(
+        self, run_id: str | None, result: Mapping[str, Any], context: AgentContext,
+    ) -> None:
+        store = self._audit_store
+        update = getattr(store, "update_agent_run", None) if store is not None else None
+        if not run_id or not callable(update):
+            return
+        status = "ready" if result.get("status") == "AGENT_REPLY_READY" else "failed"
+        try:
+            update(
+                run_id, status=status,
+                reply_origin="canonical_conversation_agent" if status == "ready" else None,
+                context=context.to_dict(),
+                failure_reason=_text(result.get("reason")) if status != "ready" else None,
+            )
+        except Exception:
+            return
 
     async def _invoke_tool(self, call: Any, context: AgentContext) -> dict[str, Any]:
         name = _tool_name(call)
         arguments = call.get("arguments", {}) if isinstance(call, Mapping) else {}
+        if isinstance(call, Mapping) and isinstance(call.get("function"), Mapping):
+            arguments = call["function"].get("arguments", arguments)
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
@@ -278,10 +771,13 @@ class CanonicalConversationAgent:
         if self._tool_backend is not None:
             method = getattr(self._tool_backend, name, None)
             if callable(method):
-                value = method(dict(arguments), context.to_dict())
-                if hasattr(value, "__await__"):
-                    value = await value
-                return _tool_result(value)
+                try:
+                    value = method(dict(arguments), context.to_dict())
+                    if hasattr(value, "__await__"):
+                        value = await value
+                    return _tool_result(value)
+                except Exception:
+                    return {"status": "error", "reason": "tool_execution_failed"}
         view = context.to_dict()
         defaults = {
             "get_current_context": view,
@@ -350,6 +846,15 @@ def _tool_name(call: Any) -> str:
     return _text(function.get("name")) or ""
 
 
+def _tool_call_id(call: Any) -> str:
+    if not isinstance(call, Mapping):
+        return "tool-call"
+    value = call.get("id")
+    if not value and isinstance(call.get("function"), Mapping):
+        value = call["function"].get("id")
+    return _text(value) or "tool-call"
+
+
 def _tool_result(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -358,6 +863,22 @@ def _tool_result(value: Any) -> dict[str, Any]:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _context_identity(context: Mapping[str, Any]) -> dict[str, str]:
+    identity = _mapping(context.get("identity"))
+    return {
+        "tenant_id": _text(identity.get("tenant_id")),
+        "shop_id": _text(identity.get("shop_id")),
+        "buyer_id": _text(identity.get("buyer_id")),
+        "chat_id": _text(identity.get("chat_id")),
+        "purchase_context_id": _text(identity.get("purchase_context_id")),
+    }
+
+
+def _optional_text(value: Any) -> str | None:
+    text = _text(value)
+    return text or None
 
 
 def _mapping_or_none(value: Any) -> dict[str, Any] | None:
@@ -382,3 +903,30 @@ def _pick(item: Mapping[str, Any], *keys: str) -> str:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _is_price_key(name: str) -> bool:
+    return (
+        name.endswith("_fen") or name.endswith("fen")
+        or "price" in name or "amount" in name or "cost" in name
+    )
+
+
+def _amount_to_fen(value: Any, *, is_fen: bool) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if number < 0:
+        return None
+    return round(number if is_fen else number * 100)
+
+
+def _normalize_seat(value: Any) -> str:
+    text = _text(value)
+    if not text:
+        return ""
+    match = re.search(r"(\d+)\s*(?:排|行)\s*(\d+)\s*座", text)
+    return f"{match.group(1)}排{match.group(2)}座" if match else text

@@ -173,6 +173,44 @@ def test_canonical_reply_command_is_durable_and_deduplicated(tmp_path: Path) -> 
     assert second["commands"] == []
 
 
+def test_agent_run_is_linked_to_outbox_and_send_receipt(tmp_path: Path) -> None:
+    protector = PlainProtector()
+    outbox = RulesFirstStore(tmp_path / "rules.sqlite3", protector=protector)
+    states = SqliteTransactionStateStore(tmp_path / "rules.sqlite3", protector=protector)
+    runtime = RulesFirstRuntime(outbox, object(), RuleStateCoordinator(states), states)
+    run = outbox.create_agent_run(
+        tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+        event_id="canonical-event", context={"source": "test"},
+    )
+    result = {
+        "status": "AGENT_REPLY_READY", "current_runtime_reply": "已收到。",
+        "canonical_reply_kind": "canonical_conversation_agent", "agent_run_id": run["run_id"],
+    }
+    runtime.accept_canonical_result(event(), result)
+    command = outbox.claim_commands(limit=1)[0]
+    assert command["action"]["agent_run_id"] == run["run_id"]
+    recorded = outbox.record_command_result(
+        command["command_id"], command["lease_token"], {"status": "succeeded", "message_id": "sent-1"},
+    )
+    runtime._record_agent_delivery(command, {"status": "succeeded", "message_id": "sent-1"}, recorded)
+    persisted = outbox.get_agent_run(run["run_id"])
+    assert persisted["status"] == "sent"
+    assert persisted["command_id"] == command["command_id"]
+    assert persisted["sent_message_id"] == "sent-1"
+
+
+def test_unavailable_agent_result_cannot_enqueue_reply(tmp_path: Path) -> None:
+    protector = PlainProtector()
+    outbox = RulesFirstStore(tmp_path / "rules.sqlite3", protector=protector)
+    states = SqliteTransactionStateStore(tmp_path / "rules.sqlite3", protector=protector)
+    runtime = RulesFirstRuntime(outbox, object(), RuleStateCoordinator(states), states)
+    accepted = runtime.accept_agent_result(event(), {
+        "status": "AGENT_REPLY_UNAVAILABLE", "reply": "不应发送", "actions": [],
+    })
+    assert accepted["commands"] == []
+    assert outbox.claim_commands(limit=1) == []
+
+
 @pytest.mark.asyncio
 async def test_liangpiao_enrichment_uses_read_details_without_promoting_ids() -> None:
     transport = object.__new__(LiangpiaoV2Transport)

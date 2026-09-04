@@ -313,6 +313,45 @@ class RulesFirstStore:
                     detected_at TEXT NOT NULL,
                     PRIMARY KEY(image_sha256, detector_version)
                 );
+                -- Agent execution evidence belongs to this existing RulesFirst
+                -- database.  It is an audit projection, not a business
+                -- authority or a second conversation database.
+                CREATE TABLE IF NOT EXISTS agent_runs (
+                    run_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    shop_id TEXT NOT NULL,
+                    buyer_id TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    reply_origin TEXT,
+                    failure_reason TEXT,
+                    cancel_reason TEXT,
+                    context_protected TEXT,
+                    command_id TEXT,
+                    sent_message_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(tenant_id, event_id)
+                );
+                CREATE INDEX IF NOT EXISTS agent_runs_session_idx
+                    ON agent_runs(tenant_id, shop_id, buyer_id, chat_id, created_at);
+                CREATE INDEX IF NOT EXISTS agent_runs_command_idx
+                    ON agent_runs(command_id, sent_message_id);
+                CREATE TABLE IF NOT EXISTS agent_tool_calls (
+                    tool_call_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    arguments_protected TEXT,
+                    result_protected TEXT,
+                    status TEXT NOT NULL,
+                    error_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(run_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS agent_tool_calls_run_idx
+                    ON agent_tool_calls(run_id, sequence);
                 """
             )
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(transactions)")}
@@ -407,6 +446,249 @@ class RulesFirstStore:
         with self._connect() as connection:
             row = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
         return int(row[0] or 0)
+
+    def create_agent_run(
+        self, *, tenant_id: str, shop_id: str, buyer_id: str, chat_id: str,
+        event_id: str, status: str = "running", reply_origin: str | None = None,
+        context: Mapping[str, Any] | None = None, run_id: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Create (or return) one durable Canonical Agent execution record.
+
+        Runs are keyed by ``(tenant_id, event_id)`` so an event retry cannot
+        create a second execution record.  Context is protected with the same
+        ``SecretProtector`` used by inbox/outbox payloads; this table is only
+        an audit projection and never becomes a business-state authority.
+        """
+        identity = tuple(str(value or "").strip() for value in (
+            tenant_id, shop_id, buyer_id, chat_id, event_id,
+        ))
+        if any(not value for value in identity):
+            raise ValueError("agent_run_identity_invalid")
+        normalized_status = str(status or "").strip()
+        if not normalized_status or len(normalized_status) > 64:
+            raise ValueError("agent_run_status_invalid")
+        normalized_origin = _text(reply_origin)
+        if normalized_origin and len(normalized_origin) > 120:
+            raise ValueError("agent_run_reply_origin_invalid")
+        rid = str(run_id or "").strip()
+        if not rid:
+            rid = "agent-run-" + hashlib.sha256("\0".join(identity).encode()).hexdigest()[:40]
+        if len(rid) > 160:
+            raise ValueError("agent_run_id_invalid")
+        timestamp = _now(now).isoformat()
+        protected_context = self._protect(dict(context)) if context is not None else None
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO agent_runs(
+                    run_id,tenant_id,shop_id,buyer_id,chat_id,event_id,status,
+                    reply_origin,context_protected,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    rid, identity[0], identity[1], identity[2], identity[3], identity[4],
+                    normalized_status, normalized_origin, protected_context, timestamp, timestamp,
+                ),
+            )
+            row = connection.execute("SELECT * FROM agent_runs WHERE run_id=?", (rid,)).fetchone()
+            if row is None:
+                # A caller supplied a run id which collided with another
+                # event.  Return the event-keyed record rather than exposing a
+                # misleading second run.
+                row = connection.execute(
+                    "SELECT * FROM agent_runs WHERE tenant_id=? AND event_id=?",
+                    (identity[0], identity[4]),
+                ).fetchone()
+        if row is None:
+            raise RuntimeError("agent_run_not_persisted")
+        return self._agent_run_view(row)
+
+    def update_agent_run(
+        self, run_id: str, *, status: str | None = None,
+        reply_origin: str | None = None, context: Mapping[str, Any] | None = None,
+        failure_reason: str | None = None, cancel_reason: str | None = None,
+        command_id: str | None = None, sent_message_id: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Update lifecycle/evidence fields of an existing Agent run."""
+        normalized_id = str(run_id or "").strip()
+        if not normalized_id:
+            raise ValueError("agent_run_id_invalid")
+        updates: dict[str, Any] = {}
+        if status is not None:
+            normalized_status = str(status or "").strip()
+            if not normalized_status or len(normalized_status) > 64:
+                raise ValueError("agent_run_status_invalid")
+            updates["status"] = normalized_status
+        for field, value, limit in (
+            ("reply_origin", reply_origin, 120),
+            ("failure_reason", failure_reason, 240),
+            ("cancel_reason", cancel_reason, 240),
+            ("command_id", command_id, 200),
+            ("sent_message_id", sent_message_id, 240),
+        ):
+            if value is None:
+                continue
+            normalized = str(value).strip()
+            if len(normalized) > limit:
+                raise ValueError(f"agent_run_{field}_invalid")
+            updates[field] = normalized or None
+        if context is not None:
+            updates["context_protected"] = self._protect(dict(context))
+        if not updates:
+            existing = self.get_agent_run(normalized_id)
+            if existing is None:
+                raise KeyError("agent_run_missing")
+            return existing
+        updates["updated_at"] = _now(now).isoformat()
+        assignments = ",".join(f"{field}=?" for field in updates)
+        with self._connect() as connection:
+            connection.execute(
+                f"UPDATE agent_runs SET {assignments} WHERE run_id=?",
+                (*updates.values(), normalized_id),
+            )
+            row = connection.execute("SELECT * FROM agent_runs WHERE run_id=?", (normalized_id,)).fetchone()
+        if row is None:
+            raise KeyError("agent_run_missing")
+        return self._agent_run_view(row)
+
+    def record_agent_run_delivery(
+        self, run_id: str, *, command_id: str, sent_message_id: str,
+        status: str = "sent", now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Attach durable outbox/send identity to a run after platform send."""
+        if not str(command_id or "").strip() or not str(sent_message_id or "").strip():
+            raise ValueError("agent_delivery_identity_invalid")
+        return self.update_agent_run(
+            run_id, status=status, command_id=command_id,
+            sent_message_id=sent_message_id, now=now,
+        )
+
+    def append_agent_tool_call(
+        self, run_id: str, *, tool_name: str, arguments: Mapping[str, Any] | None = None,
+        result: Mapping[str, Any] | None = None, status: str = "succeeded",
+        error_reason: str | None = None, sequence: int | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Persist one high-level tool invocation and its deterministic result."""
+        normalized_run = str(run_id or "").strip()
+        normalized_tool = str(tool_name or "").strip()
+        normalized_status = str(status or "").strip()
+        if not normalized_run or not normalized_tool or len(normalized_tool) > 160:
+            raise ValueError("agent_tool_call_identity_invalid")
+        if not normalized_status or len(normalized_status) > 64:
+            raise ValueError("agent_tool_call_status_invalid")
+        if sequence is not None and (isinstance(sequence, bool) or int(sequence) < 0):
+            raise ValueError("agent_tool_call_sequence_invalid")
+        normalized_error = _text(error_reason)
+        if normalized_error and len(normalized_error) > 240:
+            normalized_error = normalized_error[:240]
+        timestamp = _now(now).isoformat()
+        with self._connect() as connection:
+            run = connection.execute("SELECT run_id FROM agent_runs WHERE run_id=?", (normalized_run,)).fetchone()
+            if run is None:
+                raise KeyError("agent_run_missing")
+            if sequence is None:
+                row = connection.execute(
+                    "SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence FROM agent_tool_calls WHERE run_id=?",
+                    (normalized_run,),
+                ).fetchone()
+                sequence_value = int(row["next_sequence"])
+            else:
+                sequence_value = int(sequence)
+            connection.execute(
+                """INSERT OR IGNORE INTO agent_tool_calls(
+                    run_id,sequence,tool_name,arguments_protected,result_protected,
+                    status,error_reason,created_at
+                ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    normalized_run, sequence_value, normalized_tool,
+                    self._protect(dict(arguments)) if arguments is not None else None,
+                    self._protect(dict(result)) if result is not None else None,
+                    normalized_status, normalized_error, timestamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM agent_tool_calls WHERE run_id=? AND sequence=?",
+                (normalized_run, sequence_value),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("agent_tool_call_not_persisted")
+        return self._agent_tool_call_view(row)
+
+    def get_agent_run(self, run_id: str) -> dict[str, Any] | None:
+        normalized_id = str(run_id or "").strip()
+        if not normalized_id:
+            return None
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM agent_runs WHERE run_id=?", (normalized_id,)).fetchone()
+            if row is None:
+                return None
+            calls = connection.execute(
+                "SELECT * FROM agent_tool_calls WHERE run_id=? ORDER BY sequence,tool_call_id",
+                (normalized_id,),
+            ).fetchall()
+        view = self._agent_run_view(row)
+        view["tool_calls"] = [self._agent_tool_call_view(item) for item in calls]
+        view["tool_trace"] = view["tool_calls"]
+        return view
+
+    def get_agent_run_for_event(self, tenant_id: str, event_id: str) -> dict[str, Any] | None:
+        tenant = str(tenant_id or "").strip()
+        event = str(event_id or "").strip()
+        if not tenant or not event:
+            return None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT run_id FROM agent_runs WHERE tenant_id=? AND event_id=?",
+                (tenant, event),
+            ).fetchone()
+        return self.get_agent_run(str(row["run_id"])) if row else None
+
+    def list_agent_runs(
+        self, tenant_id: str, *, shop_id: str | None = None, buyer_id: str | None = None,
+        chat_id: str | None = None, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        tenant = str(tenant_id or "").strip()
+        if not tenant:
+            return []
+        filters = ["tenant_id=?"]
+        params: list[Any] = [tenant]
+        for field, value in (("shop_id", shop_id), ("buyer_id", buyer_id), ("chat_id", chat_id)):
+            normalized = _text(value)
+            if normalized:
+                filters.append(f"{field}=?")
+                params.append(normalized)
+        params.append(max(1, min(int(limit), 500)))
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM agent_runs WHERE {' AND '.join(filters)} ORDER BY created_at DESC, run_id DESC LIMIT ?",
+                tuple(params),
+            ).fetchall()
+        return [self.get_agent_run(str(row["run_id"])) for row in rows]
+
+    def _agent_run_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        return {
+            "run_id": str(row["run_id"]), "tenant_id": str(row["tenant_id"]),
+            "shop_id": str(row["shop_id"]), "buyer_id": str(row["buyer_id"]),
+            "chat_id": str(row["chat_id"]), "event_id": str(row["event_id"]),
+            "status": str(row["status"]), "reply_origin": row.get("reply_origin"),
+            "failure_reason": row.get("failure_reason"), "cancel_reason": row.get("cancel_reason"),
+            "context": self._unprotect(row.get("context_protected")),
+            "command_id": row.get("command_id"), "sent_message_id": row.get("sent_message_id"),
+            "created_at": str(row["created_at"]), "updated_at": str(row["updated_at"]),
+        }
+
+    def _agent_tool_call_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        return {
+            "tool_call_id": int(row["tool_call_id"]), "run_id": str(row["run_id"]),
+            "sequence": int(row["sequence"]), "tool_name": str(row["tool_name"]),
+            "arguments": self._unprotect(row.get("arguments_protected")),
+            "result": self._unprotect(row.get("result_protected")),
+            "status": str(row["status"]), "error_reason": row.get("error_reason"),
+            "created_at": str(row["created_at"]),
+        }
 
     def get_manual_mark_result(
         self, image_sha256: str, *, detector_version: str | None = None,
@@ -1182,6 +1464,10 @@ class RulesFirstStore:
     def _command_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
         row = dict(row)
         payload = self._unprotect(row.get("payload_protected"))
+        result = self._unprotect(row.get("result_protected"))
+        if not isinstance(result, Mapping):
+            result = None
+        sent_message_id = _pick(result or {}, "message_id", "messageId", "sent_message_id", "sentMessageId")
         return {
             "command_id": str(row["command_id"]), "tenant_id": str(row["tenant_id"]),
             "event_id": str(row["event_id"]), "command_type": str(row["command_type"]),
@@ -1190,6 +1476,8 @@ class RulesFirstStore:
             "lease_until": row.get("lease_until"), "next_attempt_at": row.get("next_attempt_at"),
             "reconciliation_only": bool(row.get("reconciliation_only")),
             "action": payload["action"], "context": payload["context"],
+            "result": dict(result) if result is not None else None,
+            "sent_message_id": sent_message_id or None,
         }
 
     def record_command_result(

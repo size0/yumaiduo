@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 from time import monotonic, perf_counter
 from collections.abc import Mapping
-from typing import Annotated, Callable, Protocol
+from typing import Any, Annotated, Callable, Protocol
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -19,6 +19,7 @@ from .chat_service import CustomerServiceChatService
 from .canonical_buyer_reply import CanonicalBuyerReplyRenderer
 from .canonical_conversation_agent import (
     AgentContextBuilder,
+    CanonicalAgentToolBackend,
     CanonicalConversationAgent,
     OpenAICompatibleAgentModel,
 )
@@ -299,6 +300,7 @@ def create_app(
     wplus_mark_detector: object | None = None,
     payment_validation_service: AuthoritativePaymentValidationService | None = None,
     canonical_conversation_agent: CanonicalConversationAgent | None = None,
+    canonical_agent_tool_backend: Any | None = None,
 ) -> FastAPI:
     settings_path = Path(os.getenv("WANDA_VISION_SETTINGS_PATH", "data/vision-settings.json"))
     pricing_path = Path(os.getenv("WANDA_PRICING_RULES_PATH", "data/pricing-rules.json"))
@@ -513,6 +515,11 @@ def create_app(
             model=runtime_settings.chat_model,
             timeout_seconds=runtime_settings.request_timeout_seconds,
         )
+        configured_tool_backend = canonical_agent_tool_backend or CanonicalAgentToolBackend(
+            quote_runtime=configured_canonical_quote_runtime,
+            quote_store=persistent_quote_records,
+            transaction_store=persistent_transaction_states,
+        )
         configured_conversation_agent = CanonicalConversationAgent(
             AgentContextBuilder(
                 quote_store=persistent_quote_records,
@@ -520,6 +527,8 @@ def create_app(
                 recognition_store=recognition_context,
             ),
             configured_agent_model,
+            tool_backend=configured_tool_backend,
+            audit_store=persistent_rules_store,
         )
     limiter = rate_limiter or FixedWindowRateLimiter(
         limit=int(os.getenv("RECOGNITION_RATE_LIMIT_PER_MINUTE", "20")),
@@ -904,6 +913,25 @@ def create_app(
             return False
         return persistent_shop_automation.is_canonical_quote_enabled(tenant_id, shop_id)
 
+    def canonical_buyer_message_event(body: Mapping[str, object]) -> bool:
+        """Only buyer-originated IM events may enter the conversation agent.
+
+        The plugin also forwards seller/operator events.  If direction is
+        present, require an explicit buyer-like value; self-marked messages
+        are always terminal to prevent an agent echo loop.  Legacy payloads
+        without direction remain accepted for backward-compatible canary
+        fixtures.
+        """
+        envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
+        payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
+        if payload.get("agent_generated") is True:
+            return False
+        values = [payload.get(key) for key in ("direction", "sender", "senderType", "fromRole", "role")]
+        values = [str(value).strip().lower() for value in values if value not in (None, "")]
+        if not values:
+            return True
+        return all(value in {"inbound", "buyer", "peer", "user", "receive", "received"} for value in values)
+
     @app.post("/api/wanda-ai-v2/plugin/events/process", status_code=202)
     async def plugin_process_event(
         body: dict[str, object],
@@ -914,15 +942,18 @@ def create_app(
         envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
         image_urls = payload.get("imageUrls", payload.get("image_urls"))
+        buyer_message_event = canonical_buyer_message_event(body)
         canonical_image_event = (
             envelope.get("event") == "im.message.received"
             and isinstance(image_urls, list) and bool(image_urls)
+            and buyer_message_event
         )
         canonical_text_event = (
             envelope.get("event") == "im.message.received"
             and not canonical_image_event
             and configured_conversation_agent is not None
             and canonical_conversation_agent_enabled
+            and buyer_message_event
             and canonical_conversation_scope(body)
             and canonical_shop_canary_enabled(body)
         )
