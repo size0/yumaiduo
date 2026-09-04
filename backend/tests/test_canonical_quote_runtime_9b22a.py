@@ -11,6 +11,7 @@ from app.quote_record_store import QuoteRecordStore
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.canonical_buyer_reply import CanonicalBuyerReplyRenderer
 from app.quote_v2.service import (
     CanonicalQuoteRequest, CanonicalQuoteRuntime, ManualQuoteInput, QuoteV2Service,
 )
@@ -110,11 +111,15 @@ class Detector:
         return self.value
 
 
-def recognition(*, selected_seats=None, has_manual_mark=None):
+def recognition(*, selected_seats=None, has_manual_mark=None, price_mismatch=False):
     return RecognitionResult(
         city_text="广州", cinema_text="广州测试万达", movie="测试电影",
         show_date="2026-09-05", start_time="13:35", hall="IMAX厅",
         selected_seats=selected_seats or [], has_manual_mark=has_manual_mark,
+        price_mismatch=price_mismatch,
+        seat_matched=True if selected_seats else None,
+        seat_confirm_required=price_mismatch,
+        seat_confirm_reasons=["PRICE_MISMATCH"] if price_mismatch else [],
     )
 
 
@@ -128,6 +133,7 @@ def runtime(tmp_path: Path, *, seats=None, cost=None, pricing=None, detector=Non
         pricing_rules_provider=PricingRulesSnapshot(enabled=False, rule_version="r1"),
         quote_service=QuoteV2Service(store, ttl_seconds=1800),
         liangpiao_facts_adapter=None, manual_mark_detector=detector,
+        reply_renderer=CanonicalBuyerReplyRenderer(),
     )
 
 
@@ -136,6 +142,18 @@ IDENTITY = {
     "buyer_id": "buyer-1", "chat_id": "chat-1", "purchase_context_id": "purchase-1",
     "message_id": "message-1",
 }
+
+
+@pytest.mark.asyncio
+async def test_price_mismatch_fails_closed_before_wanda_facts_or_quote_persistence(tmp_path: Path):
+    result = await runtime(tmp_path).quote_recognition(
+        recognition(selected_seats=["8排9座"], price_mismatch=True), identity=IDENTITY,
+    )
+    assert result["status"] == "RECOGNITION_QUALITY_UNAVAILABLE"
+    assert result["reason"] == "PRICE_MISMATCH"
+    assert result["quote"] is None
+    assert result["canonical_reply_kind"] == "RECOGNITION_CONFIRMATION_REQUIRED"
+    assert "对不上" in result["current_runtime_reply"]
 
 
 @pytest.mark.asyncio

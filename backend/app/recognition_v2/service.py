@@ -85,6 +85,7 @@ def _normalize(
         if seat_name is not None
     ]
     show_date, start_time = _split_showtime(_text(raw_results.get("showtime")))
+    quality = _quality_facts(provider_data.get("finalResults"))
     return RecognitionResult(
         provider_recognize_id=_text(provider_data.get("recognizeId")),
         platform_text=_text(raw_results.get("platform")),
@@ -101,9 +102,49 @@ def _normalize(
         has_selected_seats=has_selected_seats,
         image_total_price_fen=_price_fen(raw_results),
         confidence=_confidence(raw_results.get("confidence")),
+        seat_matched=quality["seat_matched"],
+        price_mismatch=quality["price_mismatch"],
+        seat_confirm_required=quality["seat_confirm_required"],
+        seat_confirm_reasons=quality["seat_confirm_reasons"],
+        seat_set_verified=quality["seat_set_verified"],
         has_manual_mark=has_manual_mark,
         raw_provider_result=dict(raw_provider_result),
     )
+
+
+def _quality_facts(value: Any) -> dict[str, Any]:
+    """Normalize provider recognition quality without promoting provider IDs.
+
+    ``has_selected_seats`` above is intentionally independent: a non-empty
+    seat list means the image contained seat labels, while ``seat_set_verified``
+    requires the provider's complete/exact confirmation and no confirmation
+    blocker.  Neither fact says anything about current Wanda availability.
+    """
+    final = value if isinstance(value, Mapping) else {}
+    reasons_raw = final.get("seatConfirmReasons")
+    reasons = [
+        str(item).strip().upper()
+        for item in reasons_raw
+        if str(item).strip()
+    ] if isinstance(reasons_raw, list) else []
+    price_mismatch = _optional_bool(final.get("priceMismatch")) is True
+    price_mismatch = price_mismatch or "PRICE_MISMATCH" in reasons
+    seat_matched = _optional_bool(final.get("seatMatched"))
+    seat_confirm_required = _bool(final.get("seatConfirmRequired"), default=False)
+    match_level = _text(final.get("matchLevel"))
+    return {
+        "seat_matched": seat_matched,
+        "price_mismatch": price_mismatch,
+        "seat_confirm_required": seat_confirm_required,
+        "seat_confirm_reasons": reasons,
+        "seat_set_verified": (
+            seat_matched is True
+            and match_level is not None
+            and match_level.upper() == "EXACT"
+            and not price_mismatch
+            and not seat_confirm_required
+        ),
+    }
 
 
 def _text(value: Any) -> str | None:
@@ -111,7 +152,7 @@ def _text(value: Any) -> str | None:
     return text or None
 
 
-def _bool(value: Any, *, default: bool) -> bool:
+def _optional_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     normalized = str(value or "").strip().lower()
@@ -119,7 +160,12 @@ def _bool(value: Any, *, default: bool) -> bool:
         return True
     if normalized in {"false", "0", "no"}:
         return False
-    return default
+    return None
+
+
+def _bool(value: Any, *, default: bool) -> bool:
+    parsed = _optional_bool(value)
+    return parsed if parsed is not None else default
 
 
 def _split_showtime(value: str | None) -> tuple[str | None, str | None]:

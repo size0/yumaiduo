@@ -674,6 +674,22 @@ class CanonicalQuoteRuntime:
         ticket_count: int | None = None, ticket_mode: str = "STANDARD",
         area_quote_strategy: str | None = None,
     ) -> dict[str, Any]:
+        # Recognition quality is a gate before cinema/show/seat/pricing facts.
+        # A screenshot total is never used to fill missing seats or authorize
+        # a transaction-ready quote.
+        quality_reasons = list(getattr(recognition, "seat_confirm_reasons", []) or [])
+        if getattr(recognition, "price_mismatch", False) or "PRICE_MISMATCH" in quality_reasons:
+            result = {
+                "status": "RECOGNITION_QUALITY_UNAVAILABLE",
+                "reason": "PRICE_MISMATCH",
+                "recognition_quality_status": "PRICE_MISMATCH",
+                "quote": None,
+                "route": "RECOGNITION_QUALITY",
+                "recognition": recognition.model_dump(
+                    mode="json", exclude={"raw_provider_result"},
+                ) if hasattr(recognition, "model_dump") else None,
+            }
+            return self._render_buyer_reply(result, recognition=recognition)
         route = await self._route.resolve(recognition)
         if route.route == "UNRESOLVED":
             result = {"status": "ROUTE_UNRESOLVED", "reason": route.resolution_reason}
@@ -703,9 +719,16 @@ class CanonicalQuoteRuntime:
         if self._reply_renderer is None:
             return result
         rendered = self._reply_renderer.render(result)
+        replies = rendered.get("messages")
+        normalized_replies = [
+            {"kind": str(item["kind"]), "text": str(item["text"])}
+            for item in replies
+            if isinstance(item, Mapping) and item.get("kind") and item.get("text")
+        ] if isinstance(replies, list) else []
         return {
             **result,
             "current_runtime_reply": rendered["text"],
+            "current_runtime_replies": normalized_replies,
             "canonical_reply_kind": rendered["kind"],
         }
 

@@ -373,7 +373,7 @@ def create_app(
     )
     canonical_detector = getattr(configured_canonical_quote_runtime, "_manual_mark_detector", None)
     configured_wplus_mark_detector = wplus_mark_detector or canonical_detector or ManualMarkDetector(
-        settings=Settings.from_env(),
+        settings=Settings.from_env(), result_store=persistent_rules_store,
     )
     configured_wplus_mark_service = wplus_fulfillment_mark_service or WplusFulfillmentMarkService(
         persistent_transaction_states, quote_store=persistent_quote_records,
@@ -420,7 +420,9 @@ def create_app(
             canonical_recognition = RecognitionV2Service(
                 canonical_transport, enrichment_service=canonical_transport,
             )
-            canonical_manual_mark_detector = ManualMarkDetector(settings=canonical_settings)
+            canonical_manual_mark_detector = ManualMarkDetector(
+                settings=canonical_settings, result_store=persistent_rules_store,
+            )
             configured_canonical_quote_runtime = CanonicalQuoteRuntime(
                 recognition_service=canonical_recognition,
                 cinema_route_service=CinemaRouteV2Service(

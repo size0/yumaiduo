@@ -1,0 +1,41 @@
+{
+  "fixture_version": "agent-acceptance-v1",
+  "purpose": "脱敏验证 Canonical 图片事实与 Legacy 文字上下文未连接；不实现 Agent 或关键词规则。",
+  "identity": {
+    "tenant_id": "fixture-tenant",
+    "shop_id": "fixture-shop",
+    "buyer_id": "fixture-buyer",
+    "chat_id": "fixture-chat"
+  },
+  "messages": [
+    {
+      "message_id": "fixture-image-1",
+      "direction": "inbound",
+      "kind": "image",
+      "flow": "canonical",
+      "canonical_result": {
+        "status": "SEAT_FACTS_UNAVAILABLE",
+        "reason": "TARGET_SEAT_NOT_AVAILABLE",
+        "quote_created": false
+      }
+    },
+    {
+      "message_id": "fixture-text-1",
+      "direction": "inbound",
+      "kind": "text",
+      "text": "还可以买吗",
+      "flow": "legacy",
+      "legacy_context": {
+        "canonical_facts_consumed": false,
+        "structured_quote_consumed": false,
+        "fallback_reason": "text_runtime_has_no_canonical_context_adapter"
+      }
+    }
+  ],
+  "expected": {
+    "canonical_image_legacy_text": true,
+    "context_gap_is_reported": true,
+    "agent_implementation_present": false,
+    "keyword_rule_present": false
+  }
+}

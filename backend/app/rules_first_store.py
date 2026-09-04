@@ -15,7 +15,7 @@ from .settings_store import SecretProtector, default_secret_protector
 
 _RECONCILIATION_DELAYS_SECONDS = (5, 30, 120)
 _FINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 def backup_sqlite_database(path: Path, backup_path: Path | None = None) -> Path:
@@ -304,6 +304,15 @@ class RulesFirstStore:
                 );
                 CREATE INDEX IF NOT EXISTS wanda_show_index_cache_lookup_idx
                     ON wanda_show_index_cache(city_id, show_date, movie_key, expires_at);
+                -- Manual-mark evidence belongs to this existing RulesFirst
+                -- store; it is not a second recognition or conversation DB.
+                CREATE TABLE IF NOT EXISTS manual_mark_results (
+                    image_sha256 TEXT NOT NULL,
+                    detector_version TEXT NOT NULL,
+                    manual_mark_result INTEGER NOT NULL CHECK(manual_mark_result IN (0, 1)),
+                    detected_at TEXT NOT NULL,
+                    PRIMARY KEY(image_sha256, detector_version)
+                );
                 """
             )
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(transactions)")}
@@ -374,6 +383,11 @@ class RulesFirstStore:
                             "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
                             (2, _now().isoformat()),
                         )
+                    if 3 not in versions:
+                        connection.execute(
+                            "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+                            (3, _now().isoformat()),
+                        )
                     if _SCHEMA_VERSION not in versions:
                         connection.execute(
                             "INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)",
@@ -393,6 +407,66 @@ class RulesFirstStore:
         with self._connect() as connection:
             row = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
         return int(row[0] or 0)
+
+    def get_manual_mark_result(
+        self, image_sha256: str, *, detector_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Read a determinate manual-mark result from the shared RulesFirst DB."""
+        image_hash = str(image_sha256 or "").strip().lower()
+        if not image_hash:
+            return None
+        with self._connect() as connection:
+            if detector_version:
+                row = connection.execute(
+                    """SELECT image_sha256, detector_version, manual_mark_result, detected_at
+                       FROM manual_mark_results
+                       WHERE image_sha256=? AND detector_version=?""",
+                    (image_hash, str(detector_version).strip()),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """SELECT image_sha256, detector_version, manual_mark_result, detected_at
+                       FROM manual_mark_results WHERE image_sha256=?
+                       ORDER BY detected_at DESC LIMIT 1""",
+                    (image_hash,),
+                ).fetchone()
+        if row is None:
+            return None
+        return {
+            "image_sha256": str(row["image_sha256"]),
+            "detector_version": str(row["detector_version"]),
+            "manual_mark_result": bool(row["manual_mark_result"]),
+            "detected_at": str(row["detected_at"]),
+        }
+
+    def save_manual_mark_result(
+        self, image_sha256: str, manual_mark_result: bool, *,
+        detector_version: str, detected_at: str | datetime | None = None,
+    ) -> dict[str, Any]:
+        """Insert one determinate result without allowing later overwrites.
+
+        ``None`` is deliberately not accepted here: an indeterminate provider
+        response must never erase or replace a cached true/false decision.
+        """
+        image_hash = str(image_sha256 or "").strip().lower()
+        version = str(detector_version or "").strip()
+        if len(image_hash) != 64 or not version or not isinstance(manual_mark_result, bool):
+            raise ValueError("manual_mark_result_invalid")
+        timestamp = (
+            detected_at.isoformat() if isinstance(detected_at, datetime)
+            else str(detected_at or _now().isoformat())
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO manual_mark_results(
+                    image_sha256, detector_version, manual_mark_result, detected_at
+                ) VALUES(?,?,?,?)""",
+                (image_hash, version, int(manual_mark_result), timestamp),
+            )
+        result = self.get_manual_mark_result(image_hash, detector_version=version)
+        if result is None:
+            raise RuntimeError("manual_mark_result_not_persisted")
+        return result
 
     def _protect(self, value: object) -> str:
         raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -929,7 +1003,8 @@ class RulesFirstStore:
         state_revision: int, result: Mapping[str, Any] | None = None,
         now: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        current = _now(now).isoformat()
+        current_time = _now(now)
+        current = current_time.isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             event = connection.execute("SELECT * FROM event_inbox WHERE inbox_id=?", (inbox_id,)).fetchone()
@@ -956,6 +1031,7 @@ class RulesFirstStore:
                     "action": dict(action),
                     "context": self._unprotect(event["payload_protected"]),
                 }
+                command_time = (current_time + timedelta(microseconds=len(created))).isoformat()
                 connection.execute(
                     """INSERT OR IGNORE INTO command_outbox(
                         command_id,tenant_id,event_id,inbox_id,command_type,dedupe_key,state_revision,
@@ -963,7 +1039,7 @@ class RulesFirstStore:
                     ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (
                         command_id, event["tenant_id"], event["event_id"], inbox_id, action_type,
-                        dedupe_key, state_revision, self._protect(payload), current, current,
+                        dedupe_key, state_revision, self._protect(payload), command_time, command_time,
                     ),
                 )
                 row = connection.execute("SELECT * FROM command_outbox WHERE command_id=?", (command_id,)).fetchone()
@@ -981,7 +1057,7 @@ class RulesFirstStore:
         self, *, tenant_id: str, event_id: str, commands: Sequence[Mapping[str, Any]],
         state_revision: int, now: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        timestamp = _now(now).isoformat()
+        current_time = _now(now)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             event = connection.execute(
@@ -998,6 +1074,7 @@ class RulesFirstStore:
                     f"{tenant_id}\0{action_type}\0{dedupe_key}".encode()
                 ).hexdigest()[:40]
                 payload = {"action": dict(action), "context": self._unprotect(event["payload_protected"])}
+                command_time = (current_time + timedelta(microseconds=len(created))).isoformat()
                 connection.execute(
                     """INSERT OR IGNORE INTO command_outbox(
                         command_id,tenant_id,event_id,inbox_id,command_type,dedupe_key,state_revision,
@@ -1005,7 +1082,7 @@ class RulesFirstStore:
                     ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (
                         command_id, tenant_id, event_id, event["inbox_id"], action_type, dedupe_key,
-                        state_revision, self._protect(payload), timestamp, timestamp,
+                        state_revision, self._protect(payload), command_time, command_time,
                     ),
                 )
                 row = connection.execute("SELECT * FROM command_outbox WHERE command_id=?", (command_id,)).fetchone()

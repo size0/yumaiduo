@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -41,6 +42,27 @@ def event(event_id: str = "event-1", remote_id: str = "message-1") -> dict[str, 
 
 def store(tmp_path: Path) -> RulesFirstStore:
     return RulesFirstStore(tmp_path / "rules-first.sqlite3", protector=PlainProtector())
+
+
+def test_manual_mark_results_are_determinate_and_owned_by_rules_first_store(tmp_path: Path) -> None:
+    runtime = store(tmp_path)
+    image_hash = hashlib.sha256(b"same-image").hexdigest()
+
+    saved = runtime.save_manual_mark_result(
+        image_hash, False, detector_version="manual-mark-v1",
+        detected_at="2026-09-04T12:00:00+00:00",
+    )
+    attempted_overwrite = runtime.save_manual_mark_result(
+        image_hash, True, detector_version="manual-mark-v1",
+        detected_at="2026-09-04T12:01:00+00:00",
+    )
+
+    assert saved["manual_mark_result"] is False
+    assert attempted_overwrite["manual_mark_result"] is False
+    assert runtime.get_manual_mark_result(
+        image_hash, detector_version="manual-mark-v1",
+    ) == saved
+    assert runtime.schema_version() == 4
 
 
 def test_event_inbox_uses_wal_and_deduplicates_event_and_platform_message(tmp_path: Path) -> None:

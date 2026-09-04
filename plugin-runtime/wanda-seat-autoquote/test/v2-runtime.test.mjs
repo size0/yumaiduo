@@ -300,6 +300,104 @@ test('rules-first runtime persists events then claims and reports durable comman
   assert.equal(calls.reported[0].result.message_id, 'sent-command-1');
 });
 
+async function runCanonicalWplusReplyTest({ externalBetweenMessages = false } = {}) {
+  const dataDir = await mkdtemp(join(tmpdir(), 'wanda-canonical-wplus-reply-'));
+  const source = envelope(`canonical-wplus-${externalBetweenMessages ? 'external' : 'self'}`);
+  const sent = [];
+  const reports = [];
+  const history = [];
+  let offered = 0;
+  let eventAccepted = false;
+  let processCalls = 0;
+  let listCalls = 0;
+  const client = {
+    shops: { list: async () => [] },
+    orders: { get: async () => providerOrder() },
+    im: {
+      listMessages: async () => {
+        listCalls += 1;
+        return { items: structuredClone(history) };
+      },
+      getSessionByOrder: async () => ({ accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1' }),
+      sendMessage: async ({ text }) => {
+        const messageId = `canonical-sent-${sent.length + 1}`;
+        sent.push(text);
+        history.push({ messageId, direction: 'seller', messageType: '1', content: { text } });
+        if (externalBetweenMessages && sent.length === 1) {
+          history.push({
+            messageId: 'external-operator-message', direction: 'seller', messageType: '1',
+            content: { text: '人工客服介入' }, agent_generated: false,
+          });
+        }
+        return { messageId };
+      },
+    },
+  };
+  const replies = [
+    { kind: 'purchase_summary', text: '影院\n《电影》\n9月5日19:55这场' },
+    { kind: 'price', text: 'W+ 49.9一张，需要几张呀' },
+  ];
+  const runtime = createRulesFirstRuntime({
+    config: {
+      dataDir, encryptionKey: Buffer.alloc(32, 7), maxConcurrentRuns: 1,
+      externalWritesEnabled: true, messageSendEnabled: true,
+      xianyuRepriceEnabled: false, liangpiaoOrderCreateEnabled: false,
+      wandaProviderWritesEnabled: false, refundEnabled: false, shipEnabled: false,
+    },
+    platform: { createClient: () => client },
+    backend: {
+      syncShops: async () => {},
+      processEvent: async () => {
+        processCalls += 1;
+        eventAccepted = true;
+        return { accepted: true, event_id: source.id, duplicate: false };
+      },
+      claimCommands: async () => {
+        if (!eventAccepted || offered >= replies.length) return { commands: [] };
+        const index = offered;
+        offered += 1;
+        return { commands: [{
+          command_id: `canonical-command-${index + 1}`, lease_token: `canonical-lease-${index + 1}`,
+          tenant_id: source.tenantId, event_id: source.id,
+          action: {
+            id: `${source.id}:canonical-reply:${index === 0 ? 'summary' : 'price'}`,
+            type: 'send_message', text: replies[index].text, rule_governed: true,
+            source: 'canonical_quote_runtime', canonical_reply_kind: `QUOTE_PREVIEW_WPLUS:${replies[index].kind}`,
+          },
+          context: {
+            envelope: source,
+            session: { accountUnb: 'shop-1', chatId: 'chat-1', peerUnb: 'buyer-1' },
+            order: null, recent_messages: [],
+          },
+        }] };
+      },
+      reportCommand: async (value) => { reports.push(value); return { ok: true }; },
+    },
+    logger: silent,
+  });
+  await runtime.start();
+  await runtime.enqueue(source);
+  await waitFor(() => reports.length === 2);
+  await runtime.stop();
+  return { sent, reports, listCalls, processCalls };
+}
+
+test('canonical W+ preview sends summary before price and self summary does not block price', async () => {
+  const result = await runCanonicalWplusReplyTest();
+  assert.deepEqual(result.sent, ['影院\n《电影》\n9月5日19:55这场', 'W+ 49.9一张，需要几张呀']);
+  assert.deepEqual(result.reports.map((item) => item.result.status), ['succeeded', 'succeeded']);
+  assert.ok(result.listCalls >= 4, 'each message must execute final IM history preflight');
+  assert.equal(result.processCalls, 1, 'command failure or success must not rerun recognition');
+});
+
+test('canonical W+ price message is blocked when an external operator replies between messages', async () => {
+  const result = await runCanonicalWplusReplyTest({ externalBetweenMessages: true });
+  assert.deepEqual(result.sent, ['影院\n《电影》\n9月5日19:55这场']);
+  assert.equal(result.reports[0].result.status, 'succeeded');
+  assert.equal(result.reports[1].result.status, 'skipped');
+  assert.equal(result.reports[1].result.reason, 'human_message_arrived_before_send');
+});
+
 test('durable verified price confirmation uses backend result binding and custom text', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'wanda-rules-price-confirmation-'));
   const source = priceEnvelope('verified-confirmation-event');

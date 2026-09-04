@@ -62,7 +62,7 @@ def test_canonical_renderer_uses_buyer_safe_wanda_exact_quote() -> None:
     assert result["text"] == "牡丹江万达《坠落2》9月5日19:55这场，8排8座，39.1/张，共39.1，直接拍就行哈"
 
 
-def test_canonical_renderer_uses_buyer_safe_wplus_preview() -> None:
+def test_canonical_renderer_uses_two_buyer_safe_wplus_preview_messages() -> None:
     result = CanonicalBuyerReplyRenderer().render({
         "status": "QUOTED", "quote": {
             "provider_route": "WANDA_SELF", "request_type": "WPLUS_AREA",
@@ -71,7 +71,21 @@ def test_canonical_renderer_uses_buyer_safe_wplus_preview() -> None:
             "unit_sell_price_fen": 3730,
         },
     })
-    assert result["text"] == "牡丹江万达《坠落2》9月5日19:55这场，W+ 37.3/张，需要几张呀"
+    assert result["messages"] == [
+        {"kind": "purchase_summary", "text": "牡丹江万达\n《坠落2》\n9月5日19:55这场"},
+        {"kind": "price", "text": "W+ 37.3一张，需要几张呀"},
+    ]
+
+
+def test_canonical_renderer_formats_integer_wplus_preview_without_trailing_zero() -> None:
+    result = CanonicalBuyerReplyRenderer().render({
+        "status": "QUOTED", "quote": {
+            "provider_route": "WANDA_SELF", "request_type": "WPLUS_AREA",
+            "cinema": "影院", "movie": "电影", "quote_date": "2026-09-05",
+            "showtime_start": "19:55", "unit_sell_price_fen": 5000,
+        },
+    })
+    assert result["messages"][1]["text"] == "W+ 50一张，需要几张呀"
 
 
 def test_canonical_renderer_includes_wplus_purchase_summary_when_ready() -> None:
@@ -112,6 +126,33 @@ def test_canonical_renderer_does_not_use_fulfillment_mark_template_for_unknown_m
     })
     assert result["kind"] == "MANUAL_MARK_UNKNOWN"
     assert result["text"] != "辛苦标记一下位置截图发我哈"
+
+
+def test_canonical_wplus_preview_creates_ordered_durable_commands_once(tmp_path: Path) -> None:
+    protector = PlainProtector()
+    outbox = RulesFirstStore(tmp_path / "rules.sqlite3", protector=protector)
+    states = SqliteTransactionStateStore(tmp_path / "rules.sqlite3", protector=protector)
+    runtime = RulesFirstRuntime(outbox, object(), RuleStateCoordinator(states), states)
+    result = {
+        "status": "QUOTED", "route": "WANDA_SELF",
+        "current_runtime_replies": [
+            {"kind": "purchase_summary", "text": "影院\n《电影》\n9月5日19:55这场"},
+            {"kind": "price", "text": "W+ 49.9一张，需要几张呀"},
+        ],
+        "canonical_reply_kind": "QUOTE_PREVIEW_WPLUS",
+    }
+    first = runtime.accept_canonical_result(event(), result)
+    claimed = outbox.claim_commands(limit=2)
+    second = runtime.accept_canonical_result(event(), result)
+    assert [item["action"]["canonical_reply_sequence"] for item in claimed] == [1, 2]
+    assert [item["action"]["canonical_reply_kind"] for item in first["commands"]] == [
+        "QUOTE_PREVIEW_WPLUS:purchase_summary", "QUOTE_PREVIEW_WPLUS:price",
+    ]
+    assert [item["action"]["dedupe_key"] for item in first["commands"]] == [
+        "canonical-reply:canonical-event:summary", "canonical-reply:canonical-event:price",
+    ]
+    assert second["duplicate"] is True
+    assert second["commands"] == []
 
 
 def test_canonical_reply_command_is_durable_and_deduplicated(tmp_path: Path) -> None:

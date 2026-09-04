@@ -79,8 +79,28 @@ class RulesFirstRuntime:
         if claimed is None:
             return {**accepted, "canonical_result_pending": True, "commands": []}
         rendered_text = str(result.get("current_runtime_reply") or "").strip()
+        rendered_replies = result.get("current_runtime_replies")
         actions: list[dict[str, object]] = []
-        if rendered_text:
+        if isinstance(rendered_replies, list) and rendered_replies:
+            for index, item in enumerate(rendered_replies, start=1):
+                if not isinstance(item, Mapping):
+                    continue
+                text = str(item.get("text") or "").strip()
+                kind = str(item.get("kind") or "").strip()
+                if not text or not kind:
+                    continue
+                suffix = "summary" if kind == "purchase_summary" else "price" if kind == "price" else str(index)
+                actions.append({
+                    "id": f"{event_id}:canonical-reply:{suffix}",
+                    "type": "send_message",
+                    "text": text,
+                    "rule_governed": True,
+                    "source": "canonical_quote_runtime",
+                    "canonical_reply_kind": f"{result.get('canonical_reply_kind') or ''}:{kind}",
+                    "canonical_reply_sequence": index,
+                    "dedupe_key": f"canonical-reply:{event_id}:{suffix}",
+                })
+        elif rendered_text:
             actions.append({
                 "id": f"{event_id}:canonical-reply",
                 "type": "send_message",
@@ -113,6 +133,7 @@ class RulesFirstRuntime:
             return {
                 **accepted, "canonical_result": reduced,
                 "current_runtime_reply": rendered_text,
+                "current_runtime_replies": rendered_replies if isinstance(rendered_replies, list) else [],
                 "commands": commands,
             }
         except Exception as error:

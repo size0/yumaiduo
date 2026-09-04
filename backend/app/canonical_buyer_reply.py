@@ -31,6 +31,17 @@ def _purchase_summary(quote: Mapping[str, Any]) -> str | None:
     return f"{cinema}《{movie}》{show_date}{start_time}这场"
 
 
+def _purchase_summary_message(quote: Mapping[str, Any]) -> str | None:
+    summary = _purchase_summary(quote)
+    if summary is None:
+        return None
+    cinema = _text(quote.get("cinema") or quote.get("cinema_name"))
+    movie = _text(quote.get("movie") or quote.get("movie_name"))
+    show_date = _date_label(quote.get("quote_date") or quote.get("show_date"))
+    start_time = _text(quote.get("showtime_start") or quote.get("start_time"))
+    return f"{cinema}\n《{movie}》\n{show_date}{start_time}这场"
+
+
 def _seat_labels(quote: Mapping[str, Any]) -> list[str]:
     items = quote.get("seat_quotes")
     if not isinstance(items, list):
@@ -64,7 +75,7 @@ class CanonicalBuyerReplyRenderer:
         result: Mapping[str, Any],
         *,
         transaction_state: object | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         quote = result.get("quote") if isinstance(result.get("quote"), Mapping) else None
         status = _text(result.get("status"))
         reason = _text(result.get("reason"))
@@ -83,11 +94,20 @@ class CanonicalBuyerReplyRenderer:
                         "text": f"{prefix}W+ {unit}/张，共{count}张{total}，直接拍就行哈",
                     }
                 if unit:
-                    prefix = f"{summary}，" if summary else ""
-                    return {
-                        "kind": "QUOTE_PREVIEW_WPLUS",
-                        "text": f"{prefix}W+ {unit}/张，需要几张呀",
-                    }
+                    summary_message = _purchase_summary_message(quote)
+                    if summary_message is not None:
+                        price_message = f"W+ {unit}一张，需要几张呀"
+                        return {
+                            "kind": "QUOTE_PREVIEW_WPLUS",
+                            # ``text`` remains the first message for old
+                            # synchronous callers; durable callers use the
+                            # explicit ordered ``messages`` list below.
+                            "text": summary_message,
+                            "messages": [
+                                {"kind": "purchase_summary", "text": summary_message},
+                                {"kind": "price", "text": price_message},
+                            ],
+                        }
             elif request_type == "EXACT_SEATS":
                 labels = _seat_labels(quote)
                 unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
@@ -104,6 +124,11 @@ class CanonicalBuyerReplyRenderer:
                     "text": "这场需要先选好座位，把选座截图发我就可以哈",
                 }
         # These are deterministic business categories, not inferred intent.
+        if status == "RECOGNITION_QUALITY_UNAVAILABLE" and "PRICE_MISMATCH" in reason:
+            return {
+                "kind": "RECOGNITION_CONFIRMATION_REQUIRED",
+                "text": "图里的座位和价格信息对不上，我先不乱报价哈。请确认后重新发当前选座图。",
+            }
         if status == "ROUTE_UNRESOLVED" and "CITY_REQUIRED" in reason:
             return {
                 "kind": "UNRESOLVED_REQUIRED_FIELD",

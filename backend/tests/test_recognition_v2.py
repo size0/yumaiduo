@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from app.errors import ProviderError
 from app.recognition_v2.liangpiao import LiangpiaoV2Transport
 from app.recognition_v2.manual_mark import ManualMarkDetector
 from app.recognition_v2.service import RecognitionV2Service, _normalize
+from app.rules_first_store import RulesFirstStore
 
 
 def _provider_payload(
@@ -106,6 +108,37 @@ async def test_success_uses_raw_results_and_keeps_final_ids_raw_only() -> None:
     assert requests[0].headers["idempotency-key"] == "idem-v2"
 
 
+def test_provider_recognition_quality_is_normalized_and_seat_verification_is_separate() -> None:
+    payload = _provider_payload()
+    payload["data"]["finalResults"] = {
+        "matchLevel": "EXACT",
+        "seatMatched": True,
+        "priceMismatch": True,
+        "seatConfirmRequired": True,
+        "seatConfirmReasons": ["PRICE_MISMATCH"],
+    }
+    result = _normalize(payload["data"], raw_provider_result=payload, has_manual_mark=None)
+
+    assert result.has_selected_seats is True
+    assert result.seat_matched is True
+    assert result.price_mismatch is True
+    assert result.seat_confirm_required is True
+    assert result.seat_confirm_reasons == ["PRICE_MISMATCH"]
+    assert result.seat_set_verified is False
+
+
+def test_provider_exact_quality_does_not_mean_realtime_availability() -> None:
+    payload = _provider_payload()
+    payload["data"]["finalResults"] = {
+        "matchLevel": "EXACT", "seatMatched": True,
+        "seatConfirmRequired": False, "seatConfirmReasons": [],
+    }
+    result = _normalize(payload["data"], raw_provider_result=payload, has_manual_mark=None)
+    assert result.has_selected_seats is True
+    assert result.seat_set_verified is True
+    assert not hasattr(result, "seat_available")
+
+
 @pytest.mark.asyncio
 async def test_nonempty_seat_is_selected_even_when_provider_flag_is_false() -> None:
     service, client = _service(
@@ -179,6 +212,47 @@ async def test_optional_raw_fields_are_normalized_without_final_override() -> No
     assert result.movie == "奥德赛"
     assert result.show_date == "2026-09-03"
     assert result.start_time == "22:00"
+
+
+@pytest.mark.asyncio
+async def test_manual_mark_result_is_reused_and_null_never_overwrites(tmp_path) -> None:
+    answers = iter([False, None])
+    calls = 0
+
+    def detector(_: str) -> bool | None:
+        nonlocal calls
+        calls += 1
+        return next(answers)
+
+    result_store = RulesFirstStore(tmp_path / "rules.sqlite3")
+    detector_service = ManualMarkDetector(
+        detector=detector, result_store=result_store,
+        image_hash_provider=lambda _: b"same-image",
+    )
+    assert await detector_service.detect("https://img.example/same.webp") is False
+    # The second provider answer is null but is not consulted because the
+    # determinate result for the same image is durable.
+    assert await detector_service.detect("https://img.example/same.webp") is False
+    assert calls == 1
+    cached = result_store.get_manual_mark_result(
+        hashlib.sha256(b"same-image").hexdigest(), detector_version="manual-mark-v1",
+    )
+    assert cached is not None and cached["manual_mark_result"] is False
+
+
+@pytest.mark.asyncio
+async def test_null_manual_mark_does_not_persist_and_later_boolean_can_resolve(tmp_path) -> None:
+    answers = iter([None, True])
+    result_store = RulesFirstStore(tmp_path / "rules.sqlite3")
+    detector_service = ManualMarkDetector(
+        detector=lambda _: next(answers), result_store=result_store,
+        image_hash_provider=lambda _: b"eventually-known",
+    )
+    assert await detector_service.detect("https://img.example/eventual.webp") is None
+    assert await detector_service.detect("https://img.example/eventual.webp") is True
+    assert result_store.get_manual_mark_result(
+        hashlib.sha256(b"eventually-known").hexdigest(), detector_version="manual-mark-v1",
+    )["manual_mark_result"] is True
 
 
 @pytest.mark.asyncio
