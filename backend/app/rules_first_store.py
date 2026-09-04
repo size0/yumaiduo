@@ -83,6 +83,71 @@ class RulesFirstStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    def _prepare_agent_tool_calls_migration(
+        self, connection: sqlite3.Connection,
+    ) -> list[dict[str, Any]]:
+        """Preserve the earlier audit projection before creating the current shape.
+
+        Some canary worktrees already contain an ``agent_tool_calls`` table from
+        an earlier audit schema.  SQLite's ``CREATE TABLE IF NOT EXISTS`` does
+        not evolve that table, and the current projection intentionally uses a
+        different protected-column contract.  Keep the old rows in this same
+        RulesFirst database and migrate rows that can be linked to an existing
+        agent run after the new table is created.
+        """
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(agent_tool_calls)")
+        }
+        if not columns or "run_id" in columns:
+            return []
+        rows = [
+            dict(row) for row in connection.execute(
+                """SELECT audit_id, call_id, tenant_id, shop_id, buyer_id, chat_id,
+                          event_id, tool_name, round_index, status,
+                          payload_protected, created_at
+                   FROM agent_tool_calls
+                   ORDER BY event_id, round_index, audit_id"""
+            )
+        ]
+        legacy_name = "agent_tool_calls_legacy_v1"
+        existing = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (legacy_name,)
+        ).fetchone()
+        if existing:
+            legacy_name = "agent_tool_calls_legacy_v1_previous"
+        connection.execute(f"ALTER TABLE agent_tool_calls RENAME TO {legacy_name}")
+        return rows
+
+    def _migrate_legacy_agent_tool_calls(
+        self, connection: sqlite3.Connection, rows: list[dict[str, Any]],
+    ) -> None:
+        """Copy compatible legacy audit rows into the current protected schema."""
+        if not rows:
+            return
+        next_sequence: dict[str, int] = {}
+        for row in rows:
+            run = connection.execute(
+                "SELECT run_id FROM agent_runs WHERE tenant_id=? AND event_id=?",
+                (row.get("tenant_id"), row.get("event_id")),
+            ).fetchone()
+            if run is None:
+                continue
+            run_id = str(run["run_id"])
+            sequence = next_sequence.get(run_id, 0)
+            next_sequence[run_id] = sequence + 1
+            connection.execute(
+                """INSERT OR IGNORE INTO agent_tool_calls(
+                    run_id, sequence, tool_name, arguments_protected,
+                    result_protected, status, error_reason, created_at
+                ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    run_id, sequence, str(row.get("tool_name") or "legacy_tool"),
+                    row.get("payload_protected"), None,
+                    str(row.get("status") or "unknown"), None,
+                    str(row.get("created_at") or _now().isoformat()),
+                ),
+            )
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path, timeout=10, isolation_level=None)
         connection.row_factory = sqlite3.Row
@@ -113,6 +178,7 @@ class RulesFirstStore:
         with self._connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
+            legacy_agent_tool_calls = self._prepare_agent_tool_calls_migration(connection)
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -354,6 +420,7 @@ class RulesFirstStore:
                     ON agent_tool_calls(run_id, sequence);
                 """
             )
+            self._migrate_legacy_agent_tool_calls(connection, legacy_agent_tool_calls)
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(transactions)")}
             for name, declaration in (
                 ("is_active", "INTEGER NOT NULL DEFAULT 1"),

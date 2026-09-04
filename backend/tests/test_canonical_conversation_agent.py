@@ -271,6 +271,67 @@ async def test_human_manual_context_is_visible_without_overriding_manual_quote()
 
 
 @pytest.mark.asyncio
+async def test_two_image_context_supports_ambiguous_left_seat_clarification():
+    payload = body(text="左边那两个呢", context={"id": "two-images", "status": "collecting"})
+    payload["recent_messages"].extend([
+        {"direction": "inbound", "messageType": 2, "content": "[image]", "messageId": "img-2"},
+        {"direction": "inbound", "messageType": 1, "content": "刚才那张图", "messageId": "hint-2"},
+    ])
+    model = FakeModel([{"reply": "你说的是刚才图里左边那两个位置吗？"}])
+    result = await CanonicalConversationAgent(AgentContextBuilder(), model).process(payload)
+    assert result["status"] == "AGENT_REPLY_READY"
+    assert {item["message_id"] for item in result["context"]["fishmore_im_history"]} >= {"img-1", "img-2", "hint-2"}
+    assert "影院" not in result["reply"]
+
+
+@pytest.mark.asyncio
+async def test_expired_historical_purchase_context_requires_new_confirmation():
+    payload = body(text="还是昨天那个", context={
+        "id": "expired-context", "status": "expired", "quote_state": "EXPIRED",
+    })
+    payload["expired_facts"] = [{"quote_state": "EXPIRED", "quote_date": "2026-09-03"}]
+    model = FakeModel([{"reply": "昨天的场次已经过期了，需要重新确认日期和场次。"}])
+    result = await CanonicalConversationAgent(AgentContextBuilder(), model).process(payload)
+    assert result["status"] == "AGENT_REPLY_READY"
+    assert result["context"]["expired_facts"][0]["quote_state"] == "EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_later_showtime_question_uses_show_options_tool():
+    class ShowOptionsBackend:
+        async def get_show_options(self, arguments, context):
+            return {"status": "success", "options": [{"showtime_start": "21:30", "hall": "4号厅"}]}
+
+    model = FakeModel([
+        {"tool_calls": [{"name": "get_show_options", "arguments": {}}]},
+        {"reply": "同一影院还有21:30的场次。"},
+    ])
+    result = await CanonicalConversationAgent(
+        AgentContextBuilder(), model, tool_backend=ShowOptionsBackend(),
+    ).process(body(text="晚一点呢", context={"id": "late-show", "status": "collecting"}))
+    assert result["status"] == "AGENT_REPLY_READY"
+    assert result["tool_trace"][0]["tool"] == "get_show_options"
+
+
+@pytest.mark.asyncio
+async def test_history_read_failure_stops_agent_before_model_call():
+    class MustNotRunModel:
+        calls = 0
+
+        async def complete(self, messages, tools):
+            self.calls += 1
+            raise AssertionError("model must not run without authoritative history")
+
+    model = MustNotRunModel()
+    payload = body()
+    payload["authoritative_history_available"] = False
+    result = await CanonicalConversationAgent(AgentContextBuilder(), model).process(payload)
+    assert result["status"] == "AGENT_REPLY_UNAVAILABLE"
+    assert result["reason"] == "conversation_snapshot_unavailable"
+    assert model.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_agent_does_not_treat_tool_or_model_output_as_authority():
     model = FakeModel([{"reply": "系统显示这两个座位都可售，价格是99元。"}])
     agent = CanonicalConversationAgent(AgentContextBuilder(), model)
