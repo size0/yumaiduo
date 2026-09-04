@@ -88,6 +88,36 @@ def test_liangpiao_order_list_and_detail_are_tenant_scoped_and_read_only(tmp_pat
     assert client.get("/api/plugin/liangpiao-orders/provider-1", headers={"x-wanda-tenant-id": "tenant-2"}).status_code == 404
 
 
+def test_agent_audit_projection_is_tenant_scoped_and_read_only(tmp_path: Path) -> None:
+    store = RulesFirstStore(tmp_path / "rules.sqlite3", protector=PlainProtector())
+    store.create_agent_run(
+        tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+        event_id="event-1", status="running",
+        context={
+            "fishmore_history_available": True,
+            "recent_canonical_recognition": {"movie": "测试电影", "match_level": "EXACT"},
+            "current_quote": {"total_quote_cents": 8800, "quote_scope": "PREVIEW"},
+            "transaction_state": {"flow_state": "MANUAL_HOLD", "revision": 3},
+            "human_manual_context": [{"reason": "PROBE_REQUIRED"}],
+        },
+    )
+    run = store.get_agent_run_for_event("tenant-1", "event-1")
+    assert run is not None
+    store.update_agent_run(run["run_id"], status="failed", failure_reason="agent_model_failed")
+    store.append_agent_tool_call(
+        run["run_id"], tool_name="get_quote", result={"status": "success"},
+        status="succeeded", sequence=0,
+    )
+    client = TestClient(create_app(service=StubRecognitionService(), rules_first_store=store))
+    response = client.get("/api/rules-first/agent-runs?limit=20", headers={"x-wanda-tenant-id": "tenant-1"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runs"][0]["event_id"] == "event-1"
+    assert payload["runs"][0]["failure"]["reason"] == "agent_model_failed"
+    assert payload["runs"][0]["tool_calls"][0]["tool_name"] == "get_quote"
+    assert client.get("/api/rules-first/agent-runs", headers={"x-wanda-tenant-id": "tenant-2"}).json() == {"runs": []}
+
+
 def test_health_does_not_expose_secrets() -> None:
     client = TestClient(create_app(service=StubRecognitionService()))
     response = client.get("/health")

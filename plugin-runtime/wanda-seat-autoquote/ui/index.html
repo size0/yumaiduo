@@ -22,6 +22,8 @@
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="conversation"><span class="site-nav-icon" aria-hidden="true">忆</span><span>会话策略</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="model"><span class="site-nav-icon" aria-hidden="true">✦</span><span>模型接口</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="knowledge"><span class="site-nav-icon" aria-hidden="true">▤</span><span>知识库</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="agent-audit"><span class="site-nav-icon" aria-hidden="true">审</span><span>Agent审计</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="manual-tasks"><span class="site-nav-icon" aria-hidden="true">人</span><span>人工任务</span></button>
   </nav>
   <div class="site-brand"><span class="site-brand-dot"></span><div><strong>Wanda AI</strong><small>本地运营管理台</small></div></div>
 </header>
@@ -71,6 +73,22 @@
       <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshDiagnostics" type="button">刷新</button><button class="diagnostics-button" id="clearDiagnostics" type="button">清空</button></div>
     </div>
     <div class="diagnostics-entries" id="diagnosticsEntries"><div class="diagnostic-empty">发送图片后，这里会格式化显示模型响应、万达官方场次/座位响应和校验详情。</div></div>
+  </section>
+  <section class="diagnostics-panel workspace-page" id="agentAuditPanel" data-workspace-page="agent-audit" aria-label="Canonical Agent审计" hidden>
+    <div class="diagnostics-head">
+      <div class="diagnostics-title"><strong>Canonical Agent 与 RulesFirst 审计</strong><span>只读展示当前租户的 Agent 运行、上下文摘要、工具调用、回复与发送门禁结果；不展示密钥或原始受保护载荷。</span></div>
+      <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshAgentAudit" type="button">刷新</button></div>
+    </div>
+    <div class="audit-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="agentAuditSearch" type="search" autocomplete="off" placeholder="搜索买家、聊天ID、事件ID、工具或失败原因"></label><span>页面不会自动刷新</span></div>
+    <div class="diagnostics-entries" id="agentAuditEntries"><div class="diagnostic-empty">暂无 Canonical Agent 运行记录。</div></div>
+  </section>
+  <section class="diagnostics-panel workspace-page" id="manualTasksPanel" data-workspace-page="manual-tasks" aria-label="人工任务" hidden>
+    <div class="diagnostics-head">
+      <div class="diagnostics-title"><strong>人工处理任务</strong><span>展示当前 RulesFirst 真实人工任务。领取和完成只调用受控任务接口，不会自动改订单、出票、退款或发送消息。</span></div>
+      <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshManualTasks" type="button">刷新</button></div>
+    </div>
+    <div class="audit-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="manualTaskSearch" type="search" autocomplete="off" placeholder="搜索买家、聊天ID、任务编号、状态或原因"></label><span>页面不会自动刷新</span></div>
+    <div class="diagnostics-entries" id="manualTaskEntries"><div class="diagnostic-empty">暂无人工任务。</div></div>
   </section>
 </div>
 <div class="settings-backdrop" id="settingsBackdrop"></div>

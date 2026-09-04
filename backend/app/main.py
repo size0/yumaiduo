@@ -731,6 +731,77 @@ def create_app(
             raise HTTPException(status_code=401, detail="panel_tenant_required")
         return tenant_id
 
+    def safe_agent_audit_view(run: Mapping[str, Any]) -> dict[str, Any]:
+        """Expose a redacted, read-only projection of one Canonical Agent run."""
+        context = run.get("context") if isinstance(run.get("context"), Mapping) else {}
+        identity = context.get("identity") if isinstance(context.get("identity"), Mapping) else {}
+        recognition = context.get("recent_canonical_recognition") if isinstance(context.get("recent_canonical_recognition"), Mapping) else {}
+        purchase = context.get("current_purchase_context") if isinstance(context.get("current_purchase_context"), Mapping) else {}
+        quote = context.get("current_quote") if isinstance(context.get("current_quote"), Mapping) else {}
+        transaction = context.get("transaction_state") if isinstance(context.get("transaction_state"), Mapping) else {}
+        messages = context.get("buyer_raw_messages") if isinstance(context.get("buyer_raw_messages"), list) else []
+        history = context.get("fishmore_im_history") if isinstance(context.get("fishmore_im_history"), list) else []
+        message_time = next(
+            (str(item.get(key)) for item in messages if isinstance(item, Mapping)
+             for key in ("timestamp", "sent_at", "sentAt", "created_at", "createdAt")
+             if item.get(key)),
+            None,
+        )
+        safe_fact_keys = (
+            "city", "city_name", "movie", "movie_name", "cinema", "cinema_name", "date", "date_text",
+            "showtime_start", "showtime_end", "hall", "hall_name", "seat_display", "seat_zone_type",
+            "match_level", "recognition_status", "selected_count", "ticket_count", "flow_state", "revision",
+        )
+        def facts(source: Mapping[str, Any]) -> dict[str, Any]:
+            return {key: source[key] for key in safe_fact_keys if key in source and source[key] not in (None, "", [])}
+        tool_calls = run.get("tool_calls") if isinstance(run.get("tool_calls"), list) else []
+        safe_tools = []
+        for call in tool_calls:
+            if not isinstance(call, Mapping):
+                continue
+            result = call.get("result") if isinstance(call.get("result"), Mapping) else {}
+            safe_tools.append({
+                "tool_call_id": call.get("tool_call_id"), "sequence": call.get("sequence"),
+                "tool_name": call.get("tool_name"), "status": call.get("status"),
+                "error_reason": call.get("error_reason"), "created_at": call.get("created_at"),
+                "result_status": result.get("status"), "result_reason": result.get("reason"),
+            })
+        failure_reason = run.get("failure_reason")
+        return {
+            "run_id": run.get("run_id"), "tenant_id": run.get("tenant_id"),
+            "shop_id": run.get("shop_id") or identity.get("shop_id"),
+            "buyer_id": run.get("buyer_id") or identity.get("buyer_id"),
+            "chat_id": run.get("chat_id") or identity.get("chat_id"),
+            "event_id": run.get("event_id"), "message_time": message_time or run.get("created_at"),
+            "created_at": run.get("created_at"), "updated_at": run.get("updated_at"),
+            "flow": "CANONICAL_CONVERSATION_AGENT",
+            "status": run.get("status"), "reply_origin": run.get("reply_origin"),
+            "agent_model": {"provider": "OpenAI-compatible", "model_source": "current_chat_settings"},
+            "context": {
+                "im_history": {"available": bool(context.get("fishmore_history_available", False)), "message_count": len(history)},
+                "recognition": facts(recognition), "purchase_context": facts(purchase), "quote": facts(quote),
+                "transaction_state": facts(transaction),
+                "human_manual_context": [
+                    {key: item.get(key) for key in ("reason", "status", "task_id") if item.get(key) not in (None, "")}
+                    for item in (context.get("human_manual_context") or []) if isinstance(item, Mapping)
+                ],
+                "same_type_reference": facts(context.get("same_type_reference_quote") if isinstance(context.get("same_type_reference_quote"), Mapping) else {}),
+            },
+            "tool_calls": safe_tools,
+            "reply": {"status": "ready" if run.get("reply_origin") else "unavailable", "origin": run.get("reply_origin")},
+            "command": {"status": "sent" if run.get("sent_message_id") else "created" if run.get("command_id") else "not_created", "command_id": run.get("command_id"), "sent_message_id": run.get("sent_message_id")},
+            "failure": {"stage": "agent_model" if failure_reason == "agent_model_failed" else "agent" if failure_reason else None, "reason": failure_reason},
+        }
+
+    @app.get("/api/rules-first/agent-runs")
+    async def list_rules_agent_runs(
+        limit: int = Query(default=100, ge=1, le=200),
+        x_wanda_tenant_id: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        tenant_id = require_panel_tenant(x_wanda_tenant_id)
+        runs = persistent_rules_store.list_agent_runs(tenant_id, limit=limit)
+        return {"runs": [safe_agent_audit_view(run) for run in runs if isinstance(run, Mapping)]}
+
     @app.post("/api/settings/reply-keyword-images")
     async def upload_reply_keyword_image(
         image: UploadFile = File(...),

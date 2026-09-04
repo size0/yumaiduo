@@ -275,3 +275,40 @@ body { height:auto; padding-bottom:0; }
 #settingsDrawer,
 #diagnosticsPanel { margin-bottom:0; }
 .plugin-status-bar { position:fixed; bottom:0; }
+
+/* Canonical Canary shell: restore the 2.7.6 internal rail without touching the host platform navigation. */
+@media (min-width:901px) {
+  body { padding-left:208px; }
+  .site-navigation { position:fixed; z-index:40; top:0; right:auto; bottom:0; left:0; inset:0 auto 0 0; width:208px; height:100vh; min-height:0; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:0; margin:0; padding:24px 16px; overflow-y:auto; overflow-x:hidden; border-width:0 1px 0 0; border-radius:0; box-shadow:4px 0 18px rgba(26,56,90,.06); }
+  .site-brand { order:-1; width:100%; justify-content:flex-start; margin:0 0 18px; padding:12px 12px 24px; border-bottom:1px solid var(--border); }
+  .site-brand strong { color:var(--text-main); font-size:13px; }
+  .site-brand small { color:var(--text-muted); font-size:10px; }
+  .site-nav-list { width:100%; min-width:0; flex-direction:column; align-items:stretch; gap:4px; overflow:visible; }
+  .site-nav-button { width:100%; min-width:0; height:43px; justify-content:flex-start; padding:0 12px; border-radius:var(--radius-md); font-size:13px; }
+  .site-nav-button.active::after { top:8px; right:auto; bottom:8px; left:0; width:3px; height:auto; border-radius:0 3px 3px 0; }
+  .plugin-page-header { width:calc(100% - 48px); max-width:1200px; margin:24px auto 0; }
+  .page { width:calc(100% - 48px); max-width:1200px; padding-top:20px; }
+  .settings-drawer { width:calc(100% - 48px); max-width:1200px; margin:20px auto 24px; }
+}
+
+@media (max-width:900px) {
+  body { padding-left:0; }
+  .site-navigation { position:sticky; top:8px; }
+}
+
+/* Read-only audit projections share the 2.7.6 diagnostic visual language. */
+.audit-toolbar { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 15px; border-bottom:1px solid #d9e2ec; color:var(--text-muted); font-size:10px; background:var(--surface-soft); }
+.audit-search { width:min(560px,100%); height:36px; display:flex; align-items:center; gap:8px; padding:0 11px; border:1px solid var(--border); border-radius:9px; color:var(--text-muted); background:var(--surface); }
+.audit-search input { width:100%; border:0; outline:0; color:var(--text-main); background:transparent; }
+.audit-search input::placeholder { color:#a0adbc; }
+.audit-section-title { margin:16px 0 9px; color:var(--text-main); font-size:12px; }
+.audit-section-title:first-child { margin-top:0; }
+.audit-facts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 12px; padding:12px 16px 16px; border-top:1px solid var(--border); background:var(--surface); }
+.audit-facts .record-fact span { color:var(--text-muted); }.audit-facts .record-fact b { color:var(--text-secondary); }
+.audit-context { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:12px 16px 16px; border-top:1px solid var(--border); background:var(--surface-soft); }
+.audit-context-card { min-width:0; padding:10px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); }
+.audit-context-card strong { display:block; color:var(--text-secondary); font-size:11px; }.audit-context-card small { display:block; margin-top:5px; color:var(--text-muted); font-size:10px; line-height:1.55; overflow-wrap:anywhere; }
+.manual-task-actions { display:flex; justify-content:flex-end; gap:8px; padding:0 16px 16px; }
+@media (max-width:760px) {
+  .audit-toolbar { align-items:stretch; flex-direction:column; }.audit-facts,.audit-context { grid-template-columns:1fr 1fr; }
+}

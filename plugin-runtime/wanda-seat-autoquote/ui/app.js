@@ -193,6 +193,41 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   }
   async function clearDiagnostics() { await v4Fetch('/api/diagnostics/recent',{method:'DELETE'}); await refreshDiagnostics(); }
 
+  let loadedAgentRuns=[];let loadedManualTasks=[];
+  const auditStatusLabel=value=>({running:'运行中',ready:'已生成回复',reply_ready:'已生成回复',failed:'失败',pending:'待处理',claimed:'处理中',completed:'已完成'}[String(value||'')]||String(value||'未知状态'));
+  const auditReasonLabel=value=>({
+    agent_model_failed:'agent_model_failed',agent_response_missing:'agent_response_missing',conversation_snapshot_unavailable:'会话历史不可用',
+    external_write_fuse_open:'系统写入保护已开启',fulfillment_required:'等待人工出票或发货',multiple_pending_orders:'发现多个待处理订单',
+    order_unverified:'订单归属尚未核验',send_message_failed:'消息发送失败',paid_amount_unverified:'付款金额尚未核验',
+    paid_amount_mismatch:'付款金额与报价不一致',order_already_paid:'订单已付款，禁止自动改价',platform_price_change_rejected:'平台拒绝自动改价',
+    MANUAL_HOLD:'MANUAL_HOLD',WAITING_WPLUS_MARK:'WAITING_WPLUS_MARK',READY_FOR_MANUAL_TICKETING:'READY_FOR_MANUAL_TICKETING',
+    MANUAL_QUOTE:'MANUAL_QUOTE',REFUND_REQUIRED:'REFUND_REQUIRED',REFUND_PENDING:'REFUND_PENDING',PROBE_REQUIRED:'PROBE_REQUIRED',
+  }[String(value||'')]||String(value||'未分类'));
+  function auditValue(value){if(value===null||value===undefined||value==='')return'暂无';if(Array.isArray(value))return value.length?value.map(auditValue).join('、'):'暂无';if(typeof value==='object')return Object.entries(value).map(([key,item])=>`${key}: ${auditValue(item)}`).join(' · ')||'暂无';return String(value);}
+  function auditMatches(record,query){if(!query)return true;return[record.buyer_id,record.chat_id,record.event_id,record.shop_id,record.status,record.failure?.reason,...(record.tool_calls||[]).flatMap(call=>[call.tool_name,call.status,call.error_reason])].some(value=>String(value||'').toLowerCase().includes(query));}
+  function appendAuditContext(parent,label,value){const card=element('div','audit-context-card');card.append(element('strong','',label),element('small','',auditValue(value)));parent.append(card);}
+  function renderAgentAudit(runs=loadedAgentRuns){
+    const root=$('agentAuditEntries');root.replaceChildren();const query=String($('agentAuditSearch')?.value||'').trim().toLowerCase();const visible=runs.filter(run=>auditMatches(run,query));
+    if(!visible.length){root.append(element('div','diagnostic-empty',query?'没有找到匹配的 Agent 运行。':'暂无 Canonical Agent 运行记录。'));return;}
+    visible.forEach(run=>{
+      const detail=element('details','diagnostic-entry');const summary=element('summary');
+      summary.append(element('span',`diagnostic-event${run.failure?.reason?' diagnostic-error':''}`,run.failure?.reason||auditStatusLabel(run.status)));
+      summary.append(element('span','diagnostic-meta',[run.flow,run.buyer_id,run.chat_id,run.message_time].filter(Boolean).join(' · ')));detail.append(summary);
+      const facts=element('div','audit-facts');
+      [['买家',run.buyer_id],['店铺',run.shop_id],['聊天ID',run.chat_id],['事件ID',run.event_id],['消息时间',run.message_time],['流程',run.flow||'CANONICAL_CONVERSATION_AGENT'],['运行状态',auditStatusLabel(run.status)],['Agent模型',`${run.agent_model?.provider||'OpenAI-compatible'} · ${run.agent_model?.model||$('currentModel')?.textContent||'当前配置'}`]].forEach(([label,value])=>facts.append(recordFact(label,value)));
+      detail.append(facts);
+      const context=element('div','audit-context');appendAuditContext(context,'IM history',run.context?.im_history);appendAuditContext(context,'Recognition',run.context?.recognition);appendAuditContext(context,'Purchase Context',run.context?.purchase_context);appendAuditContext(context,'Quote / Same-Type Reference',{quote:run.context?.quote,same_type_reference:run.context?.same_type_reference});appendAuditContext(context,'Transaction State',run.context?.transaction_state);appendAuditContext(context,'Human / Manual Context',run.context?.human_manual_context);detail.append(context);
+      const tools=run.tool_calls||[];const toolTitle=element('h4','audit-section-title',`Tool calls（${tools.length}）`);detail.append(toolTitle);
+      if(!tools.length)detail.append(element('div','diagnostic-empty','暂无工具调用记录。'));else{const toolFacts=element('div','audit-facts');tools.forEach(call=>toolFacts.append(recordFact(`第${Number(call.sequence??0)+1}轮 · ${call.tool_name||'未知工具'}`,`${auditStatusLabel(call.status)}${call.error_reason?` · ${auditReasonLabel(call.error_reason)}`:''}${call.result_status?` · result ${call.result_status}`:''}`)));detail.append(toolFacts);}
+      const resultFacts=element('div','audit-facts');resultFacts.append(recordFact('Reply',`${run.reply?.status||'unavailable'}${run.reply?.origin?` · ${run.reply.origin}`:''}`),recordFact('Command',run.command?.status||'not_created'),recordFact('Command ID',run.command?.command_id),recordFact('Sent message ID',run.command?.sent_message_id),recordFact('Failure stage',run.failure?.stage),recordFact('Failure reason',run.failure?.reason?auditReasonLabel(run.failure.reason):'无'));detail.append(resultFacts);root.append(detail);
+    });
+  }
+  async function loadAgentAudit(){const root=$('agentAuditEntries');root.replaceChildren(element('div','diagnostic-empty','正在读取 Canonical Agent 审计…'));try{const response=await v4Fetch('/api/rules-first/agent-runs?limit=200');const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取 Agent 审计失败');loadedAgentRuns=Array.isArray(data.runs)?data.runs:[];renderAgentAudit();}catch(error){root.replaceChildren(element('div','diagnostic-empty',error.message));}}
+  async function claimManualTask(task,button){const operator=window.prompt('请输入操作人标识（仅用于领取租约）','plugin-ui');if(!operator?.trim())return;button.disabled=true;try{const response=await v4Fetch(`/api/rules-first/manual-tasks/${encodeURIComponent(task.task_id)}/claim`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expected_revision:task.transaction_revision,operator_id:operator.trim()})});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'领取任务失败');await loadManualTasks();}catch(error){button.textContent=error.message;button.disabled=false;}}
+  async function completeManualTask(task,resolution,button){if(!window.confirm(resolution==='resume'?'确认恢复自动化？系统仍会重新执行全部安全门禁。':'确认仅关闭人工任务？该操作不会改订单、履约或交易状态。'))return;button.disabled=true;try{const response=await v4Fetch(`/api/rules-first/manual-tasks/${encodeURIComponent(task.task_id)}/complete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expected_revision:task.transaction_revision,lease_token:task.lease_token,resolution})});const data=await response.json();if(!response.ok)throw new Error(data?.detail||'处理任务失败');await loadManualTasks();}catch(error){button.textContent=error.message;button.disabled=false;}}
+  function renderManualTasks(tasks=loadedManualTasks){const root=$('manualTaskEntries');root.replaceChildren();const query=String($('manualTaskSearch')?.value||'').trim().toLowerCase();const visible=tasks.filter(task=>auditMatches({...task,failure:{reason:task.reason}},query));if(!visible.length){root.append(element('div','diagnostic-empty',query?'没有找到匹配的人工任务。':'暂无人工任务；当前状态没有可展示的人工接管任务。'));return;}visible.forEach(task=>{const detail=element('details','diagnostic-entry');const summary=element('summary');summary.append(element('span','diagnostic-event',auditReasonLabel(task.reason)),element('span','diagnostic-meta',[auditStatusLabel(task.status),task.buyer_id,task.chat_id].filter(Boolean).join(' · ')));const facts=element('div','audit-facts');[['店铺ID',task.shop_id],['买家ID',task.buyer_id],['聊天ID',task.chat_id],['任务编号',task.task_id],['交易状态',task.details?.flow_state||task.details?.transaction_state||'Unavailable'],['人工原因',auditReasonLabel(task.reason)],['任务状态',auditStatusLabel(task.status)],['创建时间',task.created_at||'暂无'],['修订号',task.transaction_revision]].forEach(([label,value])=>facts.append(recordFact(label,value)));detail.append(facts);const actions=element('div','manual-task-actions');if(task.status==='pending'){const claim=element('button','diagnostics-button','领取任务');claim.type='button';claim.disabled=task.reason==='fulfillment_required';claim.title=claim.disabled?'该任务等待官方履约事件，不允许人工领取':'';claim.addEventListener('click',()=>claimManualTask(task,claim));actions.append(claim);}else if(task.status==='claimed'&&task.lease_token){const resolved=element('button','diagnostics-button','状态已更新，关闭任务');resolved.type='button';resolved.addEventListener('click',()=>completeManualTask(task,'resolved',resolved));const resume=element('button','diagnostics-button','恢复自动化');resume.type='button';resume.addEventListener('click',()=>completeManualTask(task,'resume',resume));actions.append(resolved,resume);}if(actions.childElementCount)detail.append(actions);root.append(detail);});}
+  async function loadManualTasks(){const root=$('manualTaskEntries');root.replaceChildren(element('div','diagnostic-empty','正在读取人工任务…'));try{const response=await v4Fetch('/api/rules-first/manual-tasks');const data=await response.json();if(!response.ok)throw new Error(data?.detail||'读取人工任务失败');loadedManualTasks=Array.isArray(data.tasks)?data.tasks:[];renderManualTasks();}catch(error){root.replaceChildren(element('div','diagnostic-empty',error.message));}}
+
   const workspaceMeta=Object.freeze({
     chat:['客服工作台','识别买家截图、查询官方报价并延续安全会话。'],
     shops:['店铺开关','按当前鱼麦多租户控制各店铺的自动回复和自动改价。'],
@@ -202,14 +237,16 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     templates:['回复话术','编辑识图、报价、引导和改价成功通知；变量名称全部使用中文。'],
     conversation:['会话策略','按买家会话配置上下文记忆、业务介入区间与人工接管等待。'],
     model:['模型与接口','独立管理识图与AI回复服务，保存后下一次请求立即使用。'],
-    knowledge:['知识库','审核生产知识与人工会话候选，禁止未经审批直接进入运行时。']
+    knowledge:['知识库','审核生产知识与人工会话候选，禁止未经审批直接进入运行时。'],
+    'agent-audit':['Agent审计','查看 CanonicalConversationAgent、AgentContextBuilder 与 RulesFirst 审计投影。'],
+    'manual-tasks':['人工任务','查看当前 RulesFirst 被安全门禁转入人工处理的真实任务。']
   });
   let activeWorkspace='chat';
   function showWorkspace(name,focus=false) {
     if(!workspaceMeta[name])name='chat'; activeWorkspace=name;
     const settingsWorkspace=['shops','pricing','quote-records','orders','templates','conversation','model','knowledge'].includes(name);
     $('mainPage').hidden=settingsWorkspace;
-    $('workspaceChat').hidden=name!=='chat'; $('diagnosticsPanel').hidden=name!=='logs';
+    $('workspaceChat').hidden=name!=='chat'; $('diagnosticsPanel').hidden=name!=='logs'; $('agentAuditPanel').hidden=name!=='agent-audit'; $('manualTasksPanel').hidden=name!=='manual-tasks';
     $('settingsDrawer').classList.toggle('show',settingsWorkspace); $('settingsDrawer').setAttribute('aria-hidden',String(!settingsWorkspace));
     document.querySelectorAll('[data-workspace]').forEach(button=>{const selected=button.dataset.workspace===name;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1});
     if(settingsWorkspace){
@@ -224,6 +261,8 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     if(name==='templates'){loadTemplates();loadReminderSettings();loadReminderTasks();}
     if(name==='conversation')loadConversationPolicy();
     if(name==='knowledge')loadKnowledge();
+    if(name==='agent-audit')loadAgentAudit();
+    if(name==='manual-tasks')loadManualTasks();
     history.replaceState(null,'',`#${name}`);
     if(focus){const target=document.querySelector(`[data-workspace="${name}"]`);requestAnimationFrame(()=>target?.focus())}
   }
@@ -553,7 +592,7 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   $('useAirelvo').addEventListener('click',()=>{$('baseUrl').value='https://airelvo.cc/v1';catalogMessage('识图接口已切换到 Airelvo。');}); $('fetchModels').addEventListener('click',fetchModels);
   $('useChatAirelvo').addEventListener('click',()=>{$('chatBaseUrl').value='https://airelvo.cc/v1';catalogMessage('AI 回复接口已切换到 Airelvo。',false,'chatModelFetchMessage');}); $('fetchChatModels').addEventListener('click',fetchChatModels);
   $('modelSelect').addEventListener('input',updateThinkingHint); $('chatModelSelect').addEventListener('input',updateThinkingHint); $('thinkingToggle').addEventListener('change',updateThinkingHint); $('reasoningEffort').addEventListener('change',updateThinkingHint);
-  $('refreshDiagnostics').addEventListener('click',refreshDiagnostics); $('clearDiagnostics').addEventListener('click',clearDiagnostics); $('refreshShops').addEventListener('click',()=>loadShops(true)); $('refreshQuoteRecords').addEventListener('click',loadQuoteRecords); $('refreshOrders').addEventListener('click',loadOrders); $('saveReminders').addEventListener('click',saveReminderSettings); $('reminderEnabled').addEventListener('change',()=>{$('reminderEnabledText').textContent=$('reminderEnabled').checked?'已开启':'已关闭'}); $('orderSearch').addEventListener('input',renderOrders); $('closeOrderDetail').addEventListener('click',()=>$('orderDetailDialog').close()); $('orderDetailDialog').addEventListener('click',event=>{if(event.target===$('orderDetailDialog'))$('orderDetailDialog').close()});
+  $('refreshDiagnostics').addEventListener('click',refreshDiagnostics); $('clearDiagnostics').addEventListener('click',clearDiagnostics); $('refreshAgentAudit').addEventListener('click',loadAgentAudit); $('refreshManualTasks').addEventListener('click',loadManualTasks); $('agentAuditSearch').addEventListener('input',()=>renderAgentAudit()); $('manualTaskSearch').addEventListener('input',()=>renderManualTasks()); $('refreshShops').addEventListener('click',()=>loadShops(true)); $('refreshQuoteRecords').addEventListener('click',loadQuoteRecords); $('refreshOrders').addEventListener('click',loadOrders); $('saveReminders').addEventListener('click',saveReminderSettings); $('reminderEnabled').addEventListener('change',()=>{$('reminderEnabledText').textContent=$('reminderEnabled').checked?'已开启':'已关闭'}); $('orderSearch').addEventListener('input',renderOrders); $('closeOrderDetail').addEventListener('click',()=>$('orderDetailDialog').close()); $('orderDetailDialog').addEventListener('click',event=>{if(event.target===$('orderDetailDialog'))$('orderDetailDialog').close()});
   document.querySelectorAll('[data-order-filter]').forEach(button=>button.addEventListener('click',()=>{activeOrderFilter=button.dataset.orderFilter;document.querySelectorAll('[data-order-filter]').forEach(item=>item.classList.toggle('active',item===button));renderOrders()}));
   document.querySelectorAll('[data-template-filter]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-template-filter]').forEach(item=>item.classList.toggle('active',item===button));document.querySelectorAll('[data-template-section]').forEach(section=>section.hidden=section.dataset.templateSection!==button.dataset.templateFilter)})); $('addKeywordRule').addEventListener('click',addKeywordRule); $('addKnowledge').addEventListener('click',addKnowledge); $('knowledgeCategoryFilter').addEventListener('change',renderKnowledge);
   document.querySelectorAll('[data-template-variable]').forEach(button=>button.addEventListener('click',async()=>{try{await copyTemplateVariable(button.dataset.templateVariable);templateMessage(`已复制 ${button.dataset.templateVariable}`);}catch{templateMessage('复制失败，请选中变量后复制。',true);}}));

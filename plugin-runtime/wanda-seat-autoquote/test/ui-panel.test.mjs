@@ -149,6 +149,10 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.match(page.headers.get('content-security-policy') ?? '', /script-src 'self'/u);
     const pageHtml = await page.text();
     assert.match(pageHtml, /客服工作台/u);
+    assert.match(pageHtml, /data-workspace="agent-audit"/u);
+    assert.match(pageHtml, /data-workspace="manual-tasks"/u);
+    assert.match(pageHtml, /id="agentAuditPanel"/u);
+    assert.match(pageHtml, /id="manualTasksPanel"/u);
     assert.match(pageHtml, /报价记录/u);
     assert.match(pageHtml, /订单管理/u);
     assert.ok(pageHtml.indexOf('店铺开关') < pageHtml.indexOf('运营报价'));
@@ -184,6 +188,10 @@ test('FishMore panel and relative assets require a signed gateway request', asyn
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type') ?? '', /^text\/css/u);
     const styles = await asset.text();
+    assert.match(styles, /body\s*\{[^}]*padding-left:208px/u);
+    assert.match(styles, /\.site-navigation\s*\{[^}]*position:fixed[^}]*left:0/u);
+    assert.match(styles, /\.site-nav-list\s*\{[^}]*flex-direction:column/u);
+    assert.match(styles, /@media \(max-width:900px\)[\s\S]*\.site-navigation\s*\{[^}]*position:sticky/u);
     assert.match(styles, /\.settings-drawer \{[^}]*position:relative/u);
     assert.match(styles, /\.settings-body \{[^}]*overflow-y:auto/u);
     assert.match(styles, /\.pricing-rule-grid \{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)/u);
