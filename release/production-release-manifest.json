@@ -1,8 +1,8 @@
 {
   "schema_version": "production-release-manifest.v1",
-  "release_name": "wanda-v4-canonical-message-canary-20260904",
+  "release_name": "wanda-v4-canonical-wplus-preview-20260904",
   "base_commit": "deeff0b36d52a55b3d49428be0d410c7fe18021e",
-  "release_commit": "ed4ca3b56d0d7b73d299abacd6cc8da2b8aed0f6",
+  "release_commit": "1d6bd38ce585d894c4659ced6c70881e9c9196d4",
   "scope": {
     "tenant_id": "107",
     "shop_id": "2313315754",
@@ -64,8 +64,8 @@
     },
     {
       "path": "backend/app/canonical_buyer_reply.py",
-      "sha256": "bbf83965f1048ed1939988a516a8d70e66517bbce2e7d87d9861dd394161796a",
-      "size": 6445
+      "sha256": "3f799a1df0fdf981612d138f12a224dd359a88904a8a1cf46a5f9471ab767895",
+      "size": 7856
     },
     {
       "path": "backend/app/chat.py",
@@ -164,8 +164,8 @@
     },
     {
       "path": "backend/app/main.py",
-      "sha256": "c09dda55680e7f0ae88546e3c827e02ff94d2c782360c5308d11bdd1139bca27",
-      "size": 73956
+      "sha256": "f80e69c5fee190468a0157b349afe6b16e235db8513e34c13030d50e235be584",
+      "size": 74063
     },
     {
       "path": "backend/app/model_catalog.py",
@@ -359,8 +359,8 @@
     },
     {
       "path": "backend/app/quote_v2/service.py",
-      "sha256": "f69d32c7833480e6034ff2a42442fe18e1cd1f02865562776fcc663f67b7dcd0",
-      "size": 47114
+      "sha256": "d3d4a63b0bfd419a5e71b6bc767807bcb3ab840bdddcfb551f055fad10db8432",
+      "size": 48404
     },
     {
       "path": "backend/app/quote_v2/wanda_source.py",
@@ -374,18 +374,18 @@
     },
     {
       "path": "backend/app/recognition_v2/manual_mark.py",
-      "sha256": "f6ac4c685097a4e60c915cc59d9074974b441c9f9a8c4189b5ed1259afef3981",
-      "size": 4768
+      "sha256": "aab7379f60066a1efce425cf5575f9b8a6997264b6c380680dd9f00660ba8696",
+      "size": 8682
     },
     {
       "path": "backend/app/recognition_v2/models.py",
-      "sha256": "53e8123bba81fab0bba852b3e6a70deedb22b16919b20e5d22c79c204c345f20",
-      "size": 1414
+      "sha256": "95ccf18af31bfeb902d7c102cb626daf437a62fe95d9d8ec2c2c2b9a33ffb053",
+      "size": 2169
     },
     {
       "path": "backend/app/recognition_v2/service.py",
-      "sha256": "e0fcecdb2c5837f0490e19806244310fe4e136bc96dd9036c3eae5aa1c160618",
-      "size": 5664
+      "sha256": "803d24cee5c715ab62025b8d8128b29b20382fc2057df6d9d19b70c256b2dc58",
+      "size": 7616
     },
     {
       "path": "backend/app/reminder_service.py",
@@ -424,8 +424,8 @@
     },
     {
       "path": "backend/app/rules_first_runtime.py",
-      "sha256": "71d9e10dd1dddb313858ce4edd29ae48a317636067a84a84bd6a89e3bd0a3443",
-      "size": 18762
+      "sha256": "a5f4e873863dd3c6ff713e26a007b0c2073f06c8bf420ded036f01aff79978a4",
+      "size": 19976
     },
     {
       "path": "backend/app/rules_first_state_store.py",
@@ -434,8 +434,8 @@
     },
     {
       "path": "backend/app/rules_first_store.py",
-      "sha256": "54d058f03348297086333f06bc0d117eacd7bf9e58a9b38060e60b22cb518dcc",
-      "size": 68155
+      "sha256": "4b6aa199997d9530e1e33e0c1a590d24b831df012cd7acd2a42ea522f122b620",
+      "size": 72023
     },
     {
       "path": "backend/app/seat_facts_v2/models.py",
