@@ -45,6 +45,7 @@ async function withServer(run, {
         version: '2.2.18',
         entrypoint: { webhookPath: '/__plugin__/webhook' },
       },
+      backend: { sharedSecret: 'bridge-secret' },
     },
     platform: {
       verifyGateway: ({ pluginId, tenantId, userId, signature, rawBody }) => (
@@ -356,11 +357,21 @@ test('V4 panel API is signed at the gateway and proxied only to the loopback bac
     assert.deepEqual(await response.json(), { model: 'qwen-v4' });
   }, {
     fetchImpl: async (url, options) => {
-      calls.push({ url, method: options.method, tenantId: options.headers['x-wanda-tenant-id'] });
+      calls.push({
+        url,
+        method: options.method,
+        tenantId: options.headers['x-wanda-tenant-id'],
+        bridgeKey: options.headers['x-wanda-ai-v2-bridge-key'],
+      });
       return new Response(JSON.stringify({ model: 'qwen-v4' }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
   });
-  assert.deepEqual(calls, [{ url: 'http://127.0.0.1:8012/api/settings/vision', method: 'GET', tenantId: 'tenant-test' }]);
+  assert.deepEqual(calls, [{
+    url: 'http://127.0.0.1:8012/api/settings/vision',
+    method: 'GET',
+    tenantId: 'tenant-test',
+    bridgeKey: 'bridge-secret',
+  }]);
 });
 
 test('slow image recognition runs as a tenant-bound background job beyond the gateway timeout', async () => {

@@ -119,6 +119,8 @@ def test_exact_one_seat_is_priced_by_existing_engine() -> None:
     result = price_wanda_cost(cost, show(cost=None), facts, rules())
 
     assert result.status == "PRICED"
+    assert result.ticket_count == 1
+    assert result.needs_ticket_count is False
     assert result.seat_quotes[0].cost_fen == 4800
     assert result.seat_quotes[0].sell_price_fen == 4900
     assert result.total_sell_price_fen == 4900
@@ -141,6 +143,8 @@ def test_exact_same_cost_seats_are_priced_independently() -> None:
     result = price_wanda_cost(costs, show(cost=None), facts, rules())
 
     assert [item.sell_price_fen for item in result.seat_quotes] == [4900, 4900]
+    assert result.ticket_count == 2
+    assert result.needs_ticket_count is False
     assert result.total_sell_price_fen == 9800
 
 
@@ -162,6 +166,8 @@ def test_exact_different_cost_seats_are_priced_and_summed_independently() -> Non
 
     assert [item.cost_fen for item in result.seat_quotes] == [4800, 5200]
     assert [item.sell_price_fen for item in result.seat_quotes] == [4900, 6210]
+    assert result.ticket_count == 2
+    assert result.needs_ticket_count is False
     assert result.total_sell_price_fen == 11110
     assert result.unit_sell_price_fen is None
 

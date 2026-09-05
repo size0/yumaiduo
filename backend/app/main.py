@@ -49,6 +49,8 @@ from .models import (
     TicketImageRecognitionRequest,
     VisionSettingsUpdate,
     VisionSettingsView,
+    WandaFulfillmentCallbackRequest,
+    WandaFulfillmentCallbackResponse,
 )
 from .observability import LOGGER, REQUEST_ID
 from .order_quote_binding_v2.service import (
@@ -78,6 +80,11 @@ from .recognition_v2.service import RecognitionV2Service
 from .seat_facts_v2.service import SeatFactsV2Service
 from .show_resolve_v2.service import ShowResolveV2Service
 from .wanda_cost_v2.service import WandaCostResolutionService
+from .wanda_fulfillment_callbacks import (
+    CallbackError as WandaFulfillmentCallbackError,
+    CallbackVerifier as WandaFulfillmentCallbackVerifier,
+    WandaFulfillmentCallbackHandler,
+)
 from .wanda_pricing_v2.service import WandaPricingV2Service
 from .wplus_fulfillment import WplusFulfillmentMarkService
 from .service import MovieImageRecognitionService
@@ -198,6 +205,68 @@ def _new_flow_reprice_input(body: Mapping[str, object]) -> tuple[str, dict[str, 
     return (order_id, identity, order) if order_id and all(identity.values()) else None
 
 
+def _chat_scope_headers(
+    tenant_header: str | None,
+    shop_header: str | None,
+    buyer_header: str | None,
+    chat_header: str | None,
+) -> dict[str, str] | None:
+    tenant_id = str(tenant_header or "").strip()
+    shop_id = str(shop_header or "").strip()
+    buyer_id = str(buyer_header or "").strip()
+    chat_id = str(chat_header or "").strip()
+    if not all((tenant_id, shop_id, buyer_id, chat_id)):
+        return None
+    return {
+        "tenant_id": tenant_id,
+        "shop_id": shop_id,
+        "buyer_id": buyer_id,
+        "chat_id": chat_id,
+    }
+
+
+def _canonical_chat_body(message: ChatTextRequest, identity: Mapping[str, str]) -> dict[str, object]:
+    event_id = f"chat-text:{uuid4().hex}"
+    timestamp = datetime.now(timezone.utc).isoformat()
+    text = message.text.strip()
+    return {
+        "tenant_id": identity["tenant_id"],
+        "envelope": {
+            "tenantId": identity["tenant_id"],
+            "id": event_id,
+            "event": "chat.text.message.received",
+            "payload": {
+                "text": text,
+                "content": text,
+                "messageId": message.conversation_id,
+                "remoteMessageId": message.conversation_id,
+                "chatId": identity["chat_id"],
+                "shopId": identity["shop_id"],
+                "buyerId": identity["buyer_id"],
+                "requestId": message.conversation_id,
+            },
+        },
+        "session": {
+            "accountUnb": identity["shop_id"],
+            "peerUnb": identity["buyer_id"],
+            "chatId": identity["chat_id"],
+        },
+        "current_purchase_context": {
+            "request_id": message.conversation_id,
+            "event_id": event_id,
+        },
+        "authoritative_history_available": True,
+        "recent_messages": [
+            {
+                "message_id": message.conversation_id,
+                "direction": "buyer",
+                "text": text,
+                "timestamp": timestamp,
+            },
+        ],
+    }
+
+
 class QuoteService(Protocol):
     async def quote(self, recognition: MovieImageInfo) -> RealQuote: ...
 
@@ -295,6 +364,7 @@ def create_app(
     selected_seat_quote_service: SelectedSeatQuoteService | None = None,
     liangpiao_order_service: LiangpiaoOrderService | None = None,
     liangpiao_callback_handler: LiangpiaoCallbackHandler | None = None,
+    wanda_fulfillment_callback_handler: WandaFulfillmentCallbackHandler | None = None,
     canonical_quote_runtime: CanonicalQuoteRuntime | None = None,
     wplus_fulfillment_mark_service: WplusFulfillmentMarkService | None = None,
     wplus_mark_detector: object | None = None,
@@ -374,6 +444,17 @@ def create_app(
             CallbackVerifier(runtime_settings.liangpiao_app_secret),
             state_store=persistent_transaction_states, mapping_store=persistent_rules_store,
             client=configured_liangpiao_client, enabled=True,
+        )
+    configured_wanda_fulfillment_callback_handler = wanda_fulfillment_callback_handler
+    if (
+        configured_wanda_fulfillment_callback_handler is None
+        and runtime_settings.wanda_fulfillment_callback_enabled
+        and runtime_settings.wanda_fulfillment_callback_secret
+    ):
+        configured_wanda_fulfillment_callback_handler = WandaFulfillmentCallbackHandler(
+            WandaFulfillmentCallbackVerifier(runtime_settings.wanda_fulfillment_callback_secret),
+            state_store=persistent_transaction_states, quote_store=persistent_quote_records,
+            rules_store=persistent_rules_store, enabled=True,
         )
     rule_state_coordinator = RuleStateCoordinator(
         persistent_transaction_states, quote_store=persistent_quote_records,
@@ -705,6 +786,44 @@ def create_app(
         )
         return result
 
+    @app.post("/api/wanda-fulfillment/callback", response_model=WandaFulfillmentCallbackResponse)
+    async def wanda_fulfillment_callback(
+        request: Request,
+        payload: WandaFulfillmentCallbackRequest,
+        x_wanda_fulfillment_sign: str | None = Header(default=None),
+        x_wanda_fulfillment_timestamp: str | None = Header(default=None),
+        x_wanda_fulfillment_nonce: str | None = Header(default=None),
+    ) -> WandaFulfillmentCallbackResponse:
+        if not runtime_settings.wanda_fulfillment_callback_enabled or configured_wanda_fulfillment_callback_handler is None:
+            raise HTTPException(status_code=503, detail="wanda_fulfillment_callback_disabled")
+        raw = await request.body()
+        callback_record = persistent_rules_store.record_wanda_fulfillment_callback(
+            raw, signature=x_wanda_fulfillment_sign or "", timestamp=x_wanda_fulfillment_timestamp or "", nonce=x_wanda_fulfillment_nonce or "",
+        )
+        try:
+            result = await configured_wanda_fulfillment_callback_handler.handle(
+                raw, signature=x_wanda_fulfillment_sign or "", timestamp=x_wanda_fulfillment_timestamp or "", nonce=x_wanda_fulfillment_nonce or "",
+            )
+        except WandaFulfillmentCallbackError as error:
+            persistent_rules_store.update_wanda_fulfillment_callback(
+                int(callback_record["callback_id"]),
+                verification_status="rejected", processing_status="failed",
+                result_code=error.code, reason=error.message,
+            )
+            raise HTTPException(status_code=409, detail=error.code) from error
+        persistent_rules_store.update_wanda_fulfillment_callback(
+            int(callback_record["callback_id"]),
+            tenant_id=payload.tenant_id, shop_id=payload.shop_id, buyer_id=payload.buyer_id, chat_id=payload.chat_id,
+            order_id=payload.order_id, quote_id=payload.quote_id, transaction_id=payload.transaction_id,
+            event_id=payload.event_id, idempotency_key=payload.idempotency_key,
+            ticket_code_version=payload.ticket_code_version, delivery_status=result.get("delivery_status"),
+            verification_status="verified", processing_status="completed" if result.get("status") == "ok" else "manual_hold",
+            state_after=result.get("state_after"), state_revision=result.get("state_revision"),
+            command_id=result.get("command_id"), result_code=str(result.get("code") or ""),
+            reason=result.get("reason"),
+        )
+        return WandaFulfillmentCallbackResponse.model_validate(result)
+
     @app.get("/api/plugin/liangpiao-callbacks")
     async def list_plugin_liangpiao_callbacks(
         x_wanda_tenant_id: str | None = Header(default=None),
@@ -720,6 +839,13 @@ def create_app(
             raise HTTPException(status_code=503, detail="v4_plugin_bridge_not_configured")
         if not value or not secrets.compare_digest(value, expected):
             raise HTTPException(status_code=401, detail="v4_plugin_bridge_unauthorized")
+
+    def require_internal_bridge(value: str | None) -> None:
+        expected = os.getenv("WANDA_AI_V2_BRIDGE_KEY", "").strip()
+        if not expected:
+            raise HTTPException(status_code=503, detail="v4_internal_bridge_not_configured")
+        if not value or not secrets.compare_digest(value, expected):
+            raise HTTPException(status_code=401, detail="v4_internal_bridge_unauthorized")
 
     @app.post("/api/wanda-ai-v2/plugin/shops/sync")
     async def plugin_sync_shops(
@@ -1722,8 +1848,42 @@ def create_app(
         ))
 
     @app.post("/api/chat/text-messages", response_model=ChatMessageResponse)
-    async def create_chat_text_message(request: Request, message: ChatTextRequest) -> ChatMessageResponse:
+    async def create_chat_text_message(
+        request: Request,
+        message: ChatTextRequest,
+        x_wanda_tenant_id: str | None = Header(default=None),
+        x_wanda_shop_id: str | None = Header(default=None),
+        x_wanda_buyer_id: str | None = Header(default=None),
+        x_wanda_chat_id: str | None = Header(default=None),
+        x_wanda_ai_v2_bridge_key: str | None = Header(default=None),
+    ) -> ChatMessageResponse:
         enforce_rate_limit(request)
+        scope_headers_present = any((x_wanda_tenant_id, x_wanda_shop_id, x_wanda_buyer_id, x_wanda_chat_id))
+        canonical_identity = _chat_scope_headers(
+            x_wanda_tenant_id, x_wanda_shop_id, x_wanda_buyer_id, x_wanda_chat_id,
+        )
+        if scope_headers_present and canonical_identity is None:
+            raise HTTPException(status_code=422, detail="canonical_chat_identity_incomplete")
+        if canonical_identity is not None and persistent_shop_automation.is_canonical_conversation_enabled(
+            canonical_identity["tenant_id"], canonical_identity["shop_id"],
+        ):
+            require_internal_bridge(x_wanda_ai_v2_bridge_key)
+            if configured_conversation_agent is None or durable_runtime is None:
+                raise HTTPException(status_code=503, detail="canonical_conversation_reply_disabled")
+            canonical_body = _canonical_chat_body(message, canonical_identity)
+            result = await configured_conversation_agent.process(canonical_body)
+            if result.get("status") != "AGENT_REPLY_READY":
+                raise HTTPException(status_code=503, detail=str(result.get("reason") or "canonical_conversation_reply_unavailable"))
+            durable_runtime.accept_agent_result(canonical_body, result)
+            reply_text = str(result.get("reply") or "").strip()
+            if not reply_text:
+                raise HTTPException(status_code=503, detail="canonical_conversation_reply_unavailable")
+            return ChatMessageResponse(message=ChatAssistantMessage(
+                id=uuid4().hex,
+                conversation_id=message.conversation_id,
+                message_type="ai_reply",
+                text=reply_text,
+            ))
         has_key = bool(persistent_settings.current().chat_api_key)
         if ai_chat_service is not None and has_key:
             reply_text = await ai_chat_service.reply(message.text, message.conversation_id)

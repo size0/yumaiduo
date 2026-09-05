@@ -57,6 +57,8 @@ class Settings(BaseModel):
     # Active Probe is a state-writing operation and remains independently fused off.
     wanda_active_probe_enabled: bool = False
     liangpiao_callback_enabled: bool = False
+    wanda_fulfillment_callback_enabled: bool = False
+    wanda_fulfillment_callback_secret: str = ""
 
     @field_validator("base_url", "chat_base_url", "liangpiao_base_url")
     @classmethod
@@ -124,4 +126,6 @@ class Settings(BaseModel):
             ship_enabled=_env_flag("SHIP_ENABLED"),
             wanda_active_probe_enabled=_env_flag("WANDA_ACTIVE_PROBE_ENABLED"),
             liangpiao_callback_enabled=_env_flag("LIANGPIAO_CALLBACK_ENABLED"),
+            wanda_fulfillment_callback_enabled=_env_flag("WANDA_FULFILLMENT_CALLBACK_ENABLED"),
+            wanda_fulfillment_callback_secret=os.getenv("WANDA_FULFILLMENT_CALLBACK_SECRET", "").strip(),
         )

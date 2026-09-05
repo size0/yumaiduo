@@ -721,6 +721,114 @@ def test_chat_text_message_reserves_future_ai_customer_service_contract() -> Non
     assert "上传" in message["text"]
 
 
+def test_chat_text_message_uses_canonical_agent_only_with_trusted_bridge(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
+    shops = ShopAutomationStore(tmp_path / "shops.json")
+    shops.sync("107", [{"accountUnb": "2313315754", "shopName": "test"}])
+    shops.set_settings(
+        "107", "2313315754", enabled=True,
+        canonical_quote_enabled=True, canonical_conversation_enabled=True,
+    )
+
+    class AgentStub:
+        calls: list[dict[str, object]] = []
+
+        async def process(self, body):
+            self.calls.append(body)
+            return {"status": "AGENT_REPLY_READY", "reply": "已读取当前会话。", "actions": []}
+
+    class DurableRuntimeStub:
+        calls: list[tuple[dict[str, object], dict[str, object]]] = []
+
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+        def accept_agent_result(self, body, result):
+            self.calls.append((body, result))
+            return {"commands": []}
+
+    agent = AgentStub()
+    runtime = DurableRuntimeStub()
+    client = TestClient(create_app(
+        service=StubRecognitionService(), shop_automation_store=shops,
+        canonical_conversation_agent=agent, rules_first_runtime=runtime,
+    ))
+    response = client.post(
+        "/api/chat/text-messages",
+        json={"conversation_id": "canonical-chat", "text": "价钱多少"},
+        headers={
+            "X-Wanda-Tenant-Id": "107",
+            "X-Wanda-Shop-Id": "2313315754",
+            "X-Wanda-Buyer-Id": "buyer-1",
+            "X-Wanda-Chat-Id": "chat-1",
+            "X-Wanda-AI-V2-Bridge-Key": "bridge-test-secret",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"]["text"] == "已读取当前会话。"
+    assert len(agent.calls) == 1
+    assert len(runtime.calls) == 1
+
+
+def test_chat_text_message_rejects_canonical_scope_without_bridge(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
+    shops = ShopAutomationStore(tmp_path / "shops.json")
+    shops.sync("107", [{"accountUnb": "2313315754", "shopName": "test"}])
+    shops.set_settings(
+        "107", "2313315754", enabled=True,
+        canonical_quote_enabled=True, canonical_conversation_enabled=True,
+    )
+
+    class AgentStub:
+        calls: list[dict[str, object]] = []
+
+        async def process(self, body):
+            self.calls.append(body)
+            return {"status": "AGENT_REPLY_READY", "reply": "不应触发", "actions": []}
+
+    client = TestClient(create_app(service=StubRecognitionService(), shop_automation_store=shops, canonical_conversation_agent=AgentStub()))
+    response = client.post(
+        "/api/chat/text-messages",
+        json={"conversation_id": "canonical-chat", "text": "价钱多少"},
+        headers={
+            "X-Wanda-Tenant-Id": "107",
+            "X-Wanda-Shop-Id": "2313315754",
+            "X-Wanda-Buyer-Id": "buyer-1",
+            "X-Wanda-Chat-Id": "chat-1",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "v4_internal_bridge_unauthorized"
+
+
+def test_chat_text_message_rejects_partial_canonical_identity(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
+    shops = ShopAutomationStore(tmp_path / "shops.json")
+    shops.sync("107", [{"accountUnb": "2313315754", "shopName": "test"}])
+    shops.set_settings(
+        "107", "2313315754", enabled=True,
+        canonical_quote_enabled=True, canonical_conversation_enabled=True,
+    )
+
+    client = TestClient(create_app(service=StubRecognitionService(), shop_automation_store=shops))
+    response = client.post(
+        "/api/chat/text-messages",
+        json={"conversation_id": "canonical-chat", "text": "价钱多少"},
+        headers={
+            "X-Wanda-Tenant-Id": "107",
+            "X-Wanda-Shop-Id": "2313315754",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "canonical_chat_identity_incomplete"
+
+
 def test_chat_text_message_rejects_empty_or_oversized_input() -> None:
     client = TestClient(create_app(service=StubRecognitionService()))
     assert client.post("/api/chat/text-messages", json={"conversation_id": "chat", "text": "   "}).status_code == 422

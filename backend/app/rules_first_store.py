@@ -336,6 +336,39 @@ class RulesFirstStore:
                     ON liangpiao_callback_records(tenant_id, received_at DESC);
                 CREATE INDEX IF NOT EXISTS liangpiao_callback_order_idx
                     ON liangpiao_callback_records(provider_order_no, out_order_no, received_at DESC);
+                CREATE TABLE IF NOT EXISTS wanda_fulfillment_callback_records (
+                    callback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id TEXT,
+                    shop_id TEXT,
+                    buyer_id TEXT,
+                    chat_id TEXT,
+                    order_id TEXT,
+                    quote_id TEXT,
+                    transaction_id TEXT,
+                    event_id TEXT,
+                    idempotency_key TEXT,
+                    ticket_code_version TEXT,
+                    delivery_status TEXT,
+                    verification_status TEXT NOT NULL DEFAULT 'received',
+                    processing_status TEXT NOT NULL DEFAULT 'received',
+                    state_after TEXT,
+                    state_revision INTEGER,
+                    command_id TEXT,
+                    result_code TEXT,
+                    reason TEXT,
+                    payload_hash TEXT NOT NULL,
+                    payload_protected TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(tenant_id, event_id),
+                    UNIQUE(tenant_id, idempotency_key)
+                );
+                CREATE INDEX IF NOT EXISTS wanda_fulfillment_callback_tenant_idx
+                    ON wanda_fulfillment_callback_records(tenant_id, received_at DESC);
+                CREATE INDEX IF NOT EXISTS wanda_fulfillment_callback_order_idx
+                    ON wanda_fulfillment_callback_records(tenant_id, shop_id, order_id, quote_id, transaction_id, received_at DESC);
+                CREATE INDEX IF NOT EXISTS wanda_fulfillment_callback_ticket_idx
+                    ON wanda_fulfillment_callback_records(tenant_id, ticket_code_version, received_at DESC);
                 -- Cinema identity and show evidence live in the existing
                 -- RulesFirst database; this is not a second cinema database.
                 CREATE TABLE IF NOT EXISTS cinema_identity_crosswalk (
@@ -1032,6 +1065,118 @@ class RulesFirstStore:
             ).fetchall()
         return [self._liangpiao_callback_view(row) for row in rows]
 
+    def has_wanda_fulfillment_callback_nonce(self, nonce: str) -> bool:
+        wanted = str(nonce or "").strip()
+        if not wanted:
+            return False
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_protected, processing_status FROM wanda_fulfillment_callback_records ORDER BY callback_id DESC LIMIT 1000",
+            ).fetchall()
+        for row in rows:
+            if str(row["processing_status"] or "").lower() == "received":
+                continue
+            try:
+                payload = self._unprotect(row["payload_protected"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, Mapping) and str(payload.get("nonce") or "").strip() == wanted:
+                return True
+        return False
+
+    def record_wanda_fulfillment_callback(
+        self, raw_body: bytes, *, signature: str = "", timestamp: str = "", nonce: str = "",
+    ) -> dict[str, Any]:
+        raw = bytes(raw_body)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            body = {}
+        body = dict(body) if isinstance(body, Mapping) else {}
+        event_id = _pick(body, "event_id", "eventId")
+        idempotency_key = _pick(body, "idempotency_key", "idempotencyKey")
+        tenant_id = _pick(body, "tenant_id", "tenantId")
+        shop_id = _pick(body, "shop_id", "shopId")
+        buyer_id = _pick(body, "buyer_id", "buyerId")
+        chat_id = _pick(body, "chat_id", "chatId")
+        order_id = _pick(body, "order_id", "orderId")
+        quote_id = _pick(body, "quote_id", "quoteId")
+        transaction_id = _pick(body, "transaction_id", "transactionId")
+        ticket_code_version = _pick(body, "ticket_code_version", "ticketCodeVersion")
+        delivery_status = _pick(body, "delivery_status", "deliveryStatus")
+        payload = {
+            "raw_body_b64": base64.b64encode(raw).decode("ascii"),
+            "signature": str(signature or ""),
+            "timestamp": str(timestamp or ""),
+            "nonce": str(nonce or ""),
+        }
+        now = _now().isoformat()
+        with self._connect() as connection:
+            existing = None
+            if tenant_id and event_id:
+                existing = connection.execute(
+                    "SELECT * FROM wanda_fulfillment_callback_records WHERE tenant_id=? AND event_id=? ORDER BY callback_id DESC LIMIT 1",
+                    (tenant_id, event_id),
+                ).fetchone()
+            if existing is None and tenant_id and idempotency_key:
+                existing = connection.execute(
+                    "SELECT * FROM wanda_fulfillment_callback_records WHERE tenant_id=? AND idempotency_key=? ORDER BY callback_id DESC LIMIT 1",
+                    (tenant_id, idempotency_key),
+                ).fetchone()
+            if existing is not None:
+                return self._wanda_fulfillment_callback_view(existing)
+            cursor = connection.execute(
+                """INSERT INTO wanda_fulfillment_callback_records(
+                   tenant_id,shop_id,buyer_id,chat_id,order_id,quote_id,transaction_id,event_id,idempotency_key,
+                   ticket_code_version,delivery_status,payload_hash,payload_protected,received_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    tenant_id, shop_id, buyer_id, chat_id, order_id, quote_id, transaction_id, event_id,
+                    idempotency_key, ticket_code_version, delivery_status, hashlib.sha256(raw).hexdigest(),
+                    self._protect(payload), now, now,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM wanda_fulfillment_callback_records WHERE callback_id=?", (cursor.lastrowid,)
+            ).fetchone()
+        return self._wanda_fulfillment_callback_view(row)
+
+    def update_wanda_fulfillment_callback(self, callback_id: int, **updates: object) -> dict[str, Any]:
+        allowed = {
+            "tenant_id", "shop_id", "buyer_id", "chat_id", "order_id", "quote_id", "transaction_id",
+            "event_id", "idempotency_key", "ticket_code_version", "delivery_status", "verification_status",
+            "processing_status", "state_after", "state_revision", "command_id", "result_code", "reason",
+        }
+        values = {key: updates[key] for key in allowed if key in updates}
+        values["updated_at"] = _now().isoformat()
+        if not values:
+            raise ValueError("wanda_fulfillment_callback_update_empty")
+        assignments = ",".join(f"{key}=?" for key in values)
+        params = [values[key] for key in values]
+        params.append(int(callback_id))
+        with self._connect() as connection:
+            connection.execute(
+                f"UPDATE wanda_fulfillment_callback_records SET {assignments} WHERE callback_id=?", tuple(params),
+            )
+            row = connection.execute(
+                "SELECT * FROM wanda_fulfillment_callback_records WHERE callback_id=?", (int(callback_id),)
+            ).fetchone()
+        if row is None:
+            raise ValueError("wanda_fulfillment_callback_not_found")
+        return self._wanda_fulfillment_callback_view(row)
+
+    def list_wanda_fulfillment_callbacks(self, tenant_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        tenant = str(tenant_id or "").strip()
+        if not tenant:
+            return []
+        bounded_limit = max(1, min(int(limit), 500))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM wanda_fulfillment_callback_records WHERE tenant_id=? ORDER BY received_at DESC LIMIT ?",
+                (tenant, bounded_limit),
+            ).fetchall()
+        return [self._wanda_fulfillment_callback_view(row) for row in rows]
+
     def save_cinema_crosswalk(self, snapshot: Mapping[str, Any]) -> dict[str, Any]:
         required = ("canonical_cinema_identity_id", "liangpiao_cinema_id", "wanda_store_id", "city_name")
         if any(not _text(snapshot.get(key)) for key in required):
@@ -1206,6 +1351,22 @@ class RulesFirstStore:
             "result_code": row.get("result_code"), "reason": row.get("reason"),
             "payload_hash": row.get("payload_hash"), "received_at": row.get("received_at"),
             "updated_at": row.get("updated_at"),
+        }
+
+    def _wanda_fulfillment_callback_view(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row)
+        return {
+            "callback_id": int(row["callback_id"]), "tenant_id": row.get("tenant_id"),
+            "shop_id": row.get("shop_id"), "buyer_id": row.get("buyer_id"),
+            "chat_id": row.get("chat_id"), "order_id": row.get("order_id"),
+            "quote_id": row.get("quote_id"), "transaction_id": row.get("transaction_id"),
+            "event_id": row.get("event_id"), "idempotency_key": row.get("idempotency_key"),
+            "ticket_code_version": row.get("ticket_code_version"), "delivery_status": row.get("delivery_status"),
+            "verification_status": row.get("verification_status"), "processing_status": row.get("processing_status"),
+            "state_after": row.get("state_after"), "state_revision": row.get("state_revision"),
+            "command_id": row.get("command_id"), "result_code": row.get("result_code"),
+            "reason": row.get("reason"), "payload_hash": row.get("payload_hash"),
+            "received_at": row.get("received_at"), "updated_at": row.get("updated_at"),
         }
 
     def _liangpiao_order_view(self, row: Mapping[str, Any]) -> dict[str, Any]:

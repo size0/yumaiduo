@@ -1,5 +1,13 @@
 # 下一会话交接（2026-08-26）
 
+## 2026-09-05 审计补充
+
+- Canonical `/api/chat/text-messages` 现在只在 `x-wanda-ai-v2-bridge-key` 通过且四个 scope 头完整时进入 canonical 路径；部分身份直接 422，已启用 canonical 店铺但缺少桥接密钥直接 401。
+- W+ seat-facts 结果已显式输出 `has_selected_seats` 与 `quote_scope`，并覆盖 EXACT_SEATS / WPLUS_AREA / MISSING_CONTEXT。
+- 本轮本地验证已完成：backend 全量 `pytest -q`（919 passed）、插件 `npm test`（136 passed）、`npm pack --dry-run`、`node --check plugin-runtime/wanda-seat-autoquote/index.mjs`、`ruff check .`、`python -m compileall -q backend/app backend/tests`、`git diff --check`。
+- `release/production-release-manifest.json` 已对齐当前整合工作树 hash，且包含新增 `backend/app/wanda_fulfillment_callbacks.py`。
+- 生产未部署，未回放历史事件，未操作生产订单。
+
 ## 当前生产
 
 - V4：`2.4.80`

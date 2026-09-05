@@ -28,6 +28,7 @@ class SeatFactsV2Service:
             text for value in request.get("selected_seats") or []
             if (text := _text(value)) is not None
         ]
+        has_selected_seats = bool(selected_seats)
         mark = request.get("has_manual_mark")
         if mark not in (True, False, None):
             mark = None
@@ -35,11 +36,13 @@ class SeatFactsV2Service:
             return _result(
                 "INPUT_INCOMPLETE", "MANUAL_MARK_REQUIRED" if mark is None else _request_type(mark, selected_seats),
                 store_id, show_id, mark, "WANDA_STORE_AND_SHOW_REQUIRED",
+                has_selected_seats=has_selected_seats,
             )
         if route != "WANDA_SELF":
             return _result(
                 "INPUT_INCOMPLETE", "MANUAL_MARK_REQUIRED" if mark is None else _request_type(mark, selected_seats),
                 store_id, show_id, mark, "WANDA_SELF_ROUTE_REQUIRED",
+                has_selected_seats=has_selected_seats,
             )
 
         image_url = _text(request.get("image_url"))
@@ -54,20 +57,29 @@ class SeatFactsV2Service:
             return _result(
                 "MANUAL_MARK_REQUIRED", "MANUAL_MARK_REQUIRED",
                 store_id, show_id, mark, "MANUAL_MARK_UNAVAILABLE",
+                has_selected_seats=has_selected_seats,
             )
 
         request_type = _request_type(mark, selected_seats)
         try:
             response = await self._source.get_realtime_seats(show_id)
             if not _provider_success(response):
-                return _result("PROVIDER_UNAVAILABLE", request_type, store_id, show_id, mark, "WANDA_REALTIME_PROVIDER_UNAVAILABLE")
+                return _result(
+                    "PROVIDER_UNAVAILABLE", request_type, store_id, show_id, mark,
+                    "WANDA_REALTIME_PROVIDER_UNAVAILABLE", has_selected_seats=has_selected_seats,
+                )
             areas = _flatten_areas(response)
         except Exception:
-            return _result("PROVIDER_UNAVAILABLE", request_type, store_id, show_id, mark, "WANDA_REALTIME_PROVIDER_UNAVAILABLE")
+            return _result(
+                "PROVIDER_UNAVAILABLE", request_type, store_id, show_id, mark,
+                "WANDA_REALTIME_PROVIDER_UNAVAILABLE", has_selected_seats=has_selected_seats,
+            )
 
         if request_type == "EXACT_SEATS":
-            return _resolve_exact(store_id, show_id, mark, selected_seats, areas)
-        return _resolve_wplus(store_id, show_id, mark, areas)
+            return _resolve_exact(
+                store_id, show_id, mark, selected_seats, areas, has_selected_seats=has_selected_seats,
+            )
+        return _resolve_wplus(store_id, show_id, mark, areas, has_selected_seats=has_selected_seats)
 
 
 def select_same_type_available_reference(
@@ -140,6 +152,8 @@ def _resolve_exact(
     mark: bool,
     requested: list[str],
     areas: list[dict[str, Any]],
+    *,
+    has_selected_seats: bool,
 ) -> SeatFactsResult:
     all_seats = [seat for area in areas for seat in area["seats"]]
     facts: list[ExactSeatFact] = []
@@ -148,7 +162,7 @@ def _resolve_exact(
         if len(matches) != 1 or not matches[0].get("wanda_seat_id"):
             return _result(
                 "SEAT_NOT_FOUND", "EXACT_SEATS", store_id, show_id, mark,
-                "TARGET_SEAT_NOT_FOUND", exact_seats=facts,
+                "TARGET_SEAT_NOT_FOUND", exact_seats=facts, has_selected_seats=has_selected_seats,
             )
         facts.append(_seat_fact(matches[0]))
     if any(fact.status != "AVAILABLE" for fact in facts):
@@ -160,10 +174,11 @@ def _resolve_exact(
             "TARGET_SEAT_NOT_AVAILABLE_SAME_TYPE_REFERENCE" if reference else "TARGET_SEAT_NOT_AVAILABLE",
             exact_seats=facts,
             same_type_reference=_seat_fact(reference) if reference else None,
+            has_selected_seats=has_selected_seats,
         )
     return _result(
         "EXACT_SEATS_RESOLVED", "EXACT_SEATS", store_id, show_id, mark,
-        "ALL_TARGET_SEATS_AVAILABLE", exact_seats=facts,
+        "ALL_TARGET_SEATS_AVAILABLE", exact_seats=facts, has_selected_seats=has_selected_seats,
     )
 
 
@@ -172,12 +187,14 @@ def _resolve_wplus(
     show_id: str,
     mark: bool,
     areas: list[dict[str, Any]],
+    *,
+    has_selected_seats: bool,
 ) -> SeatFactsResult:
     facts = [_wplus_fact(area) for area in areas if area["is_wplus_area"]]
     return _result(
         "WPLUS_AREA_RESOLVED", "WPLUS_AREA", store_id, show_id, mark,
         "WPLUS_AREAS_READ" if facts else "NO_WPLUS_AREA_REPORTED",
-        wplus_areas=facts,
+        wplus_areas=facts, has_selected_seats=has_selected_seats,
     )
 
 
@@ -429,6 +446,7 @@ def _result(
     exact_seats: list[ExactSeatFact] | None = None,
     wplus_areas: list[WplusAreaFact] | None = None,
     same_type_reference: ExactSeatFact | None = None,
+    has_selected_seats: bool = False,
 ) -> SeatFactsResult:
     return SeatFactsResult(
         status=status,
@@ -436,6 +454,8 @@ def _result(
         wanda_store_id=store_id,
         wanda_show_id=show_id,
         has_manual_mark=mark,
+        has_selected_seats=has_selected_seats,
+        quote_scope="MISSING_CONTEXT" if request_type == "MANUAL_MARK_REQUIRED" else request_type,
         exact_seats=exact_seats or [],
         wplus_areas=wplus_areas or [],
         same_type_reference=same_type_reference,

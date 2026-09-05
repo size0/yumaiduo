@@ -268,6 +268,58 @@ class ChatTextRequest(BaseModel):
         return normalized
 
 
+class WandaFulfillmentCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str = Field(min_length=1, max_length=200)
+    shop_id: str = Field(min_length=1, max_length=200)
+    buyer_id: str = Field(min_length=1, max_length=200)
+    chat_id: str = Field(min_length=1, max_length=200)
+    order_id: str = Field(min_length=1, max_length=240)
+    quote_id: str = Field(min_length=1, max_length=240)
+    transaction_id: str = Field(min_length=1, max_length=240)
+    event_id: str = Field(min_length=1, max_length=240)
+    ticket_code: str = Field(min_length=1, max_length=2_048)
+    ticket_code_version: str = Field(min_length=1, max_length=120)
+    status: Literal["RECEIVED", "IN_PROGRESS", "COMPLETED"] = "COMPLETED"
+    delivery_status: Literal["PENDING", "SENT", "RECONCILED", "FAILED"] | None = None
+    idempotency_key: str | None = Field(default=None, max_length=240)
+    sent_message_id: str | None = Field(default=None, max_length=240)
+    send_reconciliation: bool = False
+    provider_order_no: str | None = Field(default=None, max_length=240)
+
+    @field_validator(
+        "tenant_id", "shop_id", "buyer_id", "chat_id", "order_id",
+        "quote_id", "transaction_id", "event_id", "ticket_code", "ticket_code_version",
+    )
+    @classmethod
+    def strip_non_empty_callback_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value cannot be blank")
+        return normalized
+
+
+class WandaFulfillmentCallbackResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ok: Literal[True] = True
+    status: Literal["ok", "manual_hold"]
+    code: str
+    duplicate: bool = False
+    state_after: str | None = None
+    state_revision: int | None = None
+    delivery_status: str | None = None
+    ticket_code_version: str | None = None
+    command_id: str | None = None
+    reason: str | None = None
+    event_id: str | None = None
+    idempotency_key: str | None = None
+    order_id: str | None = None
+    quote_id: str | None = None
+    transaction_id: str | None = None
+
+
 class RealSeatQuote(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

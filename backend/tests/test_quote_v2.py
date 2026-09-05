@@ -143,6 +143,7 @@ def test_wplus_unknown_count_is_preview_and_not_authorized(tmp_path: Path) -> No
     result = persist(service(tmp_path), priced_area(ticket_count=None))
 
     assert result["quote_state"] == "PREVIEW"
+    assert result["has_selected_seats"] is False
     assert result["unit_sell_price_fen"] == 5910
     assert result["total_sell_price_fen"] is None
     assert result["needs_ticket_count"] is True
@@ -167,6 +168,7 @@ def test_exact_seats_persist_concrete_seat_identity(tmp_path: Path) -> None:
     result = persist(service(tmp_path), priced_exact())
 
     assert result["request_type"] == "EXACT_SEATS"
+    assert result["has_selected_seats"] is True
     assert [seat["seat_label"] for seat in result["selected_seats"]] == ["8排9座", "8排10座"]
     assert [seat["seat_id"] for seat in result["selected_seats"]] == ["seat-1", "seat-2"]
 

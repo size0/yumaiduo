@@ -13,6 +13,7 @@ def test_selected_seat_real_write_gates_default_closed(monkeypatch) -> None:
         "LIANGPIAO_ORDER_CREATE_ENABLED",
         "EXTERNAL_WRITES_ENABLED",
         "LIANGPIAO_CALLBACK_ENABLED",
+        "WANDA_FULFILLMENT_CALLBACK_ENABLED",
         "WANDA_EXTERNAL_WRITES_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -23,6 +24,7 @@ def test_selected_seat_real_write_gates_default_closed(monkeypatch) -> None:
     assert settings.liangpiao_order_create_enabled is False
     assert settings.external_writes_enabled is False
     assert settings.liangpiao_callback_enabled is False
+    assert settings.wanda_fulfillment_callback_enabled is False
 
 
 def test_selected_seat_real_write_gates_read_explicit_environment(monkeypatch) -> None:

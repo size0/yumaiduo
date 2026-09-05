@@ -171,6 +171,7 @@ async function requestV4({ method, pathname, rawBody, contentType, config, fetch
     'x-wanda-tenant-id': String(tenantId),
     ...(shopId ? { 'x-wanda-shop-id': String(shopId) } : {}),
     ...(modelScope ? { 'x-wanda-model-scope': String(modelScope) } : {}),
+    ...(config.backend?.sharedSecret ? { 'x-wanda-ai-v2-bridge-key': config.backend.sharedSecret } : {}),
   };
   if (rawBody && /^application\/json(?:\s*;|$)/i.test(contentType ?? '')) {
     const form = decodeV4FormData(rawBody);

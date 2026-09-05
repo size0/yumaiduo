@@ -1,8 +1,8 @@
 {
   "schema_version": "production-release-manifest.v1",
-  "release_name": "v4-canonical-conversation-agent-purpose-fix-20260905-075052",
-  "base_commit": "deeff0b36d52a55b3d49428be0d410c7fe18021e",
-  "release_commit": "87eea8c74ab873aeac02f81cb62c038bb833550a",
+  "release_name": "v4-canonical-isolation-cockpit-20260905-3b3ff34",
+  "base_commit": "27279ae5d79cacb2c59ac6ea0b5d76835bdc0f85",
+  "release_commit": "3b3ff347676b68a563f7cbf7da180d655f30608e",
   "scope": {
     "tenant_id": "107",
     "shop_id": "2313315754",
@@ -65,38 +65,38 @@
     },
     {
       "path": "backend/app/canonical_buyer_reply.py",
-      "sha256": "dcb082d8f22b075c903e9d13d9ac4f2e014e005184955d250af35c288e9eb4f0",
-      "size": 8300
+      "sha256": "40ce58c19f61b58feb31fe4769db4e6339dd368ff03a1e17a8a3418d92ef8ffa",
+      "size": 8475
     },
     {
       "path": "backend/app/canonical_conversation_agent.py",
-      "sha256": "7A4B566274832E2EA3C9CD756B874CD42969D211FD62EBE3A47F5C00546FF3F5",
-      "size": 52996
+      "sha256": "768c0fcd352ef770b7c26f0279329515d408769095a5075ea4fdaaf78140c4d3",
+      "size": 54271
     },
     {
       "path": "backend/app/chat.py",
-      "sha256": "e852dd4a557a0f1e40e31c3a2e6778e96fc0250a203e54d1cee653cd6ec9250f",
-      "size": 9766
+      "sha256": "d64a64462b8844539d05bd157c9ed3c25647b284e2826c47c00a06d527ed07e2",
+      "size": 9974
     },
     {
       "path": "backend/app/chat_service.py",
-      "sha256": "5c5a5f14c871d092d18254b3903b23030446776904772ec68580a9356f7dcfae",
-      "size": 26989
+      "sha256": "50b1a41eea80f27a331d9e0a0f17a422ab5410f74b026f4445c0b7381e5cc272",
+      "size": 27858
     },
     {
       "path": "backend/app/cinema_route_v2/models.py",
-      "sha256": "7ac8a25599a821f55b8caea2a5347b5307475f91b8dd1237bce49e2994ebc440",
-      "size": 1843
+      "sha256": "3f60f140cc673d0e1cb61b930d73ee46f6ac9284be57032c1deb1485ab58e844",
+      "size": 1880
     },
     {
       "path": "backend/app/cinema_route_v2/service.py",
-      "sha256": "bfae1de41f2a67b85063707c191b83f0d1506a370bba51fa80fc8078de26ba56",
-      "size": 33176
+      "sha256": "bb3cfbc62962c22577a938270b681897e18fb9224afdaf4eb7dd3a63fb52995d",
+      "size": 33879
     },
     {
       "path": "backend/app/cinema_route_v2/wanda_source.py",
-      "sha256": "f3a33e9a8ab4dee585aaac8d8394094a1309c28524a2b9a6c11968063552d2b1",
-      "size": 1182
+      "sha256": "a5df56e55131dfe2c0a4e1fb536255b7c5866efc566c58023e7d8c4aca204736",
+      "size": 1214
     },
     {
       "path": "backend/app/cinema_routing.py",
@@ -110,13 +110,13 @@
     },
     {
       "path": "backend/app/config.py",
-      "sha256": "5d0671a482ae7d9608d418df38e15a829f13c03ca6379c5f1c627addfc2b494f",
-      "size": 7033
+      "sha256": "7e714c36baf42c6dcc18c275c7c4c54c6f9f1bdffd7f93f13573072fb70b4220",
+      "size": 7340
     },
     {
       "path": "backend/app/conversation_policy_store.py",
-      "sha256": "516079423b3a3a6a600fdade74487771bc3eb674e0191ea03a84894fdea1c236",
-      "size": 3624
+      "sha256": "26408be926d3b7045a75cb4d68044e5d80d4fb6c7dd560f48aed5af709d02862",
+      "size": 3711
     },
     {
       "path": "backend/app/diagnostics.py",
@@ -130,8 +130,8 @@
     },
     {
       "path": "backend/app/external_write_gates.py",
-      "sha256": "adf3db4c8ebe6a2b9d7bacd21548fc776c4f8ef8cef489bdfe43f42b71d89c10",
-      "size": 3689
+      "sha256": "9e1a2b7e695fc28bbe38284f675ca99632ffc78413e882ae746dfd506dff03a4",
+      "size": 3768
     },
     {
       "path": "backend/app/keyword_image_store.py",
@@ -140,13 +140,13 @@
     },
     {
       "path": "backend/app/knowledge_store.py",
-      "sha256": "84531a0543b20dc8d5fe318143829ca2e22c861a8cb3c6d75d378512d6208595",
-      "size": 13699
+      "sha256": "496798df1eeac9f3c1a52ae8e539dca664d5f4b89cd2d5254eff0dc6bf0c5250",
+      "size": 13927
     },
     {
       "path": "backend/app/liangpiao_callbacks.py",
-      "sha256": "275388203a88ec1184b7f50e9831d58d19199cde3dd40e47bbade78bec29cb3d",
-      "size": 31534
+      "sha256": "1f32ac228327bfd51c2c6a74ac09a1e16cee94526a84182ac2074524b965f6bc",
+      "size": 32115
     },
     {
       "path": "backend/app/liangpiao_client.py",
@@ -160,8 +160,8 @@
     },
     {
       "path": "backend/app/liangpiao_order_service.py",
-      "sha256": "f2674551fb927305eb50f839e8b76106d59d5fecca4fe673e3e2aac47a1dd5c4",
-      "size": 44372
+      "sha256": "dbd4e7aa9a33ceacc4c1a0dbb32e6e4e2701dc256548d5c10de6a9db62b70083",
+      "size": 45126
     },
     {
       "path": "backend/app/liangpiao_recognition.py",
@@ -170,8 +170,13 @@
     },
     {
       "path": "backend/app/main.py",
-      "sha256": "2b0e4a44f8342f57543280b232392d1a54d0c707d5b72888e9f037105a9e932a",
-      "size": 85868
+      "sha256": "de9c9972567f8ee09f84194395e43ebb844371bc33a41183c8e590791ac0f100",
+      "size": 98760
+    },
+    {
+      "path": "backend/app/wanda_fulfillment_callbacks.py",
+      "sha256": "47ab806eba9d8699a666b786685e15e4e2219a0b31142615bf6042bf95339b5a",
+      "size": 17681
     },
     {
       "path": "backend/app/model_catalog.py",
@@ -180,8 +185,8 @@
     },
     {
       "path": "backend/app/models.py",
-      "sha256": "1e9103e288285e48e6df6a883ba10aad66d9ac2953c312e94cba077321bb7372",
-      "size": 23375
+      "sha256": "ef2dd0ba423ec18e4b90da446f57632ef22c8512637929b2483dc559ec5c7a8e",
+      "size": 25883
     },
     {
       "path": "backend/app/observability.py",
@@ -190,23 +195,23 @@
     },
     {
       "path": "backend/app/order_quote_binding_v2/service.py",
-      "sha256": "7b650ac98a27205ff9318ba939924a71a5d99155fc03e68df0e0dd4a1abf292f",
-      "size": 30872
+      "sha256": "a44d501b126fa48d9f1148166b3a0e77f70f55051a142b77ccc2bfacc0e56c49",
+      "size": 31569
     },
     {
       "path": "backend/app/payment_validation.py",
-      "sha256": "49f100a0b87fe62403668cb25d7d54f387e6a012d8070507b0ac75a494bcd8bb",
-      "size": 22101
+      "sha256": "b4e3ee3ad8e020338f5512faebb9bd9afdbc827df910b4a2b63a9f710a6aced6",
+      "size": 22496
     },
     {
       "path": "backend/app/pending_cinema_candidate_store.py",
-      "sha256": "00bf3649f70ae55d06c9dad91be6778b49b0c760d54fba7031a5b74326d3dbf5",
-      "size": 3439
+      "sha256": "07f739f23c57f87f7399bed82d93dd2612d199848c015909ef8285e1880c766d",
+      "size": 3527
     },
     {
       "path": "backend/app/plugin_automation.py",
-      "sha256": "ef5c89dbd92f045e08da3e88041cb1c96c220ab1f9349b90e1f5524bdbbf87bf",
-      "size": 104824
+      "sha256": "30ee9977209ec650a88bfe982ab9af25ae540089fb70162ea0efe426bff74020",
+      "size": 107318
     },
     {
       "path": "backend/app/pricing/__init__.py",
@@ -290,8 +295,8 @@
     },
     {
       "path": "backend/app/probe/coordinator.py",
-      "sha256": "7292450239811673ed1db506b44947b2e7c89bab07eb7f060e4fee0520c4258a",
-      "size": 6942
+      "sha256": "7ab47049949ce28fc1f6b5565bd9f46e1c0db966963687089da7623d4f42c5ea",
+      "size": 7082
     },
     {
       "path": "backend/app/probe/errors.py",
@@ -315,13 +320,13 @@
     },
     {
       "path": "backend/app/probe/official_provider.py",
-      "sha256": "192f7e0bb14f164583e9beb8ec23c6ce6ae3fd294dc1fcb9b988baf3b927f0a2",
-      "size": 3225
+      "sha256": "dd612f03f73d87167be0c050ed547e8bd8173541e6c173305f10fd826771c25b",
+      "size": 3298
     },
     {
       "path": "backend/app/probe/policy.py",
-      "sha256": "16c80c08e03d1a1cff68e1f8a0591e168dd23c6329c2c660783969fd93fc8e71",
-      "size": 6676
+      "sha256": "84fdf0be77f23a2212e3745a8a78beb2fb2f022e0f9f43aace637e3f3823cf52",
+      "size": 6820
     },
     {
       "path": "backend/app/probe/probe_store.py",
@@ -355,43 +360,43 @@
     },
     {
       "path": "backend/app/prompts.py",
-      "sha256": "3f7eea47048d66c38e42c873b5445174c293eff9a6ee20264c0f5507f4d2ca0c",
-      "size": 6517
+      "sha256": "a0a4ba6cee9dcf86f16b0efe0657b227a1909079f8438fcdd02c0989fff73437",
+      "size": 6575
     },
     {
       "path": "backend/app/quote_record_store.py",
-      "sha256": "be9d7c3033159a5226a8612eb8562c15044194384095701b889b51dfa046c26b",
-      "size": 44969
+      "sha256": "e93fa10be1ab0ec404d54e91e9dfeb3a732ba93bc34f44d8633c2fff61a196bc",
+      "size": 45262
     },
     {
       "path": "backend/app/quote_v2/service.py",
-      "sha256": "dc1a567d123757dcc560c22705ac1aa2c7d196e4a872f5be4aa882e5010c87e2",
-      "size": 50821
+      "sha256": "6673856324c91ec7f773d79faa4e2d3cb00d1a5ca65282b09005de3b5c0f6411",
+      "size": 51992
     },
     {
       "path": "backend/app/quote_v2/wanda_source.py",
-      "sha256": "070fb6cd933236460997fe55e119da3d52f66923885935c7254405536da89b6c",
-      "size": 3649
+      "sha256": "0a0f67203a49639efff1075bb9dcdf6e956862642ac8b2e056fa31f92f13a171",
+      "size": 3737
     },
     {
       "path": "backend/app/recognition_v2/liangpiao.py",
-      "sha256": "1cf96cebc581a1a6b1b875c4d250ed1722cee8f781aa08cfaebd0f1cf677d4cb",
-      "size": 6177
+      "sha256": "765bfcd008004cf9a716baac1cb04c142b8b34d5d623801eea36160e73bd3b4e",
+      "size": 6339
     },
     {
       "path": "backend/app/recognition_v2/manual_mark.py",
-      "sha256": "aab7379f60066a1efce425cf5575f9b8a6997264b6c380680dd9f00660ba8696",
-      "size": 8682
+      "sha256": "cc941b717c21f5c70c4b4050509fc4faae46af95ef8e2158747406e369d06034",
+      "size": 8887
     },
     {
       "path": "backend/app/recognition_v2/models.py",
-      "sha256": "95ccf18af31bfeb902d7c102cb626daf437a62fe95d9d8ec2c2c2b9a33ffb053",
-      "size": 2169
+      "sha256": "af1126e5c1097dcf5966369ed27c2a91a727dd7c23a9ec1653abd9b49819740b",
+      "size": 2211
     },
     {
       "path": "backend/app/recognition_v2/service.py",
-      "sha256": "803d24cee5c715ab62025b8d8128b29b20382fc2057df6d9d19b70c256b2dc58",
-      "size": 7616
+      "sha256": "33af4cf6981ee5381cedff36dc37d4666a9cd75fcc090e2c8c18b5f63a057173",
+      "size": 7828
     },
     {
       "path": "backend/app/reminder_service.py",
@@ -405,18 +410,18 @@
     },
     {
       "path": "backend/app/reply_template_store.py",
-      "sha256": "479783f707ddf78913e7d08f0d1d1ba2e9967581cad1e4084a483d05c7281686",
-      "size": 30772
+      "sha256": "9b10d35c458a9ec98576463b91659b61f54241da57d364fb2a458f1679a39295",
+      "size": 31360
     },
     {
       "path": "backend/app/rule_contracts.py",
-      "sha256": "da05db317fac3d82bed0143e3c7eb52642e47aaa1e2e8365bd4c0e8721823a55",
-      "size": 2802
+      "sha256": "88872e67b01c8b06b2618ed54aa67e0c6475d9bd2f88dd91caa636040be8ab8f",
+      "size": 2871
     },
     {
       "path": "backend/app/rule_state_coordinator.py",
-      "sha256": "84b07432cd9a85a36520eee2797983c204cb3eb30cb57be56efccd3f1ad230dc",
-      "size": 32790
+      "sha256": "d8be303fc73a3dedaf27fff2dcc0de4e357350826397fef0bfb26b710ee9c8b8",
+      "size": 33424
     },
     {
       "path": "backend/app/rule_templates.py",
@@ -425,108 +430,108 @@
     },
     {
       "path": "backend/app/rules_first_migration.py",
-      "sha256": "7c49d9a0a6874271cb131d0c1a4bb02094633f08b13a9ee5cb1ccd2f00ec78c4",
-      "size": 6249
+      "sha256": "2b92376927397a4675d37bf019f06a37760cc1c0153390df708f146c92b111b2",
+      "size": 6397
     },
     {
       "path": "backend/app/rules_first_runtime.py",
-      "sha256": "171aa4fae747e0f11941ac64f08cfe1f62d0e69548c817437e82d3b3f790a31c",
-      "size": 22686
+      "sha256": "15c0f67d82e25289d57ac19eb7094c41724723fdf9a44818fd059b0b6e729b0f",
+      "size": 23176
     },
     {
       "path": "backend/app/rules_first_state_store.py",
-      "sha256": "553692827d8e59432a47388203e67f3a22d43fd20c94992e4de53088601d9892",
-      "size": 15507
+      "sha256": "eb2a03a45950faef90e42d2ab885eb0ef7cb51ac434774a2743ed46653666cc8",
+      "size": 15818
     },
     {
       "path": "backend/app/rules_first_store.py",
-      "sha256": "0c6e199a9c6fae5f6a1c249871d9ccf656e22a77c7c9175ad9c5520aa62b90f4",
-      "size": 89752
+      "sha256": "57aa5677419832169a7126a13e42543e22440f16e4af2010e64e75f25f3fbcc7",
+      "size": 102311
     },
     {
       "path": "backend/app/seat_facts_v2/models.py",
-      "sha256": "08e3f3f0993e571d5abd8daad67132e5b2074429766ecc88043c12435174fbb3",
-      "size": 2984
+      "sha256": "d94c747c33cd5d74be0a0de71742781b91f016ce1356c433b49f27cfb125a7bc",
+      "size": 3184
     },
     {
       "path": "backend/app/seat_facts_v2/service.py",
-      "sha256": "4817168a4de75b370571664046f28c3aeb0e1c33cb8b926f6fcb97633f5e042e",
-      "size": 17575
+      "sha256": "31780e401ebb2eabce772cd8efb702404112892ade7f25080a4ad6a8196b7372",
+      "size": 18972
     },
     {
       "path": "backend/app/seat_facts_v2/wanda_source.py",
-      "sha256": "228db52007282e5312a32308d9aa5bc25885b2c538e14a580b96ec16deab0bad",
-      "size": 313
+      "sha256": "82b6fd9469ec549c7973aedf8f8728e62b29a0278dee78a831977011c1fffed3",
+      "size": 323
     },
     {
       "path": "backend/app/selected_seat_quote_service.py",
-      "sha256": "a1b7f78f59a3c02294b85ecc05ff7dec03192a4fb630fdfcfc39fb9ec21e449f",
-      "size": 20666
+      "sha256": "0e957394c2358a0812c52032d4e1b09c99dcbb35d8555a5dbaef1aa1c04d6a15",
+      "size": 21069
     },
     {
       "path": "backend/app/service.py",
-      "sha256": "ddab0b40d51004d5c512ca2b9977cdb41b4f2c2cf57859d054b33496311d58a9",
-      "size": 37606
+      "sha256": "ef15d406ebceed111e3c4e6506ba89fd2ecc5e7c7b4cb3c8da44bcf21fafacde",
+      "size": 37767
     },
     {
       "path": "backend/app/settings_store.py",
-      "sha256": "2b0230e76829789bf8b31598e012c35bf3686ac2c73ef03087c4bec64029cdb5",
-      "size": 11139
+      "sha256": "74f09b595c5719ac08d2291a681e5f038a1debd8017c523db98fff946e76f0a0",
+      "size": 22671
     },
     {
       "path": "backend/app/shop_automation_store.py",
-      "sha256": "b5a5f37c02762a1f9f1b5a4c69762deb7176d38459cd22fbadf9c579949bd6aa",
-      "size": 6877
+      "sha256": "85a04268415cc3693e6a69742a891770fd026e5e779a89639b2c81dcb843e9cb",
+      "size": 8361
     },
     {
       "path": "backend/app/show_resolve_v2/models.py",
-      "sha256": "bac2a87083db475ca2ceb34090e3fcead00980330a07e9716e6ea54edc8eaa9e",
-      "size": 2215
+      "sha256": "6e84f72153f18e6e2e22480ea6743a7184221880a61f8ae1fe2ceebe1fd798a7",
+      "size": 2261
     },
     {
       "path": "backend/app/show_resolve_v2/service.py",
-      "sha256": "d70c37291db8c25a5dc4d66f45008c6ab52ab56209ea61d645eb56ad409d579d",
-      "size": 11426
+      "sha256": "a2b737573646847f36498b8ff66368e0b859eafaa83c1e6e177226946805f168",
+      "size": 11722
     },
     {
       "path": "backend/app/show_resolve_v2/wanda_source.py",
-      "sha256": "fa99db182eab199d9435b32a2e7118ef20d2a2fc3e2d2ef09902d2362f30db6b",
-      "size": 330
+      "sha256": "81e624ac7a073411771f1972a10b2bdae7da44a49707de5a852868372ee4e0f0",
+      "size": 342
     },
     {
       "path": "backend/app/transaction_state_store.py",
-      "sha256": "cd4286fa050cbe9309516f4528abc66917668c13f0d42bd2bd67de2aa13d9aa6",
-      "size": 17221
+      "sha256": "7288631d4702d81d2950560cd16827ef8f1c9bf734d2e0e7f8370e5ab3115534",
+      "size": 17520
     },
     {
       "path": "backend/app/wanda_cost_v2/models.py",
-      "sha256": "bf0b996b29e1622cea8cc3ee08fbdbc1e36f3a465b079b6fab2716cb4539cbbd",
-      "size": 1663
+      "sha256": "c2c497641ed29efd3f01eb2405b01db4895faaec187fe737116f7afcb19157be",
+      "size": 1708
     },
     {
       "path": "backend/app/wanda_cost_v2/service.py",
-      "sha256": "a5fa559319cf75ffca5dc1401521b63c17c91d268f120727d34d94172b7ad72d",
-      "size": 7807
+      "sha256": "87899282cff173239b7b80a0a21709e230e402368b9f36f5bee8db535ff58b2e",
+      "size": 8019
     },
     {
       "path": "backend/app/wanda_direct_quote.py",
-      "sha256": "3ab16994db403c5a09ace3d4aa6b164670202cb97ddf13fa69afe5b2e31f4ab9",
-      "size": 110605
+      "sha256": "1cf7e603652e3bcdf956c0437c442c47b19f71235cc540a183aabef00c806802",
+      "size": 110742
     },
     {
       "path": "backend/app/wanda_pricing_v2/models.py",
-      "sha256": "156583f4898b9894667afdbd945169fc33c45682accfd18333cbfc3a8a928d2d",
-      "size": 1982
+      "sha256": "f382c74a3683392a6a7c3e38d9bbe70c1eea299e97926b14b616307d6fd5ee53",
+      "size": 2031
     },
     {
       "path": "backend/app/wanda_pricing_v2/service.py",
-      "sha256": "6d306d7f506f86ff1adddd1d344d76e023424f427c24ac9eefa2d98f24f05893",
-      "size": 8611
+      "sha256": "d2f3c086dd3682b96f51172159098c10b409e5a3e38f839d6b5a351560513d6a",
+      "size": 8816
     },
     {
       "path": "backend/app/wplus_fulfillment.py",
-      "sha256": "358d2d86a3fb983fd10c1d44783b023bd1f7d150817ede458cb12ad51b33c3d5",
-      "size": 20235
+      "sha256": "ffdca9d948026148ae748e653ee249d0709c0af89354a87abb6bd6dcc663c723",
+      "size": 20663
     },
     {
       "path": "backend/pyproject.toml",
@@ -570,13 +575,13 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/actions/change-order-price.mjs",
-      "sha256": "3e374afca6612dcfec339f5dfc451b69f23011e4a4a45a9faa372c2390235a6b",
-      "size": 23035
+      "sha256": "04738853c45c5fbf66c1720601b8a7d752511f7161e66250254ca61554061286",
+      "size": 23597
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/actions/contracts.mjs",
-      "sha256": "5abd3d13fa9a5f94f36e6ff14dec5532a88dd1405bbb586e9ef0c5ad69ed72b9",
-      "size": 18757
+      "sha256": "2d9384072cc2aacdbec27559c75cf5265d4af6812fdf0e0a436859758d3ec320",
+      "size": 19164
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/actions/fulfillment.mjs",
@@ -595,8 +600,8 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/http/server.mjs",
-      "sha256": "abed6f05c28fd80221f79dae9b14be22260014a8fc1c3acd46f3032aab231e49",
-      "size": 24208
+      "sha256": "6635c55fbf9ab47e58690e2b6348ed4e32b0e7b7c734d57fcbdb6823dbc90341",
+      "size": 24590
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/platform/runtime.mjs",
@@ -605,13 +610,13 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-processor.mjs",
-      "sha256": "433269ae65f2c353d4e5bb25223200b9625069477f34f08c234bdeeb62ac8925",
-      "size": 66941
+      "sha256": "63200b95ab5f6ff0fb2e6ef52905bbb9dd4ebe59bc21932dc8112305e8eb669c",
+      "size": 66983
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/event-store.mjs",
-      "sha256": "afc51b996f50b73d3b695c7c74ff68b1a24ddd55c8b5cb81e6968c339e23af27",
-      "size": 21795
+      "sha256": "e74bd49bf38563d351ebbf0ccc4a8c0a64f44e38fb55b84859b1c272a6e4c280",
+      "size": 21829
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/src/runtime/v4-ui-job-store.mjs",
@@ -620,13 +625,13 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/ui/app.js",
-      "sha256": "2cde142c4eef84b32edb0107f1644f846c68a55b6fd1c8f7fc86e8bb22118527",
-      "size": 87541
+      "sha256": "dfc0f0a8de2f98ea3f430e1fe1155a2eb3c31d714d00bc45a24599291399d89a",
+      "size": 98352
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/ui/index.html",
-      "sha256": "7107da456de740248d7b5aa3a3fad9ac8d696b38fda843670bfaf01b3006d7eb",
-      "size": 48358
+      "sha256": "f4684d532454362c32f65aa9570093553ed8136f7c54df204118edcba2b180da",
+      "size": 54919
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/ui/sdk.js",
@@ -635,8 +640,8 @@
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/ui/styles.css",
-      "sha256": "a79a608e41dc1b6a9ec7a4cbf120ad739309ad5b07314624b36f2c55e20db262",
-      "size": 60417
+      "sha256": "b81fb1a39a226c462441ce26dcb28d2fcd2c5155a4e573b7fe9e0ef5f9eacc9f",
+      "size": 74427
     },
     {
       "path": "plugin-runtime/wanda-seat-autoquote/vendor/plugin-sdk-server/dist/client.js",
@@ -669,5 +674,16 @@
       "size": 1483
     }
   ],
-  "deployed_at": "2026-09-05T08:02:53.509Z"
+  "deployed_at": "2026-09-05T05:04:43.374593Z",
+  "source_heads": {
+    "backend_hotfix_commit": "87eea8c74ab873aeac02f81cb62c038bb833550a",
+    "isolation_head": "0d8ced3c01c867c1f59a089479d989571ad4c3db",
+    "ui_head": "f85b896d020c2db735a470ee2a5c9e7ffb490f7b",
+    "plugin_release_name": "wanda-v4-canonical-conversation-canary-20260905-061249",
+    "plugin_package_version": "2.2.50"
+  },
+  "build_time": "2026-09-05T05:04:43.374593Z",
+  "release_dir": "release/codex-canonical-isolation-cockpit-20260905-555ffb1",
+  "rollback_target": "v4-canonical-conversation-agent-purpose-fix-20260905-075052",
+  "rollback_target_commit": "87eea8c74ab873aeac02f81cb62c038bb833550a"
 }

@@ -25,6 +25,8 @@ def test_settings_loads_dashscope_environment_without_persisting_it(monkeypatch:
     monkeypatch.setenv("DASHSCOPE_CHAT_MODEL", " gpt-5.5 ")
     monkeypatch.setenv("MAX_IMAGE_BYTES", "2048")
     monkeypatch.setenv("MODEL_TIMEOUT_SECONDS", "15")
+    monkeypatch.setenv("WANDA_FULFILLMENT_CALLBACK_ENABLED", "true")
+    monkeypatch.setenv("WANDA_FULFILLMENT_CALLBACK_SECRET", "fulfillment-secret")
 
     value = Settings.from_env()
 
@@ -36,6 +38,8 @@ def test_settings_loads_dashscope_environment_without_persisting_it(monkeypatch:
     assert value.chat_model == "gpt-5.5"
     assert value.max_image_bytes == 2048
     assert value.request_timeout_seconds == 15
+    assert value.wanda_fulfillment_callback_enabled is True
+    assert value.wanda_fulfillment_callback_secret == "fulfillment-secret"
 
 
 def test_settings_rejects_insecure_url_and_empty_model() -> None:

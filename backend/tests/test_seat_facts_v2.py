@@ -92,7 +92,9 @@ async def test_manual_true_with_no_seats_is_wplus_area() -> None:
     source = FakeSeatSource(realtime_response(areas=[area("wplus-1", "W+区域", [seat("1", "10排15座", pay_member_status=1)], realtime_price=5816)]))
     result = await SeatFactsV2Service(source).resolve(request(has_manual_mark=True))
     assert result.seat_request_type == "WPLUS_AREA"
+    assert result.quote_scope == "WPLUS_AREA"
     assert result.status == "WPLUS_AREA_RESOLVED"
+    assert result.has_selected_seats is False
     assert result.exact_seats == []
     assert result.wplus_areas[0].area_original_price_fen == 5816
     assert result.wplus_price_authoritative is False
@@ -107,6 +109,8 @@ async def test_manual_true_with_selected_seats_stays_wplus_area() -> None:
         request(has_manual_mark=True, selected_seats=["10排15座"], has_selected_seats=True),
     )
     assert result.seat_request_type == "WPLUS_AREA"
+    assert result.quote_scope == "WPLUS_AREA"
+    assert result.has_selected_seats is True
     assert result.exact_seats == []
     assert result.wplus_areas
 
@@ -118,6 +122,8 @@ async def test_manual_false_with_selected_seat_is_exact_seats() -> None:
         request(selected_seats=["10 排 15 座"], has_selected_seats=True),
     )
     assert result.seat_request_type == "EXACT_SEATS"
+    assert result.quote_scope == "EXACT_SEATS"
+    assert result.has_selected_seats is True
     assert result.status == "EXACT_SEATS_RESOLVED"
     assert result.exact_seats[0].wanda_seat_id == "s-15"
     assert result.exact_seats[0].status == "AVAILABLE"
@@ -130,6 +136,8 @@ async def test_manual_false_without_selected_seat_is_wplus_area() -> None:
     source = FakeSeatSource(realtime_response(areas=[area("wplus-1", "W+区域", [seat("1", "10排15座", pay_member_status=1)])]))
     result = await SeatFactsV2Service(source).resolve(request())
     assert result.seat_request_type == "WPLUS_AREA"
+    assert result.quote_scope == "WPLUS_AREA"
+    assert result.has_selected_seats is False
     assert result.status == "WPLUS_AREA_RESOLVED"
 
 
@@ -138,6 +146,7 @@ async def test_manual_unknown_requires_manual_mark_and_does_not_query_seats() ->
     source = FakeSeatSource(realtime_response(areas=[area("wplus-1", "W+区域", [seat("1", "10排15座", pay_member_status=1)])]))
     result = await SeatFactsV2Service(source).resolve(request(has_manual_mark=None))
     assert result.seat_request_type == "MANUAL_MARK_REQUIRED"
+    assert result.quote_scope == "MISSING_CONTEXT"
     assert result.status == "MANUAL_MARK_REQUIRED"
     assert source.calls == []
 
@@ -151,6 +160,8 @@ async def test_unknown_manual_mark_can_be_resolved_by_one_explicit_detector_call
         manual_mark_detector=detector,
     )
     assert result.status == "EXACT_SEATS_RESOLVED"
+    assert result.quote_scope == "EXACT_SEATS"
+    assert result.has_selected_seats is True
     assert detector.calls == ["https://img.example/image.jpg"]
 
 

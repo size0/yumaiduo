@@ -60,6 +60,8 @@ class SeatFactsResult(BaseModel):
     wanda_store_id: str | None = Field(default=None, max_length=100)
     wanda_show_id: str | None = Field(default=None, max_length=100)
     has_manual_mark: bool | None = None
+    has_selected_seats: bool = False
+    quote_scope: Literal["EXACT_SEATS", "WPLUS_AREA", "MISSING_CONTEXT"] = "MISSING_CONTEXT"
     wplus_price_authoritative: Literal[False] = False
     authoritative_wplus_price_fen: None = None
     exact_seats: list[ExactSeatFact] = Field(default_factory=list, max_length=30)
