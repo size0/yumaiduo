@@ -1,8 +1,8 @@
 {
   "schema_version": "production-release-manifest.v1",
-  "release_name": "wanda-v4-canonical-conversation-canary-20260904",
+  "release_name": "v4-canonical-conversation-agent-purpose-fix-20260905-075052",
   "base_commit": "deeff0b36d52a55b3d49428be0d410c7fe18021e",
-  "release_commit": "30bcad4139dcda6ae7076223387662c034543c7e",
+  "release_commit": "87eea8c74ab873aeac02f81cb62c038bb833550a",
   "scope": {
     "tenant_id": "107",
     "shop_id": "2313315754",
@@ -70,8 +70,8 @@
     },
     {
       "path": "backend/app/canonical_conversation_agent.py",
-      "sha256": "49f560b3b66330a1c48e89fc526487876137f6ff61321f168ca94acd5f92e4cd",
-      "size": 48063
+      "sha256": "7A4B566274832E2EA3C9CD756B874CD42969D211FD62EBE3A47F5C00546FF3F5",
+      "size": 52996
     },
     {
       "path": "backend/app/chat.py",
@@ -668,5 +668,6 @@
       "sha256": "1eae10e011723fd039324c12486fe2ada223512b00834aa7b6314b429e7af164",
       "size": 1483
     }
-  ]
+  ],
+  "deployed_at": "2026-09-05T08:02:53.509Z"
 }
