@@ -389,6 +389,10 @@ class AgentContextBuilder:
                 transaction = None
         transaction_view = transaction or {"status": "absent"}
         recognition = _mapping_or_none(body.get("canonical_recognition"))
+        if recognition is not None:
+            source = _text(recognition.get("source"))
+            if source and source != "LIANGPIAO":
+                raise ValueError("canonical_recognition_source_invalid")
         if recognition is None and self._recognition_store is not None and identity["chat_id"]:
             try:
                 previous = self._recognition_store.recent(identity["chat_id"])

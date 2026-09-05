@@ -561,6 +561,96 @@ class FakeChat:
 
 
 @pytest.mark.asyncio
+async def test_canonical_shop_text_is_fenced_from_legacy_generic_ai() -> None:
+    class CanaryShops:
+        def is_enabled(self, tenant_id: str, shop_id: str) -> bool:
+            assert (tenant_id, shop_id) == ("tenant-1", "shop-1")
+            return True
+
+        def is_canonical_quote_enabled(self, tenant_id: str, shop_id: str) -> bool:
+            assert (tenant_id, shop_id) == ("tenant-1", "shop-1")
+            return True
+
+        def is_canonical_conversation_enabled(self, tenant_id: str, shop_id: str) -> bool:
+            assert (tenant_id, shop_id) == ("tenant-1", "shop-1")
+            return True
+
+    body = event_body(event="im.message.received")
+    body["order"] = None
+    body["envelope"]["payload"].update({
+        "messageType": 1,
+        "remoteMessageId": "canary-current",
+        "content": "请问多少钱",
+        "imageUrls": [],
+    })
+    body["recent_messages"] = [{
+        "direction": "inbound",
+        "messageType": 1,
+        "content": "请问多少钱",
+        "messageId": "canary-current",
+        "sentAtMs": 1787580000000,
+        "imageUrls": [],
+    }]
+
+    automation = PluginAutomation(
+        FakeRecognizer(recognition()), FakeQuoter(exact_quote()), mode="auto",
+        image_loader=load_image, chat_service=FakeChat(),
+        shop_store=CanaryShops(),
+    )
+
+    result = await automation.process_event(body)
+
+    assert result["decision"]["reason"] == "canonical_shop_legacy_text_fenced"
+    assert result["decision"]["actions"] == []
+
+
+@pytest.mark.asyncio
+async def test_canonical_shop_image_is_fenced_from_legacy_recognition_and_quote() -> None:
+    class CanaryShops:
+        def is_enabled(self, tenant_id: str, shop_id: str) -> bool:
+            assert (tenant_id, shop_id) == ("tenant-1", "shop-1")
+            return True
+
+        def is_canonical_quote_enabled(self, tenant_id: str, shop_id: str) -> bool:
+            assert (tenant_id, shop_id) == ("tenant-1", "shop-1")
+            return True
+
+        def is_canonical_conversation_enabled(self, tenant_id: str, shop_id: str) -> bool:
+            assert (tenant_id, shop_id) == ("tenant-1", "shop-1")
+            return True
+
+    body = event_body(event="im.message.received")
+    body["order"] = None
+    body["envelope"]["payload"].update({
+        "messageType": 2,
+        "remoteMessageId": "canary-image-current",
+        "content": "[图片]",
+        "imageUrls": ["https://img.alicdn.com/ticket.jpg"],
+    })
+    body["recent_messages"] = [{
+        "direction": "inbound",
+        "messageType": 2,
+        "content": "[图片]",
+        "messageId": "canary-image-current",
+        "sentAtMs": 1787580000000,
+        "imageUrls": ["https://img.alicdn.com/ticket.jpg"],
+    }]
+    recognizer = FakeRecognizer(recognition())
+    quoter = FakeQuoter(exact_quote())
+    automation = PluginAutomation(
+        recognizer, quoter, mode="auto", image_loader=load_image,
+        chat_service=FakeChat(), shop_store=CanaryShops(),
+    )
+
+    result = await automation.process_event(body)
+
+    assert result["decision"]["reason"] == "canonical_shop_legacy_image_fenced"
+    assert result["decision"]["actions"] == []
+    assert recognizer.calls == 0
+    assert quoter.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_fresh_quote_prevents_an_old_completed_order_from_answering_ok_as_fulfilled() -> None:
     body = event_body(event="im.message.received")
     body["envelope"]["payload"].update({

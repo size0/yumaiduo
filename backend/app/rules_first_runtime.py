@@ -93,26 +93,27 @@ class RulesFirstRuntime:
                 if not text or not kind:
                     continue
                 suffix = "summary" if kind == "purchase_summary" else "price" if kind == "price" else str(index)
+                action_id = f"{event_id}:reply" if suffix == "price" else f"{event_id}:reply:{suffix}"
                 actions.append({
-                    "id": f"{event_id}:canonical-reply:{suffix}",
+                    "id": action_id,
                     "type": "send_message",
                     "text": text,
                     "rule_governed": True,
                     "source": source,
                     "canonical_reply_kind": f"{result.get('canonical_reply_kind') or ''}:{kind}",
                     "canonical_reply_sequence": index,
-                    "dedupe_key": f"canonical-reply:{event_id}:{suffix}",
+                    "dedupe_key": f"reply:{event_id}:{suffix}",
                     **({"agent_run_id": agent_run_id} if agent_run_id else {}),
                 })
         elif rendered_text:
             actions.append({
-                "id": f"{event_id}:canonical-reply",
+                "id": f"{event_id}:reply",
                 "type": "send_message",
                 "text": rendered_text,
                 "rule_governed": True,
                 "source": source,
                 "canonical_reply_kind": str(result.get("canonical_reply_kind") or ""),
-                "dedupe_key": f"canonical-reply:{event_id}",
+                "dedupe_key": f"reply:{event_id}",
                 **({"agent_run_id": agent_run_id} if agent_run_id else {}),
             })
         canonical_result = dict(result)

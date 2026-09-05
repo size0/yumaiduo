@@ -448,7 +448,17 @@ class QuoteRecordStore:
             return None
         with self._lock:
             records = self._read_records()
-            selected = next((item for item in records if item.get("record_id") == wanted_record), None)
+            selected = next(
+                (
+                    item for item in records
+                    if (
+                        item.get("record_id") == wanted_record
+                        or item.get("event_id") == wanted_record
+                        or item.get("quote_id") == wanted_record
+                    )
+                ),
+                None,
+            )
             if (
                 selected is None
                 or selected.get("tenant_id") != tenant

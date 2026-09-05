@@ -211,6 +211,10 @@ class MovieImageRecognitionService:
         result is unusable, and its output goes through the same strict schema
         and official Wanda quote gates as a normal screenshot.
         """
+        self._diagnostics.add(
+            "legacy_recognition_invoked",
+            entrypoint="MovieImageRecognitionService.recognize_from_url",
+        )
         settings = self._settings_provider()
         liangpiao_error: str | None = None
         if not ticket_image and settings.liangpiao_app_key.strip() and settings.liangpiao_app_secret.strip():

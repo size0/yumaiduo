@@ -143,7 +143,10 @@ def test_canonical_text_is_terminal_and_never_enters_legacy(monkeypatch, tmp_pat
     monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
     shops = ShopAutomationStore(tmp_path / "shops.json")
     shops.sync("107", [{"accountUnb": "2313315754", "shopName": "test"}])
-    shops.set_settings("107", "2313315754", enabled=True, canonical_quote_enabled=True)
+    shops.set_settings(
+        "107", "2313315754", enabled=True,
+        canonical_quote_enabled=True, canonical_conversation_enabled=True,
+    )
 
     class AgentStub:
         calls: list[dict[str, object]] = []
@@ -169,7 +172,7 @@ def test_canonical_text_is_terminal_and_never_enters_legacy(monkeypatch, tmp_pat
                 },
             },
             "session": {"accountUnb": "2313315754", "peerUnb": "2217098857081", "chatId": "66166718230"},
-            "recentMessages": [],
+            "recent_messages": [],
         },
         headers={"X-Wanda-AI-V2-Bridge-Key": "bridge-test-secret"},
     )
@@ -215,6 +218,46 @@ def test_canonical_agent_ignores_outbound_or_human_message_event(monkeypatch, tm
     assert response.status_code == 202
     assert "canonical_agent_status" not in response.json()
     assert agent.calls == []
+
+
+def test_canonical_agent_still_triggers_for_unfamiliar_buyer_vocab(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WANDA_AI_V2_BRIDGE_KEY", "bridge-test-secret")
+    shops = ShopAutomationStore(tmp_path / "shops.json")
+    shops.sync("107", [{"accountUnb": "2313315754", "shopName": "test"}])
+    shops.set_settings("107", "2313315754", enabled=True, canonical_quote_enabled=True, canonical_conversation_enabled=True)
+
+    class AgentStub:
+        calls: list[dict[str, object]] = []
+
+        async def process(self, body):
+            self.calls.append(body)
+            return {"status": "AGENT_REPLY_READY", "reply": "已读取当前会话。", "actions": []}
+
+    agent = AgentStub()
+    client = TestClient(create_app(
+        service=StubRecognitionService(), shop_automation_store=shops,
+        canonical_conversation_agent=agent,
+    ))
+    response = client.post(
+        "/api/wanda-ai-v2/plugin/events/process",
+        json={
+            "envelope": {
+                "id": "canonical-text-unknown-1", "tenantId": "107", "event": "im.message.received",
+                "payload": {
+                    "accountUnb": "2313315754", "peerUnb": "2217098857081",
+                    "chatId": "66166718230", "remoteMessageId": "buyer-text-unknown-1",
+                    "messageType": 1, "content": {"text": "价钱多少"},
+                    "direction": "customer",
+                },
+            },
+            "session": {"accountUnb": "2313315754", "peerUnb": "2217098857081", "chatId": "66166718230"},
+            "recentMessages": [],
+        },
+        headers={"X-Wanda-AI-V2-Bridge-Key": "bridge-test-secret"},
+    )
+    assert response.status_code == 202
+    assert response.json()["canonical_agent_status"] == "AGENT_REPLY_READY"
+    assert len(agent.calls) == 1
 
 
 def test_v4_plugin_bridge_persists_before_accepting_and_is_authenticated(monkeypatch, tmp_path: Path) -> None:
@@ -531,15 +574,21 @@ def test_shop_switches_are_tenant_scoped_and_bridge_authenticated(monkeypatch, t
     )
     updated = client.put(
         "/api/plugin/shops/shop-1", headers={"X-Wanda-Tenant-Id": "tenant-a"},
-        json={"enabled": False, "canonical_quote_enabled": True},
+        json={
+            "enabled": False,
+            "canonical_quote_enabled": True,
+            "canonical_conversation_enabled": True,
+        },
     )
     other = client.get("/api/plugin/shops", headers={"X-Wanda-Tenant-Id": "tenant-b"})
 
     assert synced.json() == {"accepted": 1}
     assert listed.json() == {"shops": [{"shop_id": "shop-1", "shop_name": "一号店", "enabled": True}]}
     assert canonical_listed.json()["shops"][0]["canonical_quote_enabled"] is False
+    assert canonical_listed.json()["shops"][0]["canonical_conversation_enabled"] is False
     assert updated.json()["shop"]["enabled"] is False
     assert updated.json()["shop"]["canonical_quote_enabled"] is True
+    assert updated.json()["shop"]["canonical_conversation_enabled"] is True
     assert other.json() == {"shops": []}
     assert client.get("/api/plugin/shops").status_code == 401
 

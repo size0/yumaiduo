@@ -84,6 +84,43 @@ async def test_customer_service_calls_selected_gpt_with_thinking_disabled() -> N
 
 
 @pytest.mark.asyncio
+async def test_customer_service_can_forward_minimal_tool_schema() -> None:
+    captured: dict[str, object] = {}
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "get_current_context",
+            "description": "Read current conversation context.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+        })
+
+    settings = Settings(
+        chat_api_key="relay-key",
+        chat_base_url="https://airelvo.cc/v1",
+        chat_model="gpt-5.5",
+        chat_prompt="You are a connectivity test.",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        reply = await CustomerServiceChatService(settings, client=client).reply(
+            "Reply with OK.", "conversation-1", tools=tools,
+        )
+
+    assert reply == "OK"
+    assert captured["tools"] == tools
+
+
+@pytest.mark.asyncio
 async def test_customer_service_injects_policy_and_enabled_knowledge_into_ai_prompt() -> None:
     captured: dict[str, object] = {}
 
