@@ -111,22 +111,23 @@ class FakeModel:
 
 def test_agent_resolves_config_per_run_and_audits_id_revision_without_context_key(tmp_path: Path) -> None:
     rules = RulesFirstStore(tmp_path / "rules.sqlite3", protector=ReversibleProtector())
-    calls: list[str] = []
+    calls: list[tuple[str, str, str]] = []
     current = {"config_id": "config-a", "config_revision": 1, "provider": "OpenAI-compatible", "base_url": "https://a.example/v1", "model": "a-model"}
 
-    def resolve(_tenant: str, _shop: str, _purpose: str):
-        return {"model": FakeModel(current["model"], calls), "metadata": dict(current)}
+    def resolve(tenant_id: str, shop_id: str, *, purpose: str = "conversation_agent"):
+        calls.append((tenant_id, shop_id, purpose))
+        return {"model": FakeModel(current["model"], []), "metadata": dict(current)}
 
     body = {
         "envelope": {"id": "event-1", "tenantId": "107", "payload": {"accountUnb": "2313315754", "peerUnb": "buyer", "chatId": "chat", "content": {"text": "你好"}}},
         "session": {"accountUnb": "2313315754", "peerUnb": "buyer", "chatId": "chat"},
         "recent_messages": [],
     }
-    agent = CanonicalConversationAgent(AgentContextBuilder(), FakeModel("unused", calls), model_resolver=resolve, audit_store=rules)
+    agent = CanonicalConversationAgent(AgentContextBuilder(), FakeModel("bootstrap", []), model_resolver=resolve, audit_store=rules)
 
     first = asyncio.run(agent.process(body))
     assert first["status"] == "AGENT_REPLY_READY"
-    assert calls == ["a-model"]
+    assert calls == [("107", "2313315754", "conversation_agent")]
     run = rules.get_agent_run(first["agent_run_id"])
     assert run is not None
     assert run["model_config_id"] == "config-a"
@@ -137,7 +138,10 @@ def test_agent_resolves_config_per_run_and_audits_id_revision_without_context_ke
     body["envelope"]["id"] = "event-2"
     second = asyncio.run(agent.process(body))
     assert second["status"] == "AGENT_REPLY_READY"
-    assert calls == ["a-model", "b-model"]
+    assert calls == [
+        ("107", "2313315754", "conversation_agent"),
+        ("107", "2313315754", "conversation_agent"),
+    ]
     second_run = rules.get_agent_run(second["agent_run_id"])
     assert second_run["model_config_id"] == "config-b"
     assert second_run["model_config_revision"] == 2
@@ -170,6 +174,40 @@ def test_model_resolution_failure_fails_closed_instead_of_using_bootstrap_model(
     assert result["status"] == "AGENT_REPLY_UNAVAILABLE"
     assert result["reason"] == "agent_model_failed"
     assert calls == []
+
+
+def test_agent_resolves_model_with_keyword_only_purpose_argument(tmp_path: Path) -> None:
+    rules = RulesFirstStore(tmp_path / "rules.sqlite3", protector=ReversibleProtector())
+    calls: list[tuple[str, str, str]] = []
+
+    def resolve(tenant_id: str, shop_id: str, *, purpose: str = "conversation_agent"):
+        calls.append((tenant_id, shop_id, purpose))
+        return {
+            "model": FakeModel("ui-model", []),
+            "metadata": {
+                "config_id": "config-a",
+                "config_revision": 1,
+                "provider": "OpenAI-compatible",
+                "base_url": "https://ui-config.example/v1",
+                "model": "ui-model",
+            },
+        }
+
+    agent = CanonicalConversationAgent(
+        AgentContextBuilder(),
+        FakeModel("bootstrap", []),
+        model_resolver=resolve,
+        audit_store=rules,
+    )
+    body = {
+        "envelope": {"id": "event-1", "tenantId": "107", "payload": {"accountUnb": "2313315754", "peerUnb": "buyer", "chatId": "chat", "content": {"text": "你好"}}},
+        "session": {"accountUnb": "2313315754", "peerUnb": "buyer", "chatId": "chat"},
+        "recent_messages": [],
+    }
+
+    result = asyncio.run(agent.process(body))
+    assert result["status"] == "AGENT_REPLY_READY"
+    assert calls == [("107", "2313315754", "conversation_agent")]
 
 
 def test_plain_and_tools_calls_use_the_resolved_ui_endpoint_and_model() -> None:

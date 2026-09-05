@@ -767,7 +767,7 @@ class CanonicalConversationAgent:
         if not callable(resolver):
             return fallback, metadata
         try:
-            resolved = resolver(context.tenant_id, context.shop_id, "conversation_agent")
+            resolved = resolver(context.tenant_id, context.shop_id, purpose="conversation_agent")
         except Exception:
             return _UnavailableAgentModel(), {"config_resolution_failed": True}
         if isinstance(resolved, Mapping):
