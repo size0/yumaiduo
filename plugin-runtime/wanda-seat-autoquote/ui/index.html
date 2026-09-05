@@ -8,26 +8,43 @@
 </head>
 <body>
 <header class="plugin-page-header">
-  <div><h1>闲鱼插件</h1><p>会员座识别、自动报价改价与出票预约</p></div>
-  <div class="plugin-page-status"><span></span><strong>Wanda AI</strong><small>本地服务</small></div>
+  <div><h1>万达票务助手</h1><p>万达电影票自动报价与运营管理</p></div>
+  <div class="plugin-page-status"><span></span><strong id="headerHealth">系统运行正常</strong><small>本地服务</small></div>
 </header>
-<header class="site-navigation" id="siteNavigation">
-  <nav class="site-nav-list" role="tablist" aria-label="万达电影票AI客服功能导航">
-    <button class="site-nav-button active" type="button" role="tab" aria-selected="true" data-workspace="chat"><span class="site-nav-icon" aria-hidden="true">⌂</span><span>客服工作台</span></button>
+<!-- Legacy feature boundary retained without a first-level menu: data-workspace="chat" data-workspace="conversation" · 客服工作台 -->
+<aside class="site-navigation" id="siteNavigation">
+  <div class="site-brand"><span class="site-brand-dot"></span><div><strong>万达票务助手</strong><small>Wanda Plugin Cockpit</small></div></div>
+  <nav class="site-nav-list" role="tablist" aria-label="万达票务助手功能导航">
+    <button class="site-nav-button active" type="button" role="tab" aria-selected="true" data-workspace="overview"><span class="site-nav-icon" aria-hidden="true">⌂</span><span>概览</span></button>
+    <div class="nav-section-title">业务</div>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="shops"><span class="site-nav-icon" aria-hidden="true">店</span><span>店铺开关</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="pricing"><span class="site-nav-icon" aria-hidden="true">▣</span><span>运营报价</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="quote-records"><span class="site-nav-icon" aria-hidden="true">价</span><span>报价记录</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="orders"><span class="site-nav-icon" aria-hidden="true">单</span><span>订单管理</span></button>
+    <div class="nav-section-title">配置 / AI</div>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="templates"><span class="site-nav-icon" aria-hidden="true">言</span><span>回复话术</span></button>
-    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="conversation"><span class="site-nav-icon" aria-hidden="true">忆</span><span>会话策略</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="model"><span class="site-nav-icon" aria-hidden="true">✦</span><span>模型接口</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="knowledge"><span class="site-nav-icon" aria-hidden="true">▤</span><span>知识库</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="agent-audit"><span class="site-nav-icon" aria-hidden="true">审</span><span>Agent审计</span></button>
     <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="manual-tasks"><span class="site-nav-icon" aria-hidden="true">人</span><span>人工任务</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="settings"><span class="site-nav-icon" aria-hidden="true">⚙</span><span>设置</span></button>
   </nav>
-  <div class="site-brand"><span class="site-brand-dot"></span><div><strong>Wanda AI</strong><small>本地运营管理台</small></div></div>
-</header>
+</aside>
 <div class="page" id="mainPage">
+  <section class="workspace-page overview-page" id="overviewPage" data-workspace-page="overview" aria-label="万达票务助手概览">
+    <div class="page-heading"><div><span class="eyebrow">OVERVIEW</span><h2>万达票务助手概览</h2><p>查看当前插件运行状态、报价服务与最近处理记录。</p></div><button class="outline-button" id="refreshOverview" type="button">↻ 刷新</button></div>
+    <div class="overview-kpis">
+      <article class="overview-kpi"><span class="kpi-icon blue">⌁</span><div><small>今日识别报价</small><strong id="overviewQuoteCount">—</strong><em id="overviewQuoteMeta">正在读取</em></div></article>
+      <article class="overview-kpi"><span class="kpi-icon green">✦</span><div><small>Agent 状态</small><strong id="overviewAgentStatus">—</strong><em id="overviewAgentMeta">正在读取</em></div></article>
+      <article class="overview-kpi"><span class="kpi-icon violet">店</span><div><small>已开启店铺</small><strong id="overviewShopCount">—</strong><em id="overviewShopMeta">正在读取</em></div></article>
+      <article class="overview-kpi"><span class="kpi-icon orange">!</span><div><small>最近异常</small><strong id="overviewExceptionCount">—</strong><em id="overviewExceptionMeta">正在读取</em></div></article>
+    </div>
+    <div class="overview-grid">
+      <section class="cockpit-card config-card"><header><div><h3>当前生效配置</h3><p>来自当前作用域的真实配置，不展示密钥。</p></div><span class="status-badge success" id="overviewConfigStatus">检查中</span></header><div class="config-list" id="overviewConfigList"><div class="empty-state">正在读取配置…</div></div></section>
+      <section class="cockpit-card quick-card"><header><div><h3>快捷操作</h3><p>前往已有功能页面。</p></div></header><div class="quick-actions"><button type="button" data-quick-workspace="shops">管理店铺开关<span>查看自动化与 Canonical 状态</span></button><button type="button" data-quick-workspace="pricing">编辑报价规则<span>配置现有后台报价规则</span></button><button type="button" data-quick-workspace="quote-records">查看报价记录<span>浏览真实核价结果</span></button><button type="button" data-quick-workspace="model">模型接口<span>管理作用域模型配置</span></button></div></section>
+    </div>
+    <section class="cockpit-card runs-card"><header><div><h3>最近运行记录</h3><p>只读展示 Agent 审计与人工任务摘要。</p></div><button class="text-button" type="button" data-quick-workspace="agent-audit">查看全部</button></header><div class="overview-runs" id="overviewRuns"><div class="empty-state">正在读取运行记录…</div></div></section>
+  </section>
   <section class="workspace-page" id="workspaceChat" data-workspace-page="chat">
   <main class="chat-app" aria-label="万达电影票 AI 客服对话">
     <header class="chat-header">
@@ -103,6 +120,7 @@
   </nav>
   <div class="settings-body">
     <section class="settings-panel" id="modelSettingsPanel" role="tabpanel" aria-labelledby="modelSettingsTab">
+    <section class="model-connection-card"><header><div><span class="eyebrow">ACTIVE MODEL CONFIG</span><h3>当前模型连接</h3></div><span class="status-badge" id="modelConnectionStatus">检查中</span></header><dl><div><dt>Provider</dt><dd id="modelProviderValue">—</dd></div><div><dt>Base URL</dt><dd id="modelBaseUrlValue">—</dd></div><div><dt>Model</dt><dd id="modelNameValue">—</dd></div><div><dt>API Key</dt><dd id="modelKeyValue">未配置</dd></div><div><dt>Config ID</dt><dd id="modelConfigIdValue">—</dd></div><div><dt>Revision</dt><dd id="modelRevisionValue">—</dd></div></dl></section>
     <div class="setting-group">
       <label for="modelConfigScope">模型配置作用域</label>
       <select id="modelConfigScope"><option value="global">系统默认（全局）</option><option value="tenant">当前租户</option></select>
@@ -185,13 +203,16 @@
         <p>按当前鱼麦多租户独立控制店铺。关闭后，该店铺不会自动回复，也不会自动改价。</p>
       </div>
       <div class="operation-section" data-operation-view="shops">
-        <div class="shop-list-header"><div><h3>已授权店铺</h3><p>自动化开关默认开启；Canonical 报价为独立灰度开关，未配置店铺默认关闭。</p></div><button class="text-button" id="refreshShops" type="button">刷新店铺</button></div>
+        <div class="shop-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="shopSearch" type="search" autocomplete="off" placeholder="搜索店铺名称或 ID"></label><select id="shopStatusFilter"><option value="">全部状态</option><option value="enabled">已开启</option><option value="disabled">已关闭</option></select><select id="shopPlatformFilter"><option>全部平台</option></select><button class="outline-button" id="resetShopFilters" type="button">重置</button><button class="outline-button" id="refreshShops" type="button">↻ 刷新</button></div>
+        <div class="shop-list-header"><div><h3>店铺信息</h3><p>字段仅展示当前 API 返回的真实信息；不存在的健康与同步字段不造数据。</p></div><span id="shopCount">—</span></div>
+        <div class="shop-column-head"><span>店铺信息</span><span>自动化服务</span><span>Canonical 报价</span></div>
         <div class="shop-list" id="shopList"><div class="diagnostic-empty">正在读取店铺…</div></div>
+        <div class="list-footer"><span id="shopFooterCount">—</span><span>‹　<b>1</b>　›　 10 条 / 页</span></div>
       </div>
       <div class="records-console" data-operation-view="quote-records">
         <header class="records-head"><div><h3>报价记录</h3><p>展示当前租户的万达官方核价结果；失败原因仅供后台排查，不发送给买家。</p></div><button class="text-button" id="refreshQuoteRecords" type="button">刷新记录</button></header>
         <div class="record-summary" id="quoteRecordSummary">正在读取报价记录…</div>
-        <div class="record-list" id="quoteRecordList"><div class="diagnostic-empty">正在读取报价记录…</div></div>
+        <div class="split-record-workspace"><div class="record-list" id="quoteRecordList"><div class="diagnostic-empty">正在读取报价记录…</div></div><aside class="detail-panel" id="quoteRecordDetail"><div class="detail-panel-empty">选择一条报价记录查看详情</div></aside></div>
       </div>
       <div class="records-console order-console" data-operation-view="orders">
         <header class="records-head"><div><h3>订单管理</h3><p>统一展示良票订单和鱼麦多万达手动出票订单；价格与状态只读取对应平台的权威结果。</p></div><button class="text-button" id="refreshOrders" type="button">刷新订单</button></header>
@@ -200,7 +221,7 @@
           <div class="order-filters" role="group" aria-label="订单状态筛选"><button class="active" type="button" data-order-filter="all">全部</button><button type="button" data-order-filter="unpaid">待付款</button><button type="button" data-order-filter="paid">已付款</button><button type="button" data-order-filter="shipped">已发货</button><button type="button" data-order-filter="closed">已关闭</button></div>
         </div>
         <div class="record-summary" id="orderSummary">正在读取订单…</div>
-        <div class="record-list order-list" id="orderList"><div class="diagnostic-empty">正在读取订单…</div></div>
+        <div class="split-record-workspace order-split-workspace"><div class="record-list order-list" id="orderList"><div class="diagnostic-empty">正在读取订单…</div></div><aside class="detail-panel" id="orderRecordDetail"><div class="detail-panel-empty">选择一笔订单查看详情</div></aside></div>
       </div>
       <div class="template-console" data-operation-view="templates">
         <header class="template-console-head"><div><h3>自动回复文案</h3><p>配置识图、报价与改价过程中的自动回复；AI 不参与生成价格。</p></div><button class="template-save" id="saveTemplates" type="button">▣&nbsp; 保存文案</button></header>
@@ -228,10 +249,10 @@
         </div>
         <footer class="template-console-foot"><span id="templateRevision">正在读取话术版本…</span></footer>
       </div>
-      <div class="operations-hero" data-operation-view="conversation">
-        <strong>按买家会话独立记忆</strong><p>每个租户、店铺和聊天会话分别保存上下文；这里只控制保留时长、消息深度、业务区间和人工接管等待。</p>
+      <div class="operations-hero" data-operation-view="settings">
+        <strong>通用配置</strong><p>保留现有会话策略与人工接管配置，修改后由后端按原有语义生效。</p>
       </div>
-      <div class="operation-section" data-operation-view="conversation">
+      <div class="operation-section" data-operation-view="settings">
         <div class="money-grid"><div class="setting-group"><label class="switch-line"><span>AI 自动回复</span><span class="switch"><input id="aiReplyEnabled" type="checkbox"><span class="slider"></span></span></label><div class="setting-help">关闭后停止大模型自由文本回复；识图、实时核价、固定流程话术、订单绑定与改价继续运行。</div></div><div class="setting-group"><label for="memoryHours">记忆时长（小时）</label><input id="memoryHours" type="number" min="1" max="24"><div class="setting-help">同一买家会话在此时间内延续上下文，范围1–24小时。</div></div><div class="setting-group"><label for="memoryDepth">记忆深度（条消息）</label><input id="memoryDepth" type="number" min="5" max="50"><div class="setting-help">只保留最近消息，范围5–50条；图片原文件不会进入记忆。</div></div><div class="setting-group"><label for="humanTakeoverDelay">人工回复后等待接管（秒）</label><input id="humanTakeoverDelay" type="number" min="5" max="300"><div class="setting-help">识别为人工发送的消息后，AI等待该时长再处理买家新消息。</div></div><div class="setting-group"><label class="switch-line"><span>业务区间开关</span><span class="switch"><input id="stageGateEnabled" type="checkbox"><span class="slider"></span></span></label><div class="setting-help">开启后仅在选定权威订单阶段介入；无法确认订单阶段时仍失败关闭。</div></div><div class="setting-group"><label for="interventionStart">介入起点</label><select id="interventionStart"><option value="consultation">咨询</option><option value="order_pending">拍下</option><option value="payment">付款</option><option value="shipping_refund">发货/退款</option></select></div><div class="setting-group"><label for="interventionEnd">介入终点</label><select id="interventionEnd"><option value="consultation">咨询</option><option value="order_pending">拍下</option><option value="payment">付款</option><option value="shipping_refund">发货/退款</option></select></div></div>
         <div class="setting-group"><label for="personaBackground">客服人设及业务背景</label><textarea id="personaBackground" maxlength="2500" placeholder="例如：热情、专业、简洁的电影票在线客服；提供万达官方影院电影票代订服务，价格、库存、座位和出票状态以实时权威结果为准。"></textarea><div class="setting-help">将客服人设和店铺业务边界统一填写在这里。</div></div>
         <div class="setting-group"><label for="customerServiceKnowledge">客服知识与常见问题补充</label><textarea id="customerServiceKnowledge" maxlength="3000" placeholder="填写不适合拆成知识条目的总则；具体问答请在知识库维护"></textarea></div>
@@ -279,6 +300,10 @@
             <button class="template-save pricing-save" id="saveOperations" type="button">保存运营报价规则</button>
           </section>
         </div>
+        <div class="pricing-bottom-grid">
+          <section class="pricing-preview-panel"><header><div><span class="eyebrow">PREVIEW</span><h3>报价预览</h3><p>仅展示规则配置结构，不替代后端真实核价。</p></div><span class="status-badge neutral">只读</span></header><div class="preview-quote"><span>示例 W+ 会员价</span><strong>¥58.00</strong><div><span>匹配区间</span><b>80% — 90%</b></div><div><span>最终报价</span><b id="pricingPreviewValue">由后端规则计算</b></div></div></section>
+          <section class="pricing-history-panel"><header><div><span class="eyebrow">HISTORY</span><h3>版本历史</h3></div></header><div class="history-item"><span class="history-dot"></span><div><strong id="pricingHistoryVersion">当前版本</strong><small id="pricingHistoryMeta">保存后显示真实修订号</small></div><span class="status-badge success">生效</span></div><div class="history-item muted"><span class="history-dot"></span><div><strong>历史记录</strong><small>由后端保存的修订信息</small></div></div></section>
+        </div>
       </div>
       <div class="operation-section" data-operation-view="safety">
         <h3>强制安全门禁</h3><p>以下规则属于交易安全边界，运营人员不可关闭。</p>
@@ -293,7 +318,7 @@
       </div>
       <div class="operation-section" data-operation-view="knowledge">
         <h3>客服知识库</h3><p>常见问题拆分为可编辑、可启停、可分类的知识条目；只有启用条目会注入 AI 回复。</p>
-        <div class="knowledge-toolbar"><button class="inline-setting-button" id="addKnowledge" type="button">新增知识</button><select id="knowledgeCategoryFilter"><option value="">全部分类</option><option>售后人工</option><option>下单确认</option><option>订单出票</option><option>报价规则</option><option>截图识别</option><option>异常处理</option><option>购票流程</option><option>常见问题</option></select></div>
+        <div class="knowledge-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="knowledgeSearch" type="search" autocomplete="off" placeholder="搜索知识库内容"></label><button class="inline-setting-button" id="addKnowledge" type="button">＋ 新建文档</button><select id="knowledgeCategoryFilter"><option value="">全部分类</option><option>售后人工</option><option>下单确认</option><option>订单出票</option><option>报价规则</option><option>截图识别</option><option>异常处理</option><option>购票流程</option><option>常见问题</option></select></div>
         <div class="knowledge-stats"><div class="knowledge-stat"><b id="knowledgeTotal">0</b><span>全部条目</span></div><div class="knowledge-stat"><b id="knowledgeEnabled">0</b><span>已启用</span></div><div class="knowledge-stat"><b id="knowledgeCategories">0</b><span>分类</span></div></div>
         <div class="knowledge-notice"><strong>安全提示</strong><span>知识库只影响常见问题的识别和表达；价格、库存、订单、付款、出票、退款和人工接管仍由确定性规则掌管。W+代订与纯文字咨询仍须经过实时核验。</span></div>
         <div class="knowledge-list" id="knowledgeList"></div>
