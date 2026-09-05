@@ -279,7 +279,17 @@ class CustomerServiceChatService:
             "quote_error": quote_error,
         })
 
-    async def reply(self, text: str, conversation_id: str) -> str:
+    async def reply(
+        self,
+        text: str,
+        conversation_id: str,
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        self._diagnostics.add(
+            "legacy_agent_invoked",
+            entrypoint="CustomerServiceChatService.reply",
+        )
         settings = self._settings_provider()
         history, image_contexts = self._conversation_store.snapshot(conversation_id)
         known_ticket_count = self._known_ticket_count(history, text)
@@ -348,6 +358,8 @@ class CustomerServiceChatService:
             ),
             "messages": messages,
         }
+        if tools is not None:
+            payload["tools"] = tools
         if history or image_contexts:
             self._diagnostics.add(
                 "chat_conversation_context_used",

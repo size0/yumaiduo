@@ -226,6 +226,10 @@ class WandaDirectQuoteService:
     async def quote(
         self, recognition: MovieImageInfo, *, wanda_cinema_id: str | None = None,
     ) -> RealQuote:
+        self._diagnostics.add(
+            "legacy_quote_invoked",
+            entrypoint="WandaDirectQuoteService.quote",
+        )
         started = time.perf_counter()
         settings = self._settings_provider()
         rules = PricingRulesUpdate.model_validate(self._pricing_rules_provider())

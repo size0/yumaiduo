@@ -1,3 +1,11 @@
+"""Frozen Legacy buyer automation boundary.
+
+This module remains production-reachable through ``RulesFirstRuntime`` when a
+Canonical route does not match.  It owns the Legacy NLP/template reply path;
+new Canonical code must not import it or its pricing helpers.  Keep behavior
+stable until Legacy is retired after the Agent cutover.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -57,6 +65,8 @@ class ChatService(Protocol):
 
 class ShopStore(Protocol):
     def is_enabled(self, tenant_id: str, shop_id: str) -> bool: ...
+    def is_canonical_quote_enabled(self, tenant_id: str, shop_id: str) -> bool: ...
+    def is_canonical_conversation_enabled(self, tenant_id: str, shop_id: str) -> bool: ...
 
 
 class PendingCinemaCandidateStore(Protocol):
@@ -1120,6 +1130,17 @@ class RulesFirstDecisionEngine:
             return {"decision": {"mode": "auto", "actions": [], "reason": reason}}
         if self._shops is not None and not self._shops.is_enabled(identity["tenant_id"], identity["shop_id"]):
             return {"decision": {"mode": "auto", "actions": [], "reason": "shop_automation_disabled"}}
+        canonical_quote_enabled = False
+        canonical_conversation_enabled = False
+        if self._shops is not None:
+            quote_enabled = getattr(self._shops, "is_canonical_quote_enabled", None)
+            conversation_enabled = getattr(self._shops, "is_canonical_conversation_enabled", None)
+            if callable(quote_enabled):
+                canonical_quote_enabled = quote_enabled(identity["tenant_id"], identity["shop_id"])
+            if callable(conversation_enabled):
+                canonical_conversation_enabled = conversation_enabled(
+                    identity["tenant_id"], identity["shop_id"],
+                )
         human_takeover_active = False
         if policy is not None:
             event_time = _event_time_ms(envelope)
@@ -1134,6 +1155,8 @@ class RulesFirstDecisionEngine:
                 envelope, identity, messages, body.get("order"),
                 suppress_generic_ai=human_takeover_active or stage_suppresses_generic_ai,
                 generic_ai_reply_enabled=generic_ai_reply_enabled,
+                canonical_quote_enabled=canonical_quote_enabled,
+                canonical_conversation_enabled=canonical_conversation_enabled,
             )
         if event_type in {"order.paid", "order.shipped"}:
             order_state = _authoritative_order_state(body.get("order"))
@@ -1605,6 +1628,8 @@ class RulesFirstDecisionEngine:
         *,
         suppress_generic_ai: bool = False,
         generic_ai_reply_enabled: bool = True,
+        canonical_quote_enabled: bool = False,
+        canonical_conversation_enabled: bool = False,
     ) -> dict[str, object]:
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
         payload_message_type = str(payload.get("messageType", payload.get("message_type", ""))).strip()
@@ -1653,6 +1678,27 @@ class RulesFirstDecisionEngine:
         if normalized_message_type not in {"1", "2"} and not (isinstance(urls, list) and urls):
             return {"decision": {
                 "mode": "auto", "actions": [], "reason": "platform_non_buyer_text_deferred",
+            }}
+        has_image = isinstance(urls, list) and bool(urls)
+        if has_image and canonical_quote_enabled:
+            LOGGER.warning(
+                "event=LEGACY_RECOGNITION_ATTEMPT_BLOCKED tenant_id=%s shop_id=%s",
+                identity["tenant_id"], identity["shop_id"],
+            )
+            LOGGER.warning(
+                "event=LEGACY_QUOTE_ATTEMPT_BLOCKED tenant_id=%s shop_id=%s",
+                identity["tenant_id"], identity["shop_id"],
+            )
+            return {"decision": {
+                "mode": "auto", "actions": [], "reason": "canonical_shop_legacy_image_fenced",
+            }}
+        if not has_image and canonical_conversation_enabled and normalized_message_type in {"", "1"}:
+            LOGGER.warning(
+                "event=LEGACY_AGENT_ATTEMPT_BLOCKED tenant_id=%s shop_id=%s",
+                identity["tenant_id"], identity["shop_id"],
+            )
+            return {"decision": {
+                "mode": "auto", "actions": [], "reason": "canonical_shop_legacy_text_fenced",
             }}
         conversation_id = f'{identity["tenant_id"]}:{identity["shop_id"]}:{identity["chat_id"]}'
         synchronize = getattr(self._chat, "sync_platform_history", None)

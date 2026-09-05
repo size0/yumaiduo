@@ -972,17 +972,23 @@ def create_app(
         canonical_enabled = body.get("canonical_quote_enabled")
         if canonical_present and type(canonical_enabled) is not bool:
             raise HTTPException(status_code=422, detail="canonical_quote_enabled_boolean_required")
+        conversation_present = "canonical_conversation_enabled" in body
+        conversation_enabled = body.get("canonical_conversation_enabled")
+        if conversation_present and type(conversation_enabled) is not bool:
+            raise HTTPException(status_code=422, detail="canonical_conversation_enabled_boolean_required")
         try:
             shop = persistent_shop_automation.set_settings(
                 tenant_id, shop_id, enabled=enabled,
                 canonical_quote_enabled=canonical_enabled if canonical_present else None,
+                canonical_conversation_enabled=conversation_enabled if conversation_present else None,
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="shop_not_found") from None
         LOGGER.info(
-            "event=shop_automation_saved enabled=%s canonical_quote_enabled=%s",
+            "event=shop_automation_saved enabled=%s canonical_quote_enabled=%s canonical_conversation_enabled=%s",
             str(enabled).lower(),
             str(canonical_enabled).lower() if canonical_present else "unchanged",
+            str(conversation_enabled).lower() if conversation_present else "unchanged",
         )
         return {"shop": shop}
 
@@ -1013,14 +1019,28 @@ def create_app(
             return False
         return persistent_shop_automation.is_canonical_quote_enabled(tenant_id, shop_id)
 
+    def canonical_conversation_shop_enabled(body: Mapping[str, object]) -> bool:
+        envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
+        payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
+        session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
+        tenant_id = str(
+            envelope.get("tenantId") or envelope.get("tenant_id") or body.get("tenant_id") or ""
+        ).strip()
+        shop_id = str(
+            payload.get("accountUnb") or payload.get("account_unb") or payload.get("shopId")
+            or payload.get("shop_id") or session.get("accountUnb") or session.get("account_unb")
+            or session.get("shopId") or session.get("shop_id") or ""
+        ).strip()
+        if not tenant_id or not shop_id:
+            return False
+        return persistent_shop_automation.is_canonical_conversation_enabled(tenant_id, shop_id)
+
     def canonical_buyer_message_event(body: Mapping[str, object]) -> bool:
         """Only buyer-originated IM events may enter the conversation agent.
 
-        The plugin also forwards seller/operator events.  If direction is
-        present, require an explicit buyer-like value; self-marked messages
-        are always terminal to prevent an agent echo loop.  Legacy payloads
-        without direction remain accepted for backward-compatible canary
-        fixtures.
+        The canary must stay terminal for buyer text/image events even when the
+        platform adds new buyer-facing vocab.  Explicit seller/operator markers
+        remain blocked so we do not echo human replies back into Canonical.
         """
         envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
@@ -1030,7 +1050,16 @@ def create_app(
         values = [str(value).strip().lower() for value in values if value not in (None, "")]
         if not values:
             return True
-        return all(value in {"inbound", "buyer", "peer", "user", "receive", "received"} for value in values)
+        seller_markers = {"seller", "outbound", "sent", "staff", "human", "operator", "merchant"}
+        if any(value in seller_markers for value in values):
+            return False
+        buyer_markers = {"inbound", "buyer", "peer", "user", "receive", "received", "customer", "client"}
+        if any(value in buyer_markers for value in values):
+            return True
+        # Unknown platform vocab is treated as buyer-facing for the canary shop
+        # so the canonical text/image fence remains terminal instead of leaking
+        # to the Legacy reply engine.
+        return True
 
     @app.post("/api/wanda-ai-v2/plugin/events/process", status_code=202)
     async def plugin_process_event(
@@ -1056,6 +1085,7 @@ def create_app(
             and buyer_message_event
             and canonical_conversation_scope(body)
             and canonical_shop_canary_enabled(body)
+            and canonical_conversation_shop_enabled(body)
         )
         if canonical_text_event:
             # Once a shop is canonical-enabled, related text is terminal here;

@@ -95,6 +95,7 @@ def body(*, text="价钱多少", context=None):
             {"direction": "outbound", "messageType": 1, "content": "人工补充信息", "agent_generated": False, "messageId": "human-1"},
         ],
         "canonical_recognition": {
+            "source": "LIANGPIAO",
             "city": "牡丹江", "cinema": "万达影城", "movie": "坠落2：死点",
             "quote_date": "2026-09-05", "showtime_start": "19:55", "hall": "3号激光厅",
             "selected_seats": ["8排7座", "8排8座"], "status": "candidate",

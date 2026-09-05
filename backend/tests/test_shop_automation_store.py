@@ -13,6 +13,7 @@ def test_sync_creates_tenant_isolated_enabled_shops_and_preserves_switch(tmp_pat
 
     store.sync("tenant-a", [{"accountUnb": "shop-1", "shopName": "一号店"}])
     store.set_enabled("tenant-a", "shop-1", False)
+    store.set_settings("tenant-a", "shop-1", canonical_conversation_enabled=True)
     store.sync("tenant-a", [{"accountUnb": "shop-1", "shopName": "一号店新名称"}, {"accountUnb": "shop-2", "shopName": "二号店"}])
     store.sync("tenant-b", [{"accountUnb": "shop-1", "shopName": "其他租户店"}])
 
@@ -20,6 +21,7 @@ def test_sync_creates_tenant_isolated_enabled_shops_and_preserves_switch(tmp_pat
         {"shop_id": "shop-1", "shop_name": "一号店新名称", "enabled": False},
         {"shop_id": "shop-2", "shop_name": "二号店", "enabled": True},
     ]
+    assert store.list_shops("tenant-a", include_canonical=True)[0]["canonical_conversation_enabled"] is True
     assert store.is_enabled("tenant-a", "shop-1") is False
     assert store.is_enabled("tenant-b", "shop-1") is True
     assert ShopAutomationStore(path).is_enabled("tenant-a", "shop-1") is False

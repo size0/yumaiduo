@@ -71,6 +71,7 @@ class ShopAutomationStore:
                     # shop records therefore remain automation-compatible while
                     # defaulting the new path to OFF.
                     "canonical_quote_enabled": previous.get("canonical_quote_enabled", False) is True,
+                    "canonical_conversation_enabled": previous.get("canonical_conversation_enabled", False) is True,
                 }
                 accepted += 1
             self._write(data)
@@ -95,6 +96,7 @@ class ShopAutomationStore:
                 }
                 if include_canonical:
                     item["canonical_quote_enabled"] = value.get("canonical_quote_enabled") is True
+                    item["canonical_conversation_enabled"] = value.get("canonical_conversation_enabled") is True
                 result.append(item)
             return sorted(
                 result,
@@ -114,6 +116,16 @@ class ShopAutomationStore:
             value = shops.get(shop) if isinstance(shops, dict) else None
             return isinstance(value, dict) and value.get("canonical_quote_enabled") is True
 
+    def is_canonical_conversation_enabled(self, tenant_id: str, shop_id: str) -> bool:
+        tenant = self._text(tenant_id, maximum=160)
+        shop = self._text(shop_id, maximum=200)
+        if not tenant or not shop:
+            return False
+        with self._lock:
+            shops = self._read().get("tenants", {}).get(tenant, {}).get("shops", {})
+            value = shops.get(shop) if isinstance(shops, dict) else None
+            return isinstance(value, dict) and value.get("canonical_conversation_enabled") is True
+
     def set_settings(
         self,
         tenant_id: str,
@@ -121,6 +133,7 @@ class ShopAutomationStore:
         *,
         enabled: bool | None = None,
         canonical_quote_enabled: bool | None = None,
+        canonical_conversation_enabled: bool | None = None,
     ) -> dict[str, object]:
         tenant = self._text(tenant_id, maximum=160)
         shop = self._text(shop_id, maximum=200)
@@ -130,6 +143,10 @@ class ShopAutomationStore:
             or (
                 canonical_quote_enabled is not None
                 and not isinstance(canonical_quote_enabled, bool)
+            )
+            or (
+                canonical_conversation_enabled is not None
+                and not isinstance(canonical_conversation_enabled, bool)
             )
         ):
             raise KeyError("shop_not_found")
@@ -143,6 +160,8 @@ class ShopAutomationStore:
                 value["enabled"] = enabled
             if canonical_quote_enabled is not None:
                 value["canonical_quote_enabled"] = canonical_quote_enabled
+            if canonical_conversation_enabled is not None:
+                value["canonical_conversation_enabled"] = canonical_conversation_enabled
             self._write(data)
             result: dict[str, object] = {
                 "shop_id": shop,
@@ -151,6 +170,8 @@ class ShopAutomationStore:
             }
             if canonical_quote_enabled is not None:
                 result["canonical_quote_enabled"] = value.get("canonical_quote_enabled") is True
+            if canonical_conversation_enabled is not None:
+                result["canonical_conversation_enabled"] = value.get("canonical_conversation_enabled") is True
             return result
 
     def set_canonical_enabled(self, tenant_id: str, shop_id: str, enabled: bool) -> dict[str, object]:

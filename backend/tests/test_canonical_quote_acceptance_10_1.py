@@ -149,7 +149,7 @@ def test_canonical_wplus_preview_creates_ordered_durable_commands_once(tmp_path:
         "QUOTE_PREVIEW_WPLUS:purchase_summary", "QUOTE_PREVIEW_WPLUS:price",
     ]
     assert [item["action"]["dedupe_key"] for item in first["commands"]] == [
-        "canonical-reply:canonical-event:summary", "canonical-reply:canonical-event:price",
+        "reply:canonical-event:summary", "reply:canonical-event:price",
     ]
     assert second["duplicate"] is True
     assert second["commands"] == []
