@@ -96,6 +96,17 @@ class CanonicalBuyerReplyRenderer:
                 count = quote.get("ticket_count")
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 1 and total and unit:
+                    summary_message = _purchase_summary_message(quote)
+                    price_message = f"W+ 这场{unit}一张，共{count}张{total}元\n麻烦确认一下影院和场次哈"
+                    if summary_message is not None:
+                        return {
+                            "kind": "QUOTE_READY_WPLUS",
+                            "text": summary_message,
+                            "messages": [
+                                {"kind": "purchase_summary", "text": summary_message},
+                                {"kind": "price", "text": price_message},
+                            ],
+                        }
                     prefix = f"{summary}，" if summary else ""
                     return {
                         "kind": "QUOTE_READY_WPLUS",
