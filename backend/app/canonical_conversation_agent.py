@@ -8,6 +8,7 @@ import httpx
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
+from decimal import Decimal, InvalidOperation
 
 from .quote_v2.service import CanonicalQuoteRequest
 
@@ -19,8 +20,8 @@ AGENT_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
     {"type": "function", "function": {"name": "get_order", "description": "Read the authoritative order snapshot.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_show_options", "description": "Read show options for an already identified movie and cinema.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "get_seat_status", "description": "Read authoritative realtime seat status for the current request.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "update_purchase_request", "description": "Add structured missing purchase fields; backend validates and prices them.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
-    {"type": "function", "function": {"name": "request_quote", "description": "Request a quote for the current structured purchase request; backend calculates the result.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "update_purchase_request", "description": "Add structured missing purchase fields; backend validates and prices them.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "city": {"type": ["string", "null"], "maxLength": 200}, "cinema": {"type": ["string", "null"], "maxLength": 200}, "movie": {"type": ["string", "null"], "maxLength": 200}, "quote_date": {"type": ["string", "null"], "maxLength": 200}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "request_quote", "description": "Request a quote for the current structured purchase request; backend calculates the result.", "parameters": {"type": "object", "properties": {"ticket_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20}, "selected_seats": {"type": ["array", "null"], "items": {"type": "string"}}, "city": {"type": ["string", "null"], "maxLength": 200}, "cinema": {"type": ["string", "null"], "maxLength": 200}, "movie": {"type": ["string", "null"], "maxLength": 200}, "quote_date": {"type": ["string", "null"], "maxLength": 200}, "showtime_start": {"type": ["string", "null"]}, "hall": {"type": ["string", "null"]}}, "additionalProperties": False}}},
     {"type": "function", "function": {"name": "select_existing_quote", "description": "Select an existing quote for the current purchase context.", "parameters": {"type": "object", "properties": {"quote_index": {"type": "integer", "minimum": 0}}, "required": ["quote_index"], "additionalProperties": False}}},
 )
 
@@ -51,7 +52,7 @@ class ReplyGuardResult:
 class AgentReplyGuard:
     """Fail closed on unsupported price/order/seat/payment assertions."""
 
-    _PRICE_RE = re.compile(r"(?:[¥￥]\s*)?(\d+(?:\.\d{1,2})?)\s*(?:元|块|人民币)")
+    _PRICE_RE = re.compile(r"(?:[¥￥]\s*)?(\d+(?:\.\d{1,2})?)\s*(?:元|块|人民币|/张|每张)")
     _SEAT_RE = re.compile(r"\d+\s*(?:排|行)\s*\d+\s*座")
     _PRICE_ASSERTION_RE = re.compile(r"(?:价格|报价|单价|总价|合计|费用).{0,12}(?:是|为|：|:|[¥￥]|\d)")
     _SEAT_ASSERTION_RE = re.compile(r"(?:可售|有票|无票|售罄|不可售|已售|锁定|空闲)")
@@ -131,7 +132,7 @@ class AgentReplyGuard:
                 for child_key, child in value.items():
                     name = str(child_key).lower()
                     if _is_price_key(name):
-                        amount = _amount_to_fen(child, is_fen=name.endswith("_fen") or name.endswith("fen"))
+                        amount = _amount_to_fen(child, is_fen=name.endswith(("_fen", "fen", "_cents")))
                         if amount is not None:
                             prices.add(amount)
                     if name in {"selected_seats", "seats", "seat_labels"} and isinstance(child, (list, tuple)):
@@ -372,6 +373,17 @@ class AgentContextBuilder:
                 quote_records = []
         if current_quote is not None and not quote_records:
             quote_records = [dict(current_quote)]
+        if "canonical_quote_record_id" in purchase_context:
+            latest_id = purchase_context.get("canonical_quote_record_id")
+            # A newer image may still need a city/show clarification. Do not
+            # silently complete it with the previous image's quote facts.
+            current_quote = next((item for item in quote_records if latest_id and item.get("record_id") == latest_id), None)
+        if not _pick(payload, "itemId", "item_id"):
+            identity["purchase_context_id"] = str(
+                purchase_context.get("purchase_context_id")
+                or (current_quote or {}).get("purchase_context_id")
+                or identity["purchase_context_id"]
+            )
 
         same_type_reference = _mapping_or_none(body.get("same_type_reference_quote"))
         if same_type_reference is None:
@@ -383,7 +395,7 @@ class AgentContextBuilder:
         transaction = _mapping_or_none(body.get("transaction_state"))
         if transaction is None and self._transaction_store is not None and all(identity.values()):
             try:
-                state = self._transaction_store.get(**identity)
+                state = self._transaction_store.get(**{key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")})
                 transaction = state.model_dump(mode="json") if state is not None else None
             except Exception:
                 transaction = None
@@ -618,10 +630,10 @@ class CanonicalAgentToolBackend:
             "buyer_id": identity.get("buyer_id"),
             "chat_id": identity.get("chat_id"),
             "purchase_context_id": identity.get("purchase_context_id"),
-            "city": value("city", "city_text"),
-            "cinema": value("cinema", "cinema_text"),
-            "movie": value("movie"),
-            "quote_date": value("quote_date", "show_date", "date"),
+            "city": updated("city", "city_text"),
+            "cinema": updated("cinema", "cinema_text"),
+            "movie": updated("movie"),
+            "quote_date": updated("quote_date", "show_date", "date"),
             "showtime_start": updated("showtime_start", "start_time", "showtime"),
         }
         missing = [name for name, item in required.items() if not str(item or "").strip()]
@@ -634,9 +646,7 @@ class CanonicalAgentToolBackend:
         ).strip()
         ticket_count = updated("ticket_count", "quantity")
         if ticket_count is not None:
-            try:
-                ticket_count = int(ticket_count)
-            except (TypeError, ValueError):
+            if type(ticket_count) is not int or not 1 <= ticket_count <= 20:
                 return None, ["ticket_count"]
         return CanonicalQuoteRequest(
             tenant_id=str(identity["tenant_id"]), shop_id=str(identity["shop_id"]),
@@ -645,12 +655,17 @@ class CanonicalAgentToolBackend:
             city=str(required["city"]), cinema=str(required["cinema"]),
             movie=str(required["movie"]), quote_date=str(required["quote_date"]),
             showtime_start=str(required["showtime_start"]),
+            cinema_address=_optional_text(updated("cinema_address", "address", "cinemaAddress")),
             hall=_optional_text(updated("hall")),
             dimension=_optional_text(value("dimension", "format")),
             language=_optional_text(value("language")), seat_request_type=request_type,
             ticket_count=ticket_count, ticket_mode=str(value("ticket_mode") or "STANDARD"),
             area_quote_strategy=_optional_text(value("area_quote_strategy")),
-            selected_seats=[str(item) for item in selected] if selected else None,
+            selected_seats=[
+                str(item.get("seat_label") or item.get("seat_number") or item.get("label") or "")
+                if isinstance(item, Mapping) else str(item)
+                for item in selected
+            ] if selected else None,
             has_manual_mark=value("has_manual_mark"), image_url=_optional_text(value("image_url")),
             message_id=_optional_text(purchase.get("message_id") or value("message_id")),
         ), []
@@ -860,6 +875,8 @@ class CanonicalConversationAgent:
 
     async def _invoke_tool(self, call: Any, context: AgentContext) -> dict[str, Any]:
         name = _tool_name(call)
+        if name not in {schema["function"]["name"] for schema in AGENT_TOOL_SCHEMAS}:
+            return {"status": "error", "reason": "tool_not_allowed"}
         arguments = call.get("arguments", {}) if isinstance(call, Mapping) else {}
         if isinstance(call, Mapping) and isinstance(call.get("function"), Mapping):
             arguments = call["function"].get("arguments", arguments)
@@ -1037,22 +1054,24 @@ def _text(value: Any) -> str:
 
 
 def _is_price_key(name: str) -> bool:
-    return (
-        name.endswith("_fen") or name.endswith("fen")
-        or "price" in name or "amount" in name or "cost" in name
-    )
+    return name in {
+        "unit_sell_price_fen", "total_sell_price_fen", "sell_price_fen",
+        "unit_quote_cents", "total_quote_cents", "target_amount_cents",
+        "paid_amount_fen", "paid_amount_cents", "expected_amount_cents",
+    }
 
 
 def _amount_to_fen(value: Any, *, is_fen: bool) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
     try:
-        number = float(str(value).strip())
-    except (TypeError, ValueError):
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
         return None
-    if number < 0:
+    if not number.is_finite() or number < 0:
         return None
-    return round(number if is_fen else number * 100)
+    amount = number if is_fen else number * 100
+    return int(amount) if amount == amount.to_integral_value() else None
 
 
 def _normalize_seat(value: Any) -> str:
