@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 import re
 import asyncio
 import logging
@@ -752,6 +754,7 @@ class CanonicalConversationAgent:
         self._model_resolver = model_resolver
 
     async def process(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        trace_started = time.monotonic()
         context = await self._context_builder.build(body)
         model, model_metadata = self._resolve_model(context)
         run_id = self._start_audit_run(context, body, model_metadata)
@@ -763,6 +766,8 @@ class CanonicalConversationAgent:
             self._finish_audit_run(run_id, result, context)
             return result
         current_text = _current_text(body)
+        if os.getenv("CANONICAL_TRACE_LOG") == "1":
+            LOGGER.info("canonical_trace stage=input event_id=%s text=%s", _pick(_mapping(body.get("envelope")), "id", "eventId"), current_text)
         system = (
             "你是Canonical购票会话助手。只根据后端提供的上下文和高层工具工作；"
             "不要使用关键词、正则或固定意图规则。confirmed_facts才是已确认事实，"
@@ -812,6 +817,8 @@ class CanonicalConversationAgent:
                     name = _tool_name(call)
                     trace.append({"tool": name, "result": result})
                     self._record_tool_audit(run_id, name, call, result)
+                    if os.getenv("CANONICAL_TRACE_LOG") == "1":
+                        LOGGER.info("canonical_trace stage=tool tool=%s raw=%s validated=%s result=%s", name, json.dumps(call, ensure_ascii=False, separators=(",", ":")), json.dumps(call.get("arguments", {}), ensure_ascii=False, separators=(",", ":")), json.dumps(result, ensure_ascii=False, separators=(",", ":")))
                     messages.append({
                         "role": "tool", "name": name,
                         "tool_call_id": _tool_call_id(call),
