@@ -305,12 +305,12 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
   async function setShopEnabled(shop,input,state) {
     input.disabled=true;
     try {
-      const response=await v4Fetch(`/api/plugin/shops/${encodeURIComponent(shop.shop_id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:input.checked})});
+      const response=await v4Fetch(`/api/plugin/shops/${encodeURIComponent(shop.shop_id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:input.checked,canonical_quote_enabled:input.checked,canonical_conversation_enabled:input.checked})});
       const data=await response.json(); if(!response.ok)throw new Error(data?.detail||'店铺开关保存失败');
       shop.enabled=data.shop.enabled; state.textContent=data.shop.enabled?'自动回复与改价已开启':'自动化已关闭'; state.classList.toggle('disabled',!data.shop.enabled);
       const verify=await v4Fetch('/api/plugin/shops?include_canonical=true'); const listed=await verify.json();
       const saved=(listed.shops||[]).find(item=>String(item.shop_id)===String(shop.shop_id));
-      if(!verify.ok||!saved||saved.enabled!==data.shop.enabled)throw new Error('保存后回读状态不一致，请检查服务存储权限');
+      if(!verify.ok||!saved||saved.enabled!==data.shop.enabled||saved.canonical_quote_enabled!==data.shop.enabled)throw new Error('保存后回读状态不一致，请检查服务存储权限');
     } catch(error) { input.checked=!input.checked; state.textContent=error.message; state.classList.add('disabled'); }
     finally { input.disabled=false; }
   }
@@ -332,10 +332,7 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
     if(!visible.length){root.append(element('div','diagnostic-empty',shops.length?'没有符合当前筛选条件的店铺。':'当前租户暂未同步到店铺。收到下一条平台事件后会自动同步，也可稍后刷新。'));return;}
     visible.forEach(shop=>{
       const row=element('div','shop-row');const copy=element('div','shop-copy');copy.append(element('strong','',shop.shop_name||shop.shop_id),element('small','',`店铺标识 ${shop.shop_id}`));
-      const controls=element('div','shop-controls');
-      const automationToggle=element('div','shop-toggle');const state=element('span',`shop-state${shop.enabled?'':' disabled'}`,shop.enabled?'自动回复与改价已开启':'自动化已关闭');const label=element('label','switch');const input=document.createElement('input');input.type='checkbox';input.checked=Boolean(shop.enabled);const slider=element('span','slider');label.append(input,slider);automationToggle.append(element('small','shop-toggle-name','自动化'),state,label);
-      const canonicalToggle=element('div','shop-toggle');const canonicalState=element('span',`shop-state${shop.canonical_quote_enabled?'':' disabled'}`,shop.canonical_quote_enabled?'Canonical 报价已开启':'Canonical 报价已关闭');const canonicalLabel=element('label','switch');const canonicalInput=document.createElement('input');canonicalInput.type='checkbox';canonicalInput.checked=Boolean(shop.canonical_quote_enabled);const canonicalSlider=element('span','slider');canonicalLabel.append(canonicalInput,canonicalSlider);canonicalToggle.append(element('small','shop-toggle-name','Canonical 报价'),canonicalState,canonicalLabel);
-      controls.append(automationToggle,canonicalToggle);row.append(copy,controls);root.append(row);input.addEventListener('change',()=>setShopEnabled(shop,input,state));canonicalInput.addEventListener('change',()=>setCanonicalShopEnabled(shop,canonicalInput,canonicalState));
+      const controls=element('div','shop-controls'); const state=element('span',`shop-state${shop.enabled&&shop.canonical_quote_enabled?'':' disabled'}`,shop.enabled&&shop.canonical_quote_enabled?'Canonical 自动报价已开启':'Canonical 自动报价已关闭'); const label=element('label','switch'); const input=document.createElement('input'); input.type='checkbox'; input.checked=Boolean(shop.enabled&&shop.canonical_quote_enabled); const slider=element('span','slider'); label.append(input,slider); controls.append(element('small','shop-toggle-name','Canonical 自动报价'),state,label); row.append(copy,controls); root.append(row); input.addEventListener('change',()=>setShopEnabled(shop,input,state));
     });
   }
   async function loadShops(sync=false) {
