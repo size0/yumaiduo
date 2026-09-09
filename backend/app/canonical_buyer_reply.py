@@ -4,6 +4,8 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
+from .reply_template_store import render_template
+
 
 def _amount(value: object) -> str | None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -15,11 +17,9 @@ def _text(value: object) -> str:
     return str(value or "").strip()
 
 def _template(provider: Any | None, name: str, fallback: str, values: Mapping[str, object]) -> str:
+    provider = provider() if callable(provider) else provider
     raw = getattr(provider, name, None) if provider is not None else None
-    text = _text(raw) or fallback
-    for key, value in values.items():
-        text = text.replace("{" + key + "}", _text(value))
-    return text.strip()
+    return render_template(_text(raw) or fallback, dict(values))
 
 
 def _date_label(value: object) -> str:
@@ -88,6 +88,18 @@ class CanonicalBuyerReplyRenderer:
         status = _text(result.get("status"))
         reason = _text(result.get("reason"))
         if quote is not None:
+            # Resolve once per reply, so both segments share one saved revision.
+            templates = self._template_provider() if callable(self._template_provider) else self._template_provider
+            values = {
+                "影院": quote.get("cinema") or quote.get("cinema_name"),
+                "影片": quote.get("movie") or quote.get("movie_name"),
+                "城市": quote.get("city"),
+                "日期": quote.get("quote_date") or quote.get("show_date"),
+                "场次": quote.get("showtime_start") or quote.get("start_time"),
+                "影厅": quote.get("hall") or quote.get("hall_name"), "座位": "、".join(_seat_labels(quote)),
+                "报价名称": "W+", "报价说明": "",
+                "规则版本": quote.get("pricing_rule_version"),
+            }
             provider_route = _text(quote.get("provider_route"))
             request_type = _text(quote.get("request_type"))
             summary = _purchase_summary(quote)
@@ -103,9 +115,10 @@ class CanonicalBuyerReplyRenderer:
                 count = quote.get("ticket_count")
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 1 and total and unit:
-                    summary_message = _purchase_summary_message(quote)
-                    price_message = _template(self._template_provider, "area_quote_template", "W+ 这场{报价单价}一张，共{张数}张{报价合计}元\n麻烦确认一下影院和场次哈", {
-                        "报价单价": unit, "张数": count, "报价合计": total,
+                    summary_message = _template(templates, "recognition_template", "{影院}\n《{影片}》\n{日期} {场次}", values)
+                    price_message = _template(templates, "area_quote_template", "W+ 这场{报价单价}一张，共{张数}张{报价合计}元\n麻烦确认一下影院和场次哈", {
+                        **values, "报价单价": unit, "张数": count, "报价合计": total,
+                        "张数提示": f"共{count}张，合计{total}元",
                     })
                     if summary_message is not None:
                         return {
@@ -122,9 +135,9 @@ class CanonicalBuyerReplyRenderer:
                         "text": f"{prefix}W+ {unit}/张，共{count}张{total}，直接拍就行哈",
                     }
                 if unit:
-                    summary_message = _purchase_summary_message(quote)
+                    summary_message = _template(templates, "recognition_template", "{影院}\n《{影片}》\n{日期} {场次}", values)
                     if summary_message is not None:
-                        price_message = _template(self._template_provider, "area_quote_template", "这场会员座位{报价单价}一张，需要几张呢？\n麻烦确认一下影院和场次哈", {"报价单价": unit, "张数提示": "需要几张呢？"})
+                        price_message = _template(templates, "area_quote_template", "这场会员座位{报价单价}一张，需要几张呢？\n麻烦确认一下影院和场次哈", {**values, "报价单价": unit, "张数提示": "需要几张呢？"})
                         return {
                             "kind": "QUOTE_PREVIEW_WPLUS",
                             # ``text`` remains the first message for old
