@@ -1,0 +1,125 @@
+FFFFFF                                                                   [100%]
+================================== FAILURES ===================================
+_________________ test_last_tool_result_gets_final_text_round _________________
+
+    @pytest.mark.asyncio
+    async def test_last_tool_result_gets_final_text_round():
+        requests = []
+
+        def handler(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            if len(requests) == 1:
+                message = {"content": None, "tool_calls": [{"id": "call-context",
+                    "type": "function", "function": {"name": "get_current_context", "arguments": "{}"}}]}
+            else:
+                assert not body.get("tools")
+                assert body["messages"][-1]["tool_call_id"] == "call-context"
+                assert json.loads(body["messages"][-1]["content"])["status"] == "success"
+                message = {"content": "请补充影院信息。"}
+            return httpx.Response(200, json={"choices": [{"message": message, "finish_reason": "stop"}]})
+
+        result = await CanonicalConversationAgent(AgentContextBuilder(), model(handler), max_tool_rounds=1).process(event())
+>       assert result["status"] == "AGENT_REPLY_READY"
+E       AssertionError: assert 'AGENT_REPLY_UNAVAILABLE' == 'AGENT_REPLY_READY'
+E
+E         - AGENT_REPLY_READY
+E         + AGENT_REPLY_UNAVAILABLE
+
+backend\tests\test_agent_model_boundary_repair.py:41: AssertionError
+_______________ test_missing_key_is_not_successful_agent_reply ________________
+
+    @pytest.mark.asyncio
+    async def test_missing_key_is_not_successful_agent_reply():
+        def forbidden(_):
+            raise AssertionError("no HTTP request permitted without key")
+        result = await CanonicalConversationAgent(AgentContextBuilder(), model(forbidden, key="")).process(event())
+>       assert result["status"] == "AGENT_REPLY_UNAVAILABLE"
+E       AssertionError: assert 'AGENT_REPLY_READY' == 'AGENT_REPLY_UNAVAILABLE'
+E
+E         - AGENT_REPLY_UNAVAILABLE
+E         + AGENT_REPLY_READY
+
+backend\tests\test_agent_model_boundary_repair.py:51: AssertionError
+__ test_response_failures_are_distinguishable[message0-stop-empty_response] ___
+
+message = {'content': None}, finish = 'stop', stage = 'empty_response'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message,finish,stage", [
+        ({"content": None}, "stop", "empty_response"),
+        ({"content": "不完整报价"}, "length", "truncated"),
+        ({"content": None, "refusal": "refused"}, "stop", "refusal"),
+    ])
+    async def test_response_failures_are_distinguishable(message, finish, stage):
+        client = model(lambda _: httpx.Response(200, headers={"x-request-id": "fixture-request"},
+            json={"choices": [{"message": message, "finish_reason": finish}]}))
+        result = await CanonicalConversationAgent(AgentContextBuilder(), client).process(event())
+        assert result["status"] == "AGENT_REPLY_UNAVAILABLE"
+>       assert result["model_diagnostic"]["stage"] == stage
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'model_diagnostic'
+
+backend\tests\test_agent_model_boundary_repair.py:67: KeyError
+____ test_response_failures_are_distinguishable[message1-length-truncated] ____
+
+message = {'content': '不完整报价'}, finish = 'length', stage = 'truncated'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message,finish,stage", [
+        ({"content": None}, "stop", "empty_response"),
+        ({"content": "不完整报价"}, "length", "truncated"),
+        ({"content": None, "refusal": "refused"}, "stop", "refusal"),
+    ])
+    async def test_response_failures_are_distinguishable(message, finish, stage):
+        client = model(lambda _: httpx.Response(200, headers={"x-request-id": "fixture-request"},
+            json={"choices": [{"message": message, "finish_reason": finish}]}))
+        result = await CanonicalConversationAgent(AgentContextBuilder(), client).process(event())
+>       assert result["status"] == "AGENT_REPLY_UNAVAILABLE"
+E       AssertionError: assert 'AGENT_REPLY_READY' == 'AGENT_REPLY_UNAVAILABLE'
+E
+E         - AGENT_REPLY_UNAVAILABLE
+E         + AGENT_REPLY_READY
+
+backend\tests\test_agent_model_boundary_repair.py:66: AssertionError
+______ test_response_failures_are_distinguishable[message2-stop-refusal] ______
+
+message = {'content': None, 'refusal': 'refused'}, finish = 'stop'
+stage = 'refusal'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message,finish,stage", [
+        ({"content": None}, "stop", "empty_response"),
+        ({"content": "不完整报价"}, "length", "truncated"),
+        ({"content": None, "refusal": "refused"}, "stop", "refusal"),
+    ])
+    async def test_response_failures_are_distinguishable(message, finish, stage):
+        client = model(lambda _: httpx.Response(200, headers={"x-request-id": "fixture-request"},
+            json={"choices": [{"message": message, "finish_reason": finish}]}))
+        result = await CanonicalConversationAgent(AgentContextBuilder(), client).process(event())
+        assert result["status"] == "AGENT_REPLY_UNAVAILABLE"
+>       assert result["model_diagnostic"]["stage"] == stage
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'model_diagnostic'
+
+backend\tests\test_agent_model_boundary_repair.py:67: KeyError
+_____________________ test_http_failure_has_safe_evidence _____________________
+
+    @pytest.mark.asyncio
+    async def test_http_failure_has_safe_evidence():
+        client = model(lambda _: httpx.Response(403, headers={"x-request-id": "fixture-denied"},
+            json={"error": {"code": "permission_denied", "message": "secret test-secret private payload"}}))
+        result = await CanonicalConversationAgent(AgentContextBuilder(), client).process(event())
+>       diagnostic = result["model_diagnostic"]
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'model_diagnostic'
+
+backend\tests\test_agent_model_boundary_repair.py:77: KeyError
+=========================== short test summary info ===========================
+FAILED backend\tests\test_agent_model_boundary_repair.py::test_last_tool_result_gets_final_text_round
+FAILED backend\tests\test_agent_model_boundary_repair.py::test_missing_key_is_not_successful_agent_reply
+FAILED backend\tests\test_agent_model_boundary_repair.py::test_response_failures_are_distinguishable[message0-stop-empty_response]
+FAILED backend\tests\test_agent_model_boundary_repair.py::test_response_failures_are_distinguishable[message1-length-truncated]
+FAILED backend\tests\test_agent_model_boundary_repair.py::test_response_failures_are_distinguishable[message2-stop-refusal]
+FAILED backend\tests\test_agent_model_boundary_repair.py::test_http_failure_has_safe_evidence
+6 failed in 0.41s

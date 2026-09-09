@@ -1,0 +1,32 @@
+...F.F................................                                   [100%]
+================================== FAILURES ===================================
+___________ test_wplus_unknown_count_is_preview_and_not_authorized ____________
+
+tmp_path = WindowsPath('C:/Users/13250/AppData/Local/Temp/pytest-of-小叮/pytest-3134/test_wplus_unknown_count_is_pr0')
+
+    def test_wplus_unknown_count_is_preview_and_not_authorized(tmp_path: Path) -> None:
+        result = persist(service(tmp_path), priced_area(ticket_count=None))
+
+        assert result["quote_state"] == "PREVIEW"
+>       assert result["has_selected_seats"] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'has_selected_seats'
+
+backend\tests\test_quote_v2.py:146: KeyError
+_______________ test_exact_seats_persist_concrete_seat_identity _______________
+
+tmp_path = WindowsPath('C:/Users/13250/AppData/Local/Temp/pytest-of-小叮/pytest-3134/test_exact_seats_persist_concr0')
+
+    def test_exact_seats_persist_concrete_seat_identity(tmp_path: Path) -> None:
+        result = persist(service(tmp_path), priced_exact())
+
+        assert result["request_type"] == "EXACT_SEATS"
+>       assert result["has_selected_seats"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'has_selected_seats'
+
+backend\tests\test_quote_v2.py:171: KeyError
+=========================== short test summary info ===========================
+FAILED backend\tests\test_quote_v2.py::test_wplus_unknown_count_is_preview_and_not_authorized
+FAILED backend\tests\test_quote_v2.py::test_exact_seats_persist_concrete_seat_identity
+2 failed, 36 passed in 0.53s

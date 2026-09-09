@@ -15,6 +15,7 @@ class RecognitionResult(BaseModel):
     platform_text: str | None = Field(default=None, max_length=100)
     city_text: str | None = Field(default=None, max_length=100)
     cinema_text: str | None = Field(default=None, max_length=240)
+    cinema_address: str | None = Field(default=None, max_length=500)
     cinema_truncated: bool = False
     movie: str | None = Field(default=None, max_length=160)
     show_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")

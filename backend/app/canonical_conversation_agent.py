@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import asyncio
+import logging
+from time import monotonic
 from dataclasses import dataclass, field
 
 import httpx
@@ -11,6 +14,8 @@ from urllib.parse import urlparse
 from decimal import Decimal, InvalidOperation
 
 from .quote_v2.service import CanonicalQuoteRequest
+
+LOGGER = logging.getLogger(__name__)
 
 
 AGENT_TOOL_SCHEMAS: tuple[dict[str, Any], ...] = (
@@ -241,6 +246,14 @@ class AgentContext:
         }
 
 
+class AgentModelFailure(RuntimeError):
+    """Safe model-boundary evidence; never includes raw requests or responses."""
+
+    def __init__(self, stage: str, **details: Any) -> None:
+        super().__init__(stage)
+        self.diagnostic = {"stage": stage, **details}
+
+
 class OpenAICompatibleAgentModel:
     """Small read-only chat-completions adapter; no platform tools are exposed."""
 
@@ -281,26 +294,67 @@ class OpenAICompatibleAgentModel:
 
     async def complete(self, messages: list[dict[str, Any]], tools: tuple[dict[str, Any], ...]) -> Mapping[str, Any]:
         if not self._api_key:
-            return {"reply": "当前无法读取会话状态，请稍等人工确认。"}
+            raise AgentModelFailure("configuration", error_code="missing_api_key")
         client_options = {"timeout": self._timeout}
         if self._transport is not None:
             client_options["transport"] = self._transport
-        async with httpx.AsyncClient(**client_options) as client:
-            response = await client.post(
+        started = monotonic()
+        try:
+            async with httpx.AsyncClient(**client_options) as client:
+                response = await asyncio.wait_for(client.post(
                 self._completion_url(self._base_url),
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json={
                     "model": self._model, "messages": messages,
-                    "tools": list(tools), "temperature": self._temperature,
+                    **({"tools": list(tools)} if tools else {}), "temperature": self._temperature,
                     **({"max_tokens": self._max_tokens} if self._max_tokens is not None else {}),
                 },
-            )
-        response.raise_for_status()
-        message = response.json().get("choices", [{}])[0].get("message", {})
+                ), timeout=self._timeout)
+        except (httpx.HTTPError, asyncio.TimeoutError) as error:
+            raise AgentModelFailure(
+                "timeout" if isinstance(error, (httpx.TimeoutException, asyncio.TimeoutError)) else "transport",
+                exception_type=type(error).__name__, elapsed_ms=round((monotonic() - started) * 1000),
+            ) from None
+        request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
+        if request_id and (not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id) or self._api_key in request_id):
+            request_id = None
+        evidence = {"http_status": response.status_code, "request_id": request_id,
+                    "elapsed_ms": round((monotonic() - started) * 1000)}
+        if not response.is_success:
+            raise AgentModelFailure("http", **evidence, error_code=f"http_{response.status_code}")
+        try:
+            data = response.json()
+        except ValueError:
+            raise AgentModelFailure("parse", **evidence, error_code="invalid_json") from None
+        choices = data.get("choices") if isinstance(data, Mapping) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
+            raise AgentModelFailure("parse", **evidence, error_code="chat_choices_missing")
+        choice = choices[0]
+        message = choice.get("message")
+        if not isinstance(message, Mapping):
+            raise AgentModelFailure("parse", **evidence, error_code="chat_message_missing")
+        if choice.get("finish_reason") == "length":
+            raise AgentModelFailure("truncated", **evidence)
+        if message.get("refusal") or choice.get("finish_reason") == "content_filter":
+            raise AgentModelFailure("refusal", **evidence)
         calls = message.get("tool_calls")
         if isinstance(calls, list) and calls:
+            ids = []
+            for call in calls:
+                function = call.get("function") if isinstance(call, Mapping) else None
+                if (not isinstance(call, Mapping) or call.get("type") != "function"
+                    or not isinstance(call.get("id"), str) or not call["id"]
+                    or not isinstance(function, Mapping) or not isinstance(function.get("name"), str)
+                    or not isinstance(function.get("arguments"), str)):
+                    raise AgentModelFailure("parse", **evidence, error_code="invalid_tool_call")
+                ids.append(call["id"])
+            if len(set(ids)) != len(ids):
+                raise AgentModelFailure("parse", **evidence, error_code="duplicate_tool_call_id")
             return {"tool_calls": calls}
-        return {"reply": _text(message.get("content"))}
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise AgentModelFailure("empty_response", **evidence)
+        return {"reply": content.strip()}
 
 
 class AgentContextBuilder:
@@ -722,19 +776,35 @@ class CanonicalConversationAgent:
             {"role": "user", "content": current_text},
         ]
         trace: list[dict[str, Any]] = []
-        for _ in range(self._max_tool_rounds):
+        # The tool budget counts execution rounds, not the final prose turn.
+        # Always allow the model to consume the final tool results once, with
+        # no tools offered. Do not execute calls returned beyond the budget.
+        for round_index in range(self._max_tool_rounds + 1):
             try:
-                response = await model.complete(messages, AGENT_TOOL_SCHEMAS)
-            except Exception:
+                response = await model.complete(messages, AGENT_TOOL_SCHEMAS if round_index < self._max_tool_rounds else ())
+            except Exception as error:
                 result = {
                     "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_model_failed",
                     "reply": "", "context": context.to_dict(), "tool_trace": trace, "actions": [],
                     "agent_run_id": run_id,
+                    "model_diagnostic": (
+                        dict(error.diagnostic) if isinstance(error, AgentModelFailure)
+                        else {"stage": "model_client", "exception_type": type(error).__name__}
+                    ),
                 }
                 self._finish_audit_run(run_id, result, context)
                 return result
             tool_calls = response.get("tool_calls") if isinstance(response, Mapping) else None
             if isinstance(tool_calls, list) and tool_calls:
+                if round_index == self._max_tool_rounds:
+                    result = {
+                        "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_tool_round_limit",
+                        "reply": "", "context": context.to_dict(), "tool_trace": trace,
+                        "actions": [], "agent_run_id": run_id,
+                        "model_diagnostic": {"stage": "tool_round_limit"},
+                    }
+                    self._finish_audit_run(run_id, result, context)
+                    return result
                 assistant_message = {"role": "assistant", "tool_calls": tool_calls}
                 messages.append(assistant_message)
                 for call in tool_calls:
@@ -858,6 +928,11 @@ class CanonicalConversationAgent:
     def _finish_audit_run(
         self, run_id: str | None, result: Mapping[str, Any], context: AgentContext,
     ) -> None:
+        if result.get("model_diagnostic"):
+            # Some release compositions do not inject an audit store. Keep
+            # safe boundary evidence in the normal service log regardless.
+            LOGGER.warning("event=canonical_agent_model_failure diagnostic=%s",
+                           json.dumps(result["model_diagnostic"], separators=(",", ":")))
         store = self._audit_store
         update = getattr(store, "update_agent_run", None) if store is not None else None
         if not run_id or not callable(update):
@@ -867,7 +942,9 @@ class CanonicalConversationAgent:
             update(
                 run_id, status=status,
                 reply_origin="canonical_conversation_agent" if status == "ready" else None,
-                context=context.to_dict(),
+                context={**context.to_dict(), **(
+                    {"model_diagnostic": result["model_diagnostic"]} if result.get("model_diagnostic") else {}
+                )},
                 failure_reason=_text(result.get("reason")) if status != "ready" else None,
             )
         except Exception:
