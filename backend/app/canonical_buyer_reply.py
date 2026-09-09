@@ -14,6 +14,13 @@ def _amount(value: object) -> str | None:
 def _text(value: object) -> str:
     return str(value or "").strip()
 
+def _template(provider: Any | None, name: str, fallback: str, values: Mapping[str, object]) -> str:
+    raw = getattr(provider, name, None) if provider is not None else None
+    text = _text(raw) or fallback
+    for key, value in values.items():
+        text = text.replace("{" + key + "}", _text(value))
+    return text.strip()
+
 
 def _date_label(value: object) -> str:
     text = _text(value)
@@ -97,7 +104,9 @@ class CanonicalBuyerReplyRenderer:
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 1 and total and unit:
                     summary_message = _purchase_summary_message(quote)
-                    price_message = f"W+ 这场{unit}一张，共{count}张{total}元\n麻烦确认一下影院和场次哈"
+                    price_message = _template(self._template_provider, "area_quote_template", "W+ 这场{报价单价}一张，共{张数}张{报价合计}元\n麻烦确认一下影院和场次哈", {
+                        "报价单价": unit, "张数": count, "报价合计": total,
+                    })
                     if summary_message is not None:
                         return {
                             "kind": "QUOTE_READY_WPLUS",
@@ -115,7 +124,7 @@ class CanonicalBuyerReplyRenderer:
                 if unit:
                     summary_message = _purchase_summary_message(quote)
                     if summary_message is not None:
-                        price_message = f"这场会员座位{unit}一张，需要几张呢？\n麻烦确认一下影院和场次哈"
+                        price_message = _template(self._template_provider, "area_quote_template", "这场会员座位{报价单价}一张，需要几张呢？\n麻烦确认一下影院和场次哈", {"报价单价": unit, "张数提示": "需要几张呢？"})
                         return {
                             "kind": "QUOTE_PREVIEW_WPLUS",
                             # ``text`` remains the first message for old
