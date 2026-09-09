@@ -1,0 +1,51 @@
+[
+  {
+    "file": "canonical_conversation_agent.py",
+    "production": "54e15cb084d9f1750ff387ac78a9dcc1f616584df79ceeb02b1c0b8dfe56177b",
+    "local_lf_hash": "54e15cb084d9f1750ff387ac78a9dcc1f616584df79ceeb02b1c0b8dfe56177b",
+    "match": true
+  },
+  {
+    "file": "canonical_event_handler.py",
+    "production": "749bb154660bcb8637d91344490c46a7aac0c927756357e699e994ab5a6fd674",
+    "local_lf_hash": "749bb154660bcb8637d91344490c46a7aac0c927756357e699e994ab5a6fd674",
+    "match": true
+  },
+  {
+    "file": "rules_first_runtime.py",
+    "production": "59ecf0a2b6f72bc47fff566af33dccb8154cbf3d838349c003702c09ada3277f",
+    "local_lf_hash": "59ecf0a2b6f72bc47fff566af33dccb8154cbf3d838349c003702c09ada3277f",
+    "match": true
+  },
+  {
+    "file": "rules_first_store.py",
+    "production": "13094d8f9dfe418fa6aab8b4f2b01ec389756f7f6c14135054c37c32f0adfff7",
+    "local_lf_hash": "13094d8f9dfe418fa6aab8b4f2b01ec389756f7f6c14135054c37c32f0adfff7",
+    "match": true
+  },
+  {
+    "file": "rule_state_coordinator.py",
+    "production": "84b07432cd9a85a36520eee2797983c204cb3eb30cb57be56efccd3f1ad230dc",
+    "local_lf_hash": "84b07432cd9a85a36520eee2797983c204cb3eb30cb57be56efccd3f1ad230dc",
+    "match": true
+  },
+  {
+    "file": "quote_v2/service.py",
+    "production": "43b7d9601dd4c450f4acde220166c8a56b139664421987258c8a4f684930af65",
+    "local_lf_hash": "43b7d9601dd4c450f4acde220166c8a56b139664421987258c8a4f684930af65",
+    "match": true
+  },
+  {
+    "file": "recognition_v2/models.py",
+    "production": "0ece61db1949736d49b5c027ec666b2c3bcca50edef07e6aebb2dcb94872e041",
+    "local_lf_hash": "cdd2b809a696bbc71adc6a8681d0cc2bf0d911efaf6de4811d6d8b1c31739fef",
+    "match": true,
+    "production_lf_hash": "cdd2b809a696bbc71adc6a8681d0cc2bf0d911efaf6de4811d6d8b1c31739fef"
+  },
+  {
+    "file": "canonical_buyer_reply.py",
+    "production": "486c86753bf4e60b5aab9d7e7aed11d0e043b0ed13caead96dc94a78fb2b8d2c",
+    "local_lf_hash": "486c86753bf4e60b5aab9d7e7aed11d0e043b0ed13caead96dc94a78fb2b8d2c",
+    "match": true
+  }
+]

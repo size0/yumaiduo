@@ -1,0 +1,491 @@
+{
+  "2755491711": [
+    {
+      "time": "2026-09-09T09:38:05.558227+00:00",
+      "event_id": "612b82ea3d74813a3fa8ff67d07358b929e550f964700bf82587f9ab4adc32c7",
+      "type": 1,
+      "status": "pending",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-09T09:38:05.495612+00:00",
+      "event_id": "a76f88617294cf602bc998fb6cfdac44e695c80614f958e7058c9d90fe6ce8b5",
+      "type": 1,
+      "status": "pending",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-09T09:37:38.825598+00:00",
+      "event_id": "35e3f6bfd73f15b292c83d44cf6d4c856c7be077eb099b5cdd6eb32f8bda05fc",
+      "type": 1,
+      "status": "processing",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-09T09:37:34.799201+00:00",
+      "event_id": "c4103333a7773b50029ed15d2fd1a20d6cc45d0a65471d1687ee40c5f13dd3df",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_UNAVAILABLE",
+      "reason": "agent_model_failed",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    }
+  ],
+  "86533729": [
+    {
+      "time": "2026-09-08T14:38:23.703729+00:00",
+      "event_id": "f27bb2fdfada886b71e8b694207aeb2663cded892f8e9e3efaaa5509f4f25bb4",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_UNAVAILABLE",
+      "reason": "reply_fact_unverified",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T14:38:22.711870+00:00",
+      "event_id": "68db2321f0cff4f3452c244cf8df4b5f57416249c73c6a134421603fa2793592",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "QUOTED",
+      "reason": "canonical_quote_reply_ready",
+      "record_id": "record-7483f84a28da4bbfb4ce3f9872cfbc7c",
+      "recognition_present": true,
+      "commands": [
+        {
+          "id": "cmd-326e1e425e0b2f247645ef2969143b0aea8208eb",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    }
+  ],
+  "3512353025": [
+    {
+      "time": "2026-09-08T11:22:52.474174+00:00",
+      "event_id": "bb80e27c8a7c8c86b801231a537ff698e81d9d070939a595dc8964538ecef6a2",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-9ef2ec950baaccc42b1447669e1c05f6bd311a2b",
+          "status": "succeeded",
+          "result": {
+            "status": "succeeded",
+            "message_id": "4290752944814.PNM"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T11:22:51.295767+00:00",
+      "event_id": "f7d8f20740cda9fd56f7ede555d04b254cb371d5096be58ee1b9c28164fe0d75",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "QUOTED",
+      "reason": "canonical_quote_reply_ready",
+      "record_id": "record-91e25c3be2d441e89d814e6779ddbb3f",
+      "recognition_present": true,
+      "commands": [
+        {
+          "id": "cmd-09d41cfb7cee2592567968aaf168877b5da2b212",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    }
+  ],
+  "3077576603": [
+    {
+      "time": "2026-09-08T10:32:18.976578+00:00",
+      "event_id": "e10e15fbe13de544435dd3b274c7c564ea07acf278b0c81c2bfb657b636fd815",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-8a448f8e39dda48e37dba8150936a038ed514b91",
+          "status": "succeeded",
+          "result": {
+            "status": "succeeded",
+            "message_id": "4296253031761.PNM"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T10:30:41.189859+00:00",
+      "event_id": "5f3bc3d24d3e042df5ba86ac8664718113de3a8a3ab1aed759f1a36c992b7d98",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-0f5a8eb00112fb325ffa2a98223df6ae45b69e40",
+          "status": "succeeded",
+          "result": {
+            "status": "succeeded",
+            "message_id": "4287008282468.PNM"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T10:30:08.095973+00:00",
+      "event_id": "065ecb7cab194a5e597ac962c96ce218474ae66c7c5c47b7725f8ab5f5576d2f",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "PROBE_REQUIRED",
+      "reason": "canonical_quote_reply_ready",
+      "record_id": null,
+      "recognition_present": true,
+      "commands": [
+        {
+          "id": "cmd-fb75f4e4911e54cb6e751295473be2e46b1ce658",
+          "status": "succeeded",
+          "result": {
+            "status": "succeeded",
+            "message_id": "4298491959896.PNM"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T10:30:01.861643+00:00",
+      "event_id": "f401946549bd77b31611f3f29ebbf5b16d220926e7ff043c1f5110febc50a036",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-e05f7e4ea28b99cbaa67d6df5f6295f099cdb95c",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    }
+  ],
+  "2208075880535": [
+    {
+      "time": "2026-09-08T10:19:25.886298+00:00",
+      "event_id": "979d90dbf0aebe31d62718620969b1f3ca8d15bfdfa9344b79ff2dc633667613",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "automation_hold_active",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T10:16:25.832945+00:00",
+      "event_id": "de7fb585aa38afe10816bcb46f7776c040b39ac93e2f5f163b9ee52b0e25e971",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "automation_hold_active",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T10:15:20.727819+00:00",
+      "event_id": "bebeb82f64ccf0a4e16edf1a36cd22392eab58cee52aaefe1b00314ee22e75a0",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "automation_hold_active",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T10:15:18.094378+00:00",
+      "event_id": "1e744052aa6e38262e23d645784da26461854f7359daf98cab2b17e0902698f7",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "CANONICAL_QUOTE_UNAVAILABLE",
+      "reason": "automation_hold_active",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    }
+  ],
+  "4031701933": [
+    {
+      "time": "2026-09-08T07:10:59.573483+00:00",
+      "event_id": "531bac9b2026a2c1a024e8a46a040f29bcbf7f124603e2d150ba13d4f3f453aa",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_UNAVAILABLE",
+      "reason": "agent_model_failed",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    }
+  ],
+  "2216210070249": [
+    {
+      "time": "2026-09-08T06:15:24.231077+00:00",
+      "event_id": "69968766c37f21b30fb6714cec4323a82939129a93480ffafb927f352f360b11",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_UNAVAILABLE",
+      "reason": "agent_model_failed",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T06:14:33.465595+00:00",
+      "event_id": "91a64caf8e851dc1d72f9f96ad7b0564c305f2d0f2b9d7f2234c9659d013f6e3",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-87f193924d62e73208a821c76aca1986468fe3c3",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T06:14:32.355845+00:00",
+      "event_id": "caca1a9abf8d1e7f39556a88bfded6ca402abb4b9a563b805bb02876df71f968",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-44a170b785549db4b5eaf2f47d53ff5e9daa0cdc",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T06:14:31.389814+00:00",
+      "event_id": "457df23debfdc1c45215421b2f86664ff2de629917fa184307a22619ba7d2a4b",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "QUOTED",
+      "reason": "canonical_quote_reply_ready",
+      "record_id": "record-6a447c43759c426fbb3c73892b653439",
+      "recognition_present": true,
+      "commands": [
+        {
+          "id": "cmd-7b8eb07bb0d4d4dd6fba40ecd30755f05669b260",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    }
+  ],
+  "3705917086": [
+    {
+      "time": "2026-09-08T04:31:08.119642+00:00",
+      "event_id": "4fec35d864845705efd9466fa80953051940d4dd3082336ed4f950aedf73c6f6",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "automation_hold_active",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T04:17:45.458016+00:00",
+      "event_id": "e1df6a579d979762da09c6e3a6e470c4e92b5cd5c5a811d5e3ce26b1af09c3d1",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T04:17:44.779644+00:00",
+      "event_id": "1303302615e26b17f42e7fc2ffee4b83d35a8f1f2c59b8fbc7831834d1c56972",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-08T04:17:43.965669+00:00",
+      "event_id": "d3f364c51b091a95ee95ee4e22f7c9572b284023e3c191044b7d24e331f8e027",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "CANONICAL_QUOTE_UNAVAILABLE",
+      "reason": "canonical_quote_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    }
+  ],
+  "4108845945": [
+    {
+      "time": "2026-09-08T04:14:06.931047+00:00",
+      "event_id": "4138be5a806cbb2422aa2510c23dfd8b1bfdf6994992a7dc35564af414e87ca2",
+      "type": 2,
+      "status": "completed",
+      "canonical_status": "QUOTED",
+      "reason": "canonical_quote_reply_ready",
+      "record_id": "record-68ddc355ab2347158b4353c3fa7d5511",
+      "recognition_present": true,
+      "commands": [
+        {
+          "id": "cmd-97d9a60020195c9f1bb32d64e3366599b8d71cd4",
+          "status": "succeeded",
+          "result": {
+            "status": "succeeded",
+            "message_id": "4297837807913.PNM"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T04:13:31.728120+00:00",
+      "event_id": "0341e4b3aeaf2fb69523d6b204eb6b18ea58615b5dba4d392d40b2d47d6b6314",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-c05a998a3dcb1ce5c209fe1e11c59447f85ed07f",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    },
+    {
+      "time": "2026-09-08T04:13:29.865871+00:00",
+      "event_id": "ebe837db8ef0e954731896ad8a23c937de067def40dd39084723bbd3448e92d3",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": "AGENT_REPLY_READY",
+      "reason": "agent_reply_ready",
+      "record_id": null,
+      "recognition_present": false,
+      "commands": [
+        {
+          "id": "cmd-5ec70a35b394808e4a8bd507fe381fef32e703f1",
+          "status": "failed",
+          "result": {
+            "status": "skipped",
+            "reason": "buyer_message_arrived_before_send"
+          }
+        }
+      ]
+    }
+  ],
+  "2214596868738": [
+    {
+      "time": "2026-09-08T00:00:10.849794+00:00",
+      "event_id": "57d6a85bf42224302b1937e0a58653ea9bd232f81b6e93a36b6be98441ebe263",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-07T23:45:11.325951+00:00",
+      "event_id": "ea0e60a6abf4348e486944233e57b6f550140847a23f6086fffb0c626f1c4094",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-07T23:30:35.914105+00:00",
+      "event_id": "acd9b60f7b5cfe73452317e39147f14fe818a2fa90bb60903a80eafd5283b120",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    },
+    {
+      "time": "2026-09-07T15:44:25.297510+00:00",
+      "event_id": "bf1a2ea0cd4af52f523aa7c0bf93d3c5cc1084df3cf68e7195a30391ef29a9a0",
+      "type": 1,
+      "status": "completed",
+      "canonical_status": null,
+      "reason": null,
+      "record_id": null,
+      "recognition_present": false,
+      "commands": []
+    }
+  ]
+}

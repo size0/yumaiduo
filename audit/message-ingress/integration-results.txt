@@ -1,0 +1,5 @@
+2026-09-09T17:48:45 INFO request_id=- event=logging_ready log_path=logs\app.log
+{"E1_command": true, "E2_event": "E2", "quote_id": "quote-ff1802a325364b11a15eaecec234cc01", "command_id": "cmd-a8a386d6f56c2e08c1831ec1a936c94068d5bf67", "reply": "影片：测试电影；影院：广州测试万达；场次：2026-09-05 13:35；W+这场44.9/张，共2张89.8。麻烦确认一下影院和场次，确认后直接拍就行哈", "external_send": "NOT_EXECUTED"}
+.{"E1_command": false, "E2_event": "E2", "quote_id": "quote-1e0599ac7984475baa1053e308d12e57", "command_id": "cmd-a8a386d6f56c2e08c1831ec1a936c94068d5bf67", "reply": "影片：测试电影；影院：广州测试万达；场次：2026-09-05 13:35；W+这场44.9/张，共2张89.8。麻烦确认一下影院和场次，确认后直接拍就行哈", "external_send": "NOT_EXECUTED"}
+...............................
+32 passed in 0.60s

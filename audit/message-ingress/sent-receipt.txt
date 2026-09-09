@@ -1,0 +1,2 @@
+SENT_CLASS 74b9bbb2a19be32c219f85404abf5d499349f7d8b8ccd3bb4c7646439dc6693c None None
+IM_HISTORY_MATCH [{'read_event': '4bafca58f032ff1126d265d697725675ac8cd7a6f2461d8317101de036b25fb0', 'messageId': '4288632252341.PNM', 'direction': 'outbound', 'sentAt': '2026-09-09T09:39:03.685Z'}, {'read_event': '1d8c8a7b6da9200afd50954978ed3a3d064861f37d802e2e18b6eaef6d733b23', 'messageId': '4288632252341.PNM', 'direction': 'outbound', 'sentAt': '2026-09-09T09:39:03.685Z'}]
