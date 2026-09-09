@@ -104,7 +104,7 @@ class CanonicalBuyerReplyRenderer:
                 if unit:
                     summary_message = _purchase_summary_message(quote)
                     if summary_message is not None:
-                        price_message = f"这场会员座位{unit}一张"
+                        price_message = f"这场会员座位{unit}一张，需要几张呢？\n麻烦确认一下影院和场次哈"
                         return {
                             "kind": "QUOTE_PREVIEW_WPLUS",
                             # ``text`` remains the first message for old
