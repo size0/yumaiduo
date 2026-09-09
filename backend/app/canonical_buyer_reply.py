@@ -18,8 +18,15 @@ def _text(value: object) -> str:
 
 def _template(provider: Any | None, name: str, fallback: str, values: Mapping[str, object]) -> str:
     provider = provider() if callable(provider) else provider
-    raw = getattr(provider, name, None) if provider is not None else None
-    return render_template(_text(raw) or fallback, dict(values))
+    raw = _text(getattr(provider, name, None)) if provider is not None else ""
+    # These two settings are shared with the legacy image-reply renderer. Do
+    # not let its old "报价内容"/seat-confirmation contract collapse the
+    # canonical two-message contract; a clean user-saved template still wins.
+    if name == "recognition_template" and any(marker in raw for marker in ("{报价内容}", "{报价单价}", "请在图片", "分隔符")):
+        raw = ""
+    if name == "area_quote_template" and "座位是否" in raw:
+        raw = ""
+    return render_template(raw or fallback, dict(values))
 
 
 def _date_label(value: object) -> str:
