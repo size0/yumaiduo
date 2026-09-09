@@ -308,6 +308,9 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
       const response=await v4Fetch(`/api/plugin/shops/${encodeURIComponent(shop.shop_id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:input.checked})});
       const data=await response.json(); if(!response.ok)throw new Error(data?.detail||'店铺开关保存失败');
       shop.enabled=data.shop.enabled; state.textContent=data.shop.enabled?'自动回复与改价已开启':'自动化已关闭'; state.classList.toggle('disabled',!data.shop.enabled);
+      const verify=await v4Fetch('/api/plugin/shops?include_canonical=true'); const listed=await verify.json();
+      const saved=(listed.shops||[]).find(item=>String(item.shop_id)===String(shop.shop_id));
+      if(!verify.ok||!saved||saved.enabled!==data.shop.enabled)throw new Error('保存后回读状态不一致，请检查服务存储权限');
     } catch(error) { input.checked=!input.checked; state.textContent=error.message; state.classList.add('disabled'); }
     finally { input.disabled=false; }
   }
@@ -317,6 +320,9 @@ window.addEventListener('beforeunload',()=>fishMoreSdk.dispose(),{once:true});
       const response=await v4Fetch(`/api/plugin/shops/${encodeURIComponent(shop.shop_id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:Boolean(shop.enabled),canonical_quote_enabled:input.checked})});
       const data=await response.json(); if(!response.ok)throw new Error(data?.detail||'Canonical 报价开关保存失败');
       shop.canonical_quote_enabled=data.shop.canonical_quote_enabled; state.textContent=data.shop.canonical_quote_enabled?'Canonical 报价已开启':'Canonical 报价已关闭'; state.classList.toggle('disabled',!data.shop.canonical_quote_enabled);
+      const verify=await v4Fetch('/api/plugin/shops?include_canonical=true'); const listed=await verify.json();
+      const saved=(listed.shops||[]).find(item=>String(item.shop_id)===String(shop.shop_id));
+      if(!verify.ok||!saved||saved.canonical_quote_enabled!==data.shop.canonical_quote_enabled)throw new Error('保存后回读状态不一致，请检查服务存储权限');
     } catch(error) { input.checked=!input.checked; state.textContent=error.message; state.classList.add('disabled'); }
     finally { input.disabled=false; }
   }
