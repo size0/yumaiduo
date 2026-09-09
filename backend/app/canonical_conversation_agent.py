@@ -763,7 +763,7 @@ class CanonicalConversationAgent:
                 "status": "AGENT_REPLY_UNAVAILABLE", "reason": "conversation_snapshot_unavailable",
                 "context": context.to_dict(), "tool_trace": [], "actions": [], "agent_run_id": run_id,
             }
-            self._finish_audit_run(run_id, result, context)
+            self._finish_audit_run(run_id, result, context, started_at=trace_started)
             return result
         current_text = _current_text(body)
         if os.getenv("CANONICAL_TRACE_LOG") == "1":
@@ -797,7 +797,7 @@ class CanonicalConversationAgent:
                         else {"stage": "model_client", "exception_type": type(error).__name__}
                     ),
                 }
-                self._finish_audit_run(run_id, result, context)
+                self._finish_audit_run(run_id, result, context, started_at=trace_started)
                 return result
             tool_calls = response.get("tool_calls") if isinstance(response, Mapping) else None
             if isinstance(tool_calls, list) and tool_calls:
@@ -808,14 +808,24 @@ class CanonicalConversationAgent:
                         "actions": [], "agent_run_id": run_id,
                         "model_diagnostic": {"stage": "tool_round_limit"},
                     }
-                    self._finish_audit_run(run_id, result, context)
+                    self._finish_audit_run(run_id, result, context, started_at=trace_started)
                     return result
                 assistant_message = {"role": "assistant", "tool_calls": tool_calls}
                 messages.append(assistant_message)
                 for call in tool_calls:
                     result = await self._invoke_tool(call, context)
                     name = _tool_name(call)
-                    trace.append({"tool": name, "result": result})
+                    raw_arguments, parsed_arguments = _tool_arguments(call)
+                    trace.append({
+                        "tool": name,
+                        "raw_arguments": raw_arguments,
+                        "validated_arguments": (
+                            parsed_arguments
+                            if result.get("status") in {"success", "QUOTED", "QUOTE_UPDATED", "QUOTE_SELECTED"}
+                            else {}
+                        ),
+                        "result": result,
+                    })
                     self._record_tool_audit(run_id, name, call, result)
                     if os.getenv("CANONICAL_TRACE_LOG") == "1":
                         LOGGER.info("canonical_trace stage=tool tool=%s raw=%s validated=%s result=%s", name, json.dumps(call, ensure_ascii=False, separators=(",", ":")), json.dumps(call.get("arguments", {}), ensure_ascii=False, separators=(",", ":")), json.dumps(result, ensure_ascii=False, separators=(",", ":")))
@@ -834,7 +844,7 @@ class CanonicalConversationAgent:
                         "reply": "", "reply_guard": guard.to_dict(),
                         "context": context.to_dict(), "tool_trace": trace, "actions": [], "agent_run_id": run_id,
                     }
-                    self._finish_audit_run(run_id, result, context)
+                    self._finish_audit_run(run_id, result, context, started_at=trace_started)
                     return result
                 result = {
                     "status": "AGENT_REPLY_READY", "reply": reply,
@@ -845,14 +855,14 @@ class CanonicalConversationAgent:
                         **({"agent_run_id": run_id} if run_id else {}),
                     }],
                 }
-                self._finish_audit_run(run_id, result, context)
+                self._finish_audit_run(run_id, result, context, started_at=trace_started)
                 return result
             break
         result = {
             "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_response_missing", "reply": "",
             "context": context.to_dict(), "tool_trace": trace, "actions": [], "agent_run_id": run_id,
         }
-        self._finish_audit_run(run_id, result, context)
+        self._finish_audit_run(run_id, result, context, started_at=trace_started)
         return result
 
     def _resolve_model(self, context: AgentContext) -> tuple[AgentModel, dict[str, Any]]:
@@ -934,6 +944,7 @@ class CanonicalConversationAgent:
 
     def _finish_audit_run(
         self, run_id: str | None, result: Mapping[str, Any], context: AgentContext,
+        *, started_at: float | None = None,
     ) -> None:
         if result.get("model_diagnostic"):
             # Some release compositions do not inject an audit store. Keep
@@ -946,10 +957,20 @@ class CanonicalConversationAgent:
             return
         status = "ready" if result.get("status") == "AGENT_REPLY_READY" else "failed"
         try:
+            buyer_messages = context.buyer_raw_messages
+            current_input = buyer_messages[-1].get("text") if buyer_messages else ""
+            audit_trace = {
+                "user_input": _text(current_input),
+                "tool_calls": list(result.get("tool_trace") or []),
+                "model_reply": _text(result.get("reply")),
+                "final_reply": _text(result.get("reply")) if status == "ready" else "",
+                "duration_ms": round((time.monotonic() - started_at) * 1000, 1) if started_at else None,
+                "end_reason": _text(result.get("reason")) or ("reply_ready" if status == "ready" else "agent_failed"),
+            }
             update(
                 run_id, status=status,
                 reply_origin="canonical_conversation_agent" if status == "ready" else None,
-                context={**context.to_dict(), **(
+                context={**context.to_dict(), "agent_trace": audit_trace, **(
                     {"model_diagnostic": result["model_diagnostic"]} if result.get("model_diagnostic") else {}
                 )},
                 failure_reason=_text(result.get("reason")) if status != "ready" else None,
@@ -1069,6 +1090,20 @@ def _history_item(value: Any) -> dict[str, Any]:
         "agent_generated": item.get("agent_generated") is True,
         "has_image": item.get("messageType") in {2, "2"} or bool(item.get("imageUrls") or item.get("image_urls")),
     }
+
+
+def _tool_arguments(call: Any) -> tuple[Any, dict[str, Any]]:
+    if not isinstance(call, Mapping):
+        return {}, {}
+    function = call.get("function") if isinstance(call.get("function"), Mapping) else call
+    raw = function.get("arguments", {}) if isinstance(function, Mapping) else {}
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw, {}
+        return raw, dict(parsed) if isinstance(parsed, Mapping) else {}
+    return raw, dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def _tool_name(call: Any) -> str:

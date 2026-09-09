@@ -72,8 +72,8 @@ def test_canonical_renderer_uses_two_buyer_safe_wplus_preview_messages() -> None
         },
     })
     assert result["messages"] == [
-        {"kind": "purchase_summary", "text": "牡丹江万达\n《坠落2》\n9月5日19:55这场"},
-        {"kind": "price", "text": "W+ 37.3一张，需要几张呀"},
+        {"kind": "purchase_summary", "text": "牡丹江万达\n《坠落2》\n2026-09-05 19:55"},
+        {"kind": "price", "text": "W+ 37.3一张，需要几张呀。"},
     ]
 
 
@@ -85,7 +85,7 @@ def test_canonical_renderer_formats_integer_wplus_preview_without_trailing_zero(
             "showtime_start": "19:55", "unit_sell_price_fen": 5000,
         },
     })
-    assert result["messages"][1]["text"] == "W+ 50一张，需要几张呀"
+    assert result["messages"][1]["text"] == "W+ 50一张，需要几张呀。"
 
 
 def test_canonical_renderer_includes_wplus_purchase_summary_when_ready() -> None:
@@ -98,8 +98,11 @@ def test_canonical_renderer_includes_wplus_purchase_summary_when_ready() -> None
             "ticket_count": 2,
         },
     })
-    assert result["text"] == "牡丹江万达《坠落2》9月5日19:55这场，W+ 28/张，共2张56，直接拍就行哈"
-    assert "座" not in result["text"]
+    assert result["text"] == "牡丹江万达\n《坠落2》\n2026-09-05 19:55"
+    assert result["messages"] == [
+        {"kind": "purchase_summary", "text": "牡丹江万达\n《坠落2》\n2026-09-05 19:55"},
+        {"kind": "price", "text": "W+ 28一张，共2张56元。"},
+    ]
 
 
 def test_canonical_renderer_keeps_seat_failure_buyer_safe_without_price() -> None:

@@ -85,6 +85,9 @@ class CanonicalBuyerReplyRenderer:
         transaction_state: object | None = None,
     ) -> dict[str, Any]:
         quote = result.get("quote") if isinstance(result.get("quote"), Mapping) else None
+        # Keep compatibility with callers that pass a quote record directly.
+        if quote is None and any(key in result for key in ("request_type", "unit_sell_price_fen", "total_sell_price_fen")):
+            quote = result
         status = _text(result.get("status"))
         reason = _text(result.get("reason"))
         if quote is not None:
@@ -116,7 +119,7 @@ class CanonicalBuyerReplyRenderer:
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 1 and total and unit:
                     summary_message = _template(templates, "recognition_template", "{影院}\n《{影片}》\n{日期} {场次}", values)
-                    price_message = _template(templates, "area_quote_template", "W+ 这场{报价单价}一张，共{张数}张{报价合计}元\n麻烦确认一下影院和场次哈", {
+                    price_message = _template(templates, "area_quote_template", "W+ {报价单价}一张，共{张数}张{报价合计}元。", {
                         **values, "报价单价": unit, "张数": count, "报价合计": total,
                         "张数提示": f"共{count}张，合计{total}元",
                     })
@@ -137,7 +140,7 @@ class CanonicalBuyerReplyRenderer:
                 if unit:
                     summary_message = _template(templates, "recognition_template", "{影院}\n《{影片}》\n{日期} {场次}", values)
                     if summary_message is not None:
-                        price_message = _template(templates, "area_quote_template", "这场会员座位{报价单价}一张，需要几张呢？\n麻烦确认一下影院和场次哈", {**values, "报价单价": unit, "张数提示": "需要几张呢？"})
+                        price_message = _template(templates, "area_quote_template", "W+ {报价单价}一张，需要几张呀。", {**values, "报价单价": unit, "张数提示": "需要几张呀。"})
                         return {
                             "kind": "QUOTE_PREVIEW_WPLUS",
                             # ``text`` remains the first message for old

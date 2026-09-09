@@ -34,6 +34,7 @@ class RulesFirstRuntime:
         *, event_preprocessor: Callable[[Mapping[str, Any]], object] | None = None,
         fulfillment_mark_handler: Callable[[Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
         payment_validation_handler: Callable[[Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
+        canonical_text_handler: Callable[[Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
         liangpiao_fulfillment_handler: Callable[[Mapping[str, Any], Mapping[str, Any]], Awaitable[dict[str, object] | None]] | None = None,
         idle_seconds: float = 0.1,
     ) -> None:
@@ -44,6 +45,7 @@ class RulesFirstRuntime:
         self._event_preprocessor = event_preprocessor
         self._fulfillment_mark_handler = fulfillment_mark_handler
         self._payment_validation_handler = payment_validation_handler
+        self._canonical_text_handler = canonical_text_handler
         self._liangpiao_fulfillment_handler = liangpiao_fulfillment_handler
         self._idle_seconds = max(0.01, float(idle_seconds))
         self._task: asyncio.Task[None] | None = None
@@ -103,6 +105,10 @@ class RulesFirstRuntime:
                     "canonical_reply_kind": f"{result.get('canonical_reply_kind') or ''}:{kind}",
                     "canonical_reply_sequence": index,
                     "dedupe_key": f"reply:{event_id}:{suffix}",
+                    "quote_record_id": (
+                        (result.get("quote") or {}).get("record_id")
+                        if isinstance(result.get("quote"), Mapping) else None
+                    ),
                     **({"agent_run_id": agent_run_id} if agent_run_id else {}),
                 })
         elif rendered_text:
@@ -114,6 +120,10 @@ class RulesFirstRuntime:
                 "source": source,
                 "canonical_reply_kind": str(result.get("canonical_reply_kind") or ""),
                 "dedupe_key": f"reply:{event_id}",
+                "quote_record_id": (
+                    (result.get("quote") or {}).get("record_id")
+                    if isinstance(result.get("quote"), Mapping) else None
+                ),
                 **({"agent_run_id": agent_run_id} if agent_run_id else {}),
             })
         canonical_result = dict(result)
@@ -195,6 +205,7 @@ class RulesFirstRuntime:
             if self._event_preprocessor is not None:
                 self._event_preprocessor(body)
             result = None
+            reduced: dict[str, object] | None = None
             if self._fulfillment_mark_handler is not None:
                 result = await self._fulfillment_mark_handler(body)
             if result is None and self._payment_validation_handler is not None:
@@ -208,10 +219,15 @@ class RulesFirstRuntime:
                 fulfillment = await self._liangpiao_fulfillment_handler(body, result)
                 if fulfillment is not None:
                     result = fulfillment
+            if result is None and self._canonical_text_handler is not None:
+                canonical = await self._canonical_text_handler(body)
+                if canonical is not None:
+                    reduced = canonical
+                    result = canonical
             if result is None:
                 result = await self._engine.process_event(body)
                 reduced = self._coordinator.record_event_decision(body, result)
-            else:
+            if reduced is None:
                 reduced = result
             decision = reduced.get("decision") if isinstance(reduced.get("decision"), Mapping) else {}
             actions = decision.get("actions") if isinstance(decision.get("actions"), list) else []
@@ -227,6 +243,13 @@ class RulesFirstRuntime:
                 result={
                     "transition_code": rule.get("transition_code"),
                     "state_after": rule.get("state_after"),
+                    "decision_reason": decision.get("reason"),
+                    "canonical_status": reduced.get("canonical_agent_status"),
+                    "canonical_quote_record_id": (
+                        (reduced.get("quote") or {}).get("record_id")
+                        if isinstance(reduced.get("quote"), Mapping) else None
+                    ),
+                    "canonical_purchase_context_id": reduced.get("canonical_purchase_context_id"),
                 },
             )
             return True

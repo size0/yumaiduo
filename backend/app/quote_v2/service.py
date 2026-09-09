@@ -72,6 +72,7 @@ class CanonicalQuoteRequest:
     movie: str
     quote_date: str
     showtime_start: str
+    cinema_address: str | None = None
     hall: str | None = None
     dimension: str | None = None
     language: str | None = None

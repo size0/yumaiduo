@@ -91,6 +91,45 @@ async def test_runtime_accepts_before_reduction_and_exposes_only_durable_command
 
 
 @pytest.mark.asyncio
+async def test_canonical_text_handler_uses_durable_outbox_without_legacy_engine(tmp_path: Path) -> None:
+    path = tmp_path / "rules.sqlite3"
+    protected = PlainProtector()
+    outbox = RulesFirstStore(path, protector=protected)
+    states = SqliteTransactionStateStore(path, protector=protected)
+
+    class MustNotRunEngine:
+        async def process_event(self, _body: object) -> dict[str, object]:
+            raise AssertionError("canonical text must not reach legacy engine")
+
+        def process_action_result(self, _body: object) -> dict[str, object]:
+            return {"actions": []}
+
+    async def canonical(_body: Mapping[str, Any]) -> dict[str, object]:
+        return {
+            "canonical_agent_status": "AGENT_REPLY_READY",
+            "decision": {"mode": "canonical", "reason": "agent_reply", "actions": [{
+                "id": "text-1:reply", "type": "send_message", "text": "已按当前报价记录。",
+            }]},
+        }
+
+    runtime = RulesFirstRuntime(
+        outbox, MustNotRunEngine(), RuleStateCoordinator(states), states,
+        canonical_text_handler=canonical,
+    )
+    event = body()
+    event["envelope"]["event"] = "im.message.received"
+    event["envelope"]["payload"] = {
+        "accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1",
+        "content": "2张", "messageType": 1,
+    }
+    runtime.accept(event)
+    assert await runtime.drain_once() is True
+    commands = runtime.claim_commands()
+    assert len(commands) == 1
+    assert commands[0]["action"]["text"] == "已按当前报价记录。"
+
+
+@pytest.mark.asyncio
 async def test_passwordless_payment_result_never_emits_cancel_or_fulfillment_command(tmp_path: Path) -> None:
     class PaidEngine(Engine):
         def process_action_result(self, body: Mapping[str, Any]) -> dict[str, object]:
