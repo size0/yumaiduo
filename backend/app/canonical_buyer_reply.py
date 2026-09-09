@@ -39,7 +39,8 @@ def _purchase_summary_message(quote: Mapping[str, Any]) -> str | None:
     movie = _text(quote.get("movie") or quote.get("movie_name"))
     show_date = _date_label(quote.get("quote_date") or quote.get("show_date"))
     start_time = _text(quote.get("showtime_start") or quote.get("start_time"))
-    return f"{cinema}\n《{movie}》\n{show_date}{start_time}这场"
+    # Keep the buyer-facing context scannable and stable: one fact per line.
+    return f"{cinema}\n{movie}\n{quote.get('quote_date') or quote.get('show_date')} {start_time}"
 
 
 def _seat_labels(quote: Mapping[str, Any]) -> list[str]:
@@ -103,7 +104,7 @@ class CanonicalBuyerReplyRenderer:
                 if unit:
                     summary_message = _purchase_summary_message(quote)
                     if summary_message is not None:
-                        price_message = f"W+ {unit}一张，需要几张呀"
+                        price_message = f"这场会员座位{unit}一张"
                         return {
                             "kind": "QUOTE_PREVIEW_WPLUS",
                             # ``text`` remains the first message for old
