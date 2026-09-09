@@ -1092,7 +1092,8 @@ def create_app(
     ) -> dict[str, object]:
         tenant_id = require_panel_tenant(x_wanda_tenant_id)
         enabled = body.get("enabled")
-        if type(enabled) is not bool:
+        enabled_present = "enabled" in body
+        if enabled_present and type(enabled) is not bool:
             raise HTTPException(status_code=422, detail="enabled_boolean_required")
         canonical_present = "canonical_quote_enabled" in body
         canonical_enabled = body.get("canonical_quote_enabled")
@@ -1102,9 +1103,11 @@ def create_app(
         conversation_enabled = body.get("canonical_conversation_enabled")
         if conversation_present and type(conversation_enabled) is not bool:
             raise HTTPException(status_code=422, detail="canonical_conversation_enabled_boolean_required")
+        if not (enabled_present or canonical_present or conversation_present):
+            raise HTTPException(status_code=422, detail="shop_update_fields_required")
         try:
             shop = persistent_shop_automation.set_settings(
-                tenant_id, shop_id, enabled=enabled,
+                tenant_id, shop_id, enabled=enabled if enabled_present else None,
                 canonical_quote_enabled=canonical_enabled if canonical_present else None,
                 canonical_conversation_enabled=conversation_enabled if conversation_present else None,
             )
@@ -1112,7 +1115,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="shop_not_found") from None
         LOGGER.info(
             "event=shop_automation_saved enabled=%s canonical_quote_enabled=%s canonical_conversation_enabled=%s",
-            str(enabled).lower(),
+            str(enabled).lower() if enabled_present else "unchanged",
             str(canonical_enabled).lower() if canonical_present else "unchanged",
             str(conversation_enabled).lower() if conversation_present else "unchanged",
         )
