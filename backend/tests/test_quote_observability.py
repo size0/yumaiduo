@@ -173,3 +173,64 @@ def test_delivery_receipt_trace_covers_three_outcomes():
     assert _delivery_receipt_result(succeeded=True, message_id="m", record_id="q", action_type="send_message")[1] == "PENDING"
     assert _delivery_receipt_result(succeeded=True, message_id="m", record_id=None, action_type="send_message")[1] == "SKIPPED_NO_QUOTE_RECORD"
     assert _delivery_receipt_result(succeeded=True, message_id="m", record_id=None, action_type="other")[1] == "NOT_ATTEMPTED"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["QUOTED", "ROUTE_UNRESOLVED", "SHOW_RESOLVE_FAILURE", "SELECTED_SEATS_REQUIRED", "PROVIDER_UNAVAILABLE"])
+async def test_real_orchestration_provider_call_equivalence_trace_toggle(monkeypatch, case):
+    """Run the canonical orchestration twice with fakes and compare provider boundaries."""
+    from app.quote_v2.service import CanonicalQuoteRuntime
+    from app.seat_facts_v2.models import SeatFactsResult
+    from app.wanda_cost_v2.models import WandaCostFacts
+    from app.wanda_pricing_v2.models import WandaPricingResult
+    from app.show_resolve_v2.models import ShowResolutionResult
+
+    original_stage_trace = __import__("app.quote_v2.service", fromlist=["_stage_trace"])._stage_trace
+    async def run(tracing):
+        calls = []
+        class Route:
+            async def resolve(self, recognition):
+                calls.append(("route", (recognition.city_text, recognition.cinema_text, recognition.movie, recognition.show_date, recognition.start_time), {}))
+                return SimpleNamespace(route="UNRESOLVED" if case == "ROUTE_UNRESOLVED" else "WANDA_SELF", resolution_reason="missing show" if case == "ROUTE_UNRESOLVED" else None, wanda_store_id="store-1", wanda_city_id="city-1", wanda_city_name="City", wanda_cinema_name="Cinema", wanda_cinema_address=None)
+        class Show:
+            async def resolve(self, payload):
+                calls.append(("show", tuple(sorted(payload.items())), {}))
+                if case == "SHOW_RESOLVE_FAILURE":
+                    return ShowResolutionResult(status="NOT_FOUND", resolution_reason="show missing")
+                return ShowResolutionResult(status="RESOLVED", wanda_store_id="store-1", wanda_show_id="show-1", movie_name="Movie", show_date="2026-09-12", start_time="16:00", hall_name="Hall")
+        class Seats:
+            async def resolve(self, payload, **kwargs):
+                calls.append(("seat", tuple(sorted(payload.items())), tuple(sorted(kwargs.items()))))
+                if case == "SELECTED_SEATS_REQUIRED":
+                    return SeatFactsResult(status="INPUT_INCOMPLETE", seat_request_type="EXACT_SEATS", resolution_reason="selected seats required")
+                if case == "PROVIDER_UNAVAILABLE":
+                    return SeatFactsResult(status="PROVIDER_UNAVAILABLE", seat_request_type="EXACT_SEATS", resolution_reason="provider unavailable")
+                return SeatFactsResult(status="EXACT_SEATS_RESOLVED", seat_request_type="EXACT_SEATS", wanda_show_id="show-1")
+        class Cost:
+            def resolve(self, show, seats):
+                calls.append(("cost", (show.wanda_show_id, seats.status), {}))
+                return WandaCostFacts(status="COST_READY", request_type="EXACT_SEATS", cost_items=[])
+        class Pricing:
+            def price(self, cost, show, seats, rules, **kwargs):
+                calls.append(("pricing", (cost.status, show.wanda_show_id, seats.status, rules.rule_version), tuple(sorted(kwargs.items()))))
+                return WandaPricingResult(status="PRICING_REQUIRES_COST" if case == "PROVIDER_UNAVAILABLE" else "PRICED", request_type="EXACT_SEATS", unit_sell_price_fen=1000 if case != "PROVIDER_UNAVAILABLE" else None, total_sell_price_fen=1000 if case != "PROVIDER_UNAVAILABLE" else None, ticket_count=1 if case != "PROVIDER_UNAVAILABLE" else None, pricing_rule_version="r1")
+        class Quotes:
+            def persist(self, *args, **kwargs):
+                calls.append(("quote_persist", (), tuple(sorted(kwargs.items()))))
+                return {"record_id": "q1"}
+        runtime = CanonicalQuoteRuntime.__new__(CanonicalQuoteRuntime)
+        runtime._route, runtime._show, runtime._seats = Route(), Show(), Seats()
+        runtime._cost, runtime._wanda_pricing, runtime._quotes = Cost(), Pricing(), Quotes()
+        runtime._fact_store = None
+        runtime._reply_renderer = None
+        runtime._rules = lambda: __import__("app.pricing.models", fromlist=["PricingRulesSnapshot"]).PricingRulesSnapshot(revision=1, rule_version="r1")
+        runtime._manual_mark_detector = None
+        monkeypatch.setattr("app.quote_v2.service._stage_trace", original_stage_trace if tracing else (lambda *a, **k: None))
+        recognition = SimpleNamespace(city_text="City", cinema_text="Cinema", movie="Movie", show_date="2026-09-12", start_time="16:00", hall="Hall", language=None, dimension=None, selected_seats=["4排7座"], has_selected_seats=True, has_manual_mark=False, candidate_shows=[], provider_recognize_id="rec-1", cinema_address=None, model_dump=lambda **k: {})
+        identity = {"event_id":"e1", "tenant_id":"t", "shop_id":"s", "buyer_id":"b", "chat_id":"c", "purchase_context_id":"p", "message_id":"m"}
+        result = await runtime.quote_recognition(recognition, identity=identity)
+        normalized = [(name, args, kwargs) for name, args, kwargs in calls]
+        return result, normalized
+    off = await run(False)
+    on = await run(True)
+    assert off == on
+
