@@ -13,7 +13,7 @@ from .conversation_fact_patch_parser import merge_conversation_facts
 from .settings_store import SecretProtector, default_secret_protector
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _DEFAULT_TTL_SECONDS = 1_800
 _ALLOWED_FACTS = frozenset({
     "city", "cinema", "cinema_address", "movie", "quote_date", "showtime_start",
@@ -131,6 +131,13 @@ class ConversationFactStore:
                 );
                 CREATE INDEX IF NOT EXISTS conversation_facts_lookup_idx
                     ON conversation_facts(tenant_id, shop_id, buyer_id, chat_id, expires_at, updated_at);
+                CREATE TABLE IF NOT EXISTS agent_states (
+                    state_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL, shop_id TEXT NOT NULL, buyer_id TEXT NOT NULL, chat_id TEXT NOT NULL,
+                    purchase_context_id TEXT NOT NULL, state_protected TEXT NOT NULL, revision INTEGER NOT NULL,
+                    expires_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    UNIQUE(tenant_id, shop_id, buyer_id, chat_id, purchase_context_id)
+                );
                 """
             )
             connection.execute(
@@ -270,6 +277,33 @@ class ConversationFactStore:
             if row is not None and (_parse_time(row["expires_at"]) or reference) <= reference:
                 result.update({"expired": True, "source": row["source"], "expires_at": row["expires_at"]})
         return result
+
+    def load_agent_state(self, *, now: datetime | None = None, **identity: Any) -> dict[str, Any]:
+        keys = tuple(str(identity.get(key) or "").strip() for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id"))
+        if any(not value for value in keys):
+            return {}
+        with self._lock, self._connect() as connection:
+            row = connection.execute("SELECT * FROM agent_states WHERE tenant_id=? AND shop_id=? AND buyer_id=? AND chat_id=? AND purchase_context_id=?", keys).fetchone()
+        if row is None or (_parse_time(row["expires_at"]) or _utc()) <= _utc(now):
+            return {}
+        return {**json.loads(self._protector.unprotect(row["state_protected"])), "revision": int(row["revision"]), "expires_at": row["expires_at"]}
+
+    def save_agent_state(self, *, state: Mapping[str, Any], ttl_seconds: int | None = None, expected_revision: int | None = None, **identity: Any) -> dict[str, Any]:
+        keys = tuple(str(identity.get(key) or "").strip() for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id"))
+        if any(not value for value in keys):
+            raise ValueError("agent_state_identity_invalid")
+        now = _utc(); ttl = int(ttl_seconds or self._ttl_seconds); expires = now + timedelta(seconds=ttl)
+        with self._lock, self._connect() as connection:
+            old = connection.execute("SELECT revision FROM agent_states WHERE tenant_id=? AND shop_id=? AND buyer_id=? AND chat_id=? AND purchase_context_id=?", keys).fetchone()
+            revision = int(old[0]) if old else 0
+            if expected_revision is not None and revision != expected_revision:
+                raise ValueError("agent_state_revision_conflict")
+            revision += 1
+            state_id = f"as-{uuid4().hex}"
+            protected = self._protect(dict(state))
+            connection.execute("""INSERT INTO agent_states(state_id,tenant_id,shop_id,buyer_id,chat_id,purchase_context_id,state_protected,revision,expires_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(tenant_id,shop_id,buyer_id,chat_id,purchase_context_id) DO UPDATE SET state_protected=excluded.state_protected,revision=excluded.revision,expires_at=excluded.expires_at,updated_at=excluded.updated_at""", (state_id, *keys, protected, revision, expires.isoformat(), now.isoformat()))
+        return {**dict(state), "revision": revision, "expires_at": expires.isoformat()}
 
     def context_for_event(self, body: Mapping[str, Any]) -> dict[str, Any]:
         identity = _event_identity(body)

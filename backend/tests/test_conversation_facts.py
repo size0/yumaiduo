@@ -82,7 +82,20 @@ def test_store_merges_facts_and_isolates_purchase_identity(tmp_path: Path) -> No
         event_id="image-1",
     )
     assert saved["facts"] == FACTS
-    assert facts.schema_version() == 1
+    assert facts.schema_version() == 2
+
+
+def test_agent_state_is_durable_revisioned_and_identity_scoped(tmp_path: Path) -> None:
+    facts = store(tmp_path)
+    identity = dict(tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-a", chat_id="chat-a", purchase_context_id="purchase-a")
+    saved = facts.save_agent_state(**identity, state={"user_goal": "CHANGE_SHOW", "conversation_phase": "RESOLVE_SHOW"})
+    assert saved["revision"] == 1
+    loaded = facts.load_agent_state(**identity)
+    assert loaded["user_goal"] == "CHANGE_SHOW"
+    assert loaded["revision"] == 1
+    updated = facts.save_agent_state(**identity, expected_revision=1, state={"user_goal": "SET_TICKET_COUNT", "conversation_phase": "COLLECT_SEAT_OR_COUNT"})
+    assert updated["revision"] == 2
+    assert facts.load_agent_state(**{**identity, "buyer_id": "buyer-b"}) == {}
     assert facts.journal_mode() == "wal"
 
     facts.save(

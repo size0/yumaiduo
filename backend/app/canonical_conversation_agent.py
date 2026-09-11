@@ -224,6 +224,7 @@ class AgentContext:
     user_goal: str = "BUY_MOVIE_TICKET"
     conversation_phase: str = "DISCOVER"
     next_action: str = "UNDERSTAND_REQUEST"
+    agent_state: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -256,6 +257,7 @@ class AgentContext:
                 "conversation_phase": self.conversation_phase,
                 "next_action": self.next_action,
             },
+            "agent_state": self.agent_state,
         }
 
 
@@ -520,6 +522,14 @@ class AgentContextBuilder:
             candidate = {**durable_facts, **candidate}
         phase, next_action = _task_phase(current_text=_current_text(body), candidate=candidate, quote=current_quote)
         user_goal = _user_goal(_current_text(body), quote=current_quote)
+        agent_state = {}
+        if self._fact_store is not None and all(identity.values()):
+            try:
+                agent_state = self._fact_store.load_agent_state(**identity) or {}
+                phase = str(agent_state.get("conversation_phase") or phase)
+                user_goal = str(agent_state.get("user_goal") or user_goal)
+            except Exception:
+                agent_state = {}
         return AgentContext(
             **identity,
             fishmore_im_history=history,
@@ -544,6 +554,7 @@ class AgentContextBuilder:
             user_goal=user_goal,
             conversation_phase=phase,
             next_action=next_action,
+            agent_state=agent_state,
         )
 
 
@@ -817,6 +828,7 @@ class CanonicalConversationAgent:
     async def process(self, body: Mapping[str, Any]) -> dict[str, Any]:
         trace_started = time.monotonic()
         context = await self._context_builder.build(body)
+        self._persist_agent_state(context)
         model, model_metadata = self._resolve_model(context)
         run_id = self._start_audit_run(context, body, model_metadata)
         if body.get("authoritative_history_available") is False:
@@ -936,6 +948,23 @@ class CanonicalConversationAgent:
         }
         self._finish_audit_run(run_id, result, context, started_at=trace_started)
         return result
+
+    def _persist_agent_state(self, context: AgentContext) -> None:
+        store = getattr(self._context_builder, "_fact_store", None)
+        if store is None or not all((context.tenant_id, context.shop_id, context.buyer_id, context.chat_id, context.purchase_context_id)):
+            return
+        try:
+            store.save_agent_state(
+                tenant_id=context.tenant_id, shop_id=context.shop_id, buyer_id=context.buyer_id,
+                chat_id=context.chat_id, purchase_context_id=context.purchase_context_id,
+                state={"user_goal": context.user_goal, "conversation_phase": context.conversation_phase,
+                       "next_action": context.next_action, "blocked_reason": None},
+                expected_revision=context.agent_state.get("revision") if context.agent_state else None,
+            )
+        except ValueError:
+            LOGGER.warning("event=agent_state_persist_conflict chat_id=%s", context.chat_id)
+        except Exception:
+            LOGGER.warning("event=agent_state_persist_failed chat_id=%s", context.chat_id)
 
     def _system_prompt(self) -> str:
         """Inject the operator-configured persona and knowledge into the canonical agent.
