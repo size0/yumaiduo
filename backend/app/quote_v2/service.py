@@ -47,7 +47,13 @@ def _recognition_trace(recognition: Any) -> dict[str, Any]:
 
 def _safe_reason(value: object) -> dict[str, str | None]:
     raw = str(value or "").strip()
-    return {"reason_class": raw[:80] if raw else None, "reason_hash": _trace_hash(raw)}
+    if not raw:
+        reason_class = None
+    else:
+        upper = raw.upper()
+        known = ("MISSING", "REQUIRED", "UNAVAILABLE", "UNRESOLVED", "INVALID", "NOT_FOUND", "TIMEOUT")
+        reason_class = next((item for item in known if item in upper), "UNCLASSIFIED")
+    return {"reason_class": reason_class, "reason_hash": _trace_hash(raw)}
 
 
 def _latency_mark(trace: Any, stage: str) -> None:
