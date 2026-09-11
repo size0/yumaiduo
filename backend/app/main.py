@@ -28,6 +28,7 @@ from .canonical_agent_audit_store import CanonicalAgentAuditStore
 from .cinema_route_v2.service import CinemaRouteV2Service
 from .conversation_policy_store import ConversationPolicyStore
 from .conversation_fact_store import ConversationFactStore
+from .conversation_quote_continuation import ConversationQuoteContinuation
 from .diagnostics import DiagnosticsStore
 from .errors import ImageValidationError, ProviderError, RecognitionError
 from .config import Settings
@@ -576,6 +577,9 @@ def create_app(
         agent=canonical_agent, shop_store=persistent_shop_automation, inbox=persistent_rules_store,
         quote_context_writer=configured_wplus_mark_service.record_quote_context,
         reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
+        quote_continuation=(ConversationQuoteContinuation(
+            fact_store=persistent_conversation_facts, quote_runtime=configured_canonical_quote_runtime,
+        ) if configured_canonical_quote_runtime is not None else None),
     )
     durable_runtime = rules_first_runtime or (
         RulesFirstRuntime(
