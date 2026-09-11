@@ -17,6 +17,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, 
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .chat import (
+    build_image_followup_reply,
     build_guidance_reply,
     build_recognition_reply,
     build_show_confirmation_reply,
@@ -1640,18 +1641,34 @@ def create_app(
                 recognition,
                 templates=persistent_reply_templates.current(),
             )
-        elif (
-            message_text.strip()
-            and ai_chat_service is not None
-            and bool(persistent_settings.current().chat_api_key)
-        ):
-            try:
-                reply_text = await ai_chat_service.reply(
-                    message_text,
-                    normalized.conversation_id,
-                )
-            except RecognitionError as error:
-                diagnostics.add("chat_image_followup_fallback", code=error.code, message=error.message)
+        elif message_text.strip():
+            deterministic_followup = build_image_followup_reply(
+                message_text,
+                recognition,
+                quote=quote,
+                quote_error=quote_error,
+                templates=persistent_reply_templates.current(),
+            )
+            if deterministic_followup is not None:
+                reply_text = deterministic_followup
+            elif (
+                ai_chat_service is not None
+                and bool(persistent_settings.current().chat_api_key)
+            ):
+                try:
+                    reply_text = await ai_chat_service.reply(
+                        message_text,
+                        normalized.conversation_id,
+                    )
+                except RecognitionError as error:
+                    diagnostics.add("chat_image_followup_fallback", code=error.code, message=error.message)
+                    reply_text = build_recognition_reply(
+                        recognition,
+                        quote=quote,
+                        quote_error=quote_error,
+                        templates=persistent_reply_templates.current(),
+                    )
+            else:
                 reply_text = build_recognition_reply(
                     recognition,
                     quote=quote,

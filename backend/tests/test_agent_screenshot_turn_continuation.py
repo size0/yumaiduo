@@ -10,7 +10,13 @@ from app.canonical_conversation_agent import (
     CanonicalConversationAgent,
 )
 from app.canonical_event_handler import _show_confirmation_reply
-from app.chat import build_show_confirmation_reply, is_show_confirmation_message
+from app.chat import (
+    build_image_followup_reply,
+    build_show_confirmation_reply,
+    extract_ticket_count,
+    is_cancel_message,
+    is_show_confirmation_message,
+)
 from app.models import MovieImageInfo
 
 
@@ -174,6 +180,22 @@ def test_chat_image_confirmation_uses_recognized_facts_and_skips_quote() -> None
         "对，是UME影城（Onyx LED 4K巨幕新天地店），周六9月12日18:02《奥德赛》这场。"
         "截图里的列表价先不当最终报价，你确定场次后把选座和张数告诉我，我再按实时座位核价。"
     )
+
+
+def test_image_followup_intents_are_not_swallowed_by_quote_failure() -> None:
+    recognition = MovieImageInfo(
+        city="上海",
+        cinema_name="上海枫泾天娱影城",
+        movie_name="奥德赛",
+        date_text="今天",
+        showtime_start="20:30",
+    )
+    assert extract_ticket_count("我要两张") == 2
+    assert is_cancel_message("不要了")
+    assert "先不买了" in build_image_followup_reply("不要了", recognition)
+    assert "2张" in build_image_followup_reply("我要两张", recognition)
+    assert "换" in build_image_followup_reply("换下一场可以吗", recognition)
+    assert "4排7座" in build_image_followup_reply("4排7座可以吗", recognition)
 
 
 @pytest.mark.asyncio

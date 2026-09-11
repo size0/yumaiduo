@@ -211,6 +211,68 @@ def is_show_confirmation_message(text: str) -> bool:
     return any(token in normalized for token in ("影院", "影城", "场", "电影", "影片"))
 
 
+def is_cancel_message(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    return bool(normalized) and any(token in normalized for token in ("不要了", "不买了", "取消", "不用了", "算了"))
+
+
+def is_show_change_message(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    return bool(normalized) and any(token in normalized for token in ("换下一场", "换场", "改场", "换个场次", "别的场次"))
+
+
+def extract_ticket_count(text: str) -> int | None:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    match = re.search(r"(?<!\d)(\d{1,2})\s*(?:张|张票|人|位)", normalized)
+    if match:
+        value = int(match.group(1))
+        return value if 1 <= value <= 20 else None
+    numerals = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+    for token, value in numerals.items():
+        if re.search(rf"{token}\s*(?:张|票|人|位)", normalized):
+            return value
+    return None
+
+
+def is_seat_followup_message(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(text or ""))
+    return bool(normalized) and (
+        bool(re.search(r"\d+\s*排\s*\d+\s*[座号號]", normalized))
+        or any(token in normalized for token in ("座位", "选座", "圈的", "圈出", "标记的位置"))
+    )
+
+
+def build_image_followup_reply(
+    text: str,
+    recognition: MovieImageInfo,
+    *,
+    quote: RealQuote | None = None,
+    quote_error: str | None = None,
+    templates: ReplyTemplates | None = None,
+) -> str | None:
+    """Handle low-ambiguity buyer intent before an LLM can lose the image facts."""
+    if is_cancel_message(text):
+        return "好的，先不买了。有需要再找我。"
+    if is_show_change_message(text):
+        movie = recognition.movie_name or "这部电影"
+        date = recognition.date_text or "原日期"
+        return f"可以，还是{date}《{movie}》这家影院吗？把想换的场次时间发我，我按新场次继续核价。"
+    count = extract_ticket_count(text)
+    if count is not None:
+        if quote is not None:
+            return f"收到，你要{count}张。我按当前场次继续核对实时座位和总价。"
+        if recognition.city:
+            return f"收到，先记下{count}张。我按当前场次继续核对实时座位和价格。"
+        return f"收到，先记下{count}张。再补一下城市，我继续核对当前场次的实时座位和价格。"
+    if is_seat_followup_message(text):
+        explicit = re.search(r"\d+\s*排\s*\d+\s*[座号號]", str(text or ""))
+        if explicit:
+            seat = re.sub(r"\s+", "", explicit.group(0))
+            return f"收到，你指定的是{seat}，我按文字座位继续核验实时库存和价格。"
+        return "收到，我按你圈出或指定的位置继续核验实时座位和价格。"
+    return None
+
+
 def build_show_confirmation_reply(
     recognition: MovieImageInfo,
     *,
