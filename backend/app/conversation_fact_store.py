@@ -19,6 +19,7 @@ _ALLOWED_FACTS = frozenset({
     "city", "cinema", "cinema_address", "movie", "quote_date", "showtime_start",
     "showtime_end", "hall", "dimension", "language", "seat_request_type",
     "selected_seats", "ticket_count", "showtime_ordinal",
+    "candidate_shows", "show_id", "verified",
 })
 
 
@@ -367,6 +368,21 @@ class ConversationFactStore:
             if labels:
                 result["selected_seats"] = list(dict.fromkeys(labels))
                 result.setdefault("seat_request_type", "EXACT_SEATS")
+        shows = recognition.get("candidate_shows")
+        if isinstance(shows, list):
+            normalized_shows = []
+            for item in shows[:10]:
+                if not isinstance(item, Mapping):
+                    continue
+                show = {
+                    key: str(item[key]).strip()
+                    for key in ("show_id", "start_time", "end_time", "hall_name", "dimension", "language")
+                    if item.get(key) not in (None, "")
+                }
+                if show.get("start_time"):
+                    normalized_shows.append(show)
+            if normalized_shows:
+                result["candidate_shows"] = normalized_shows
         return {key: value for key, value in result.items() if key in _ALLOWED_FACTS}
 
     @staticmethod
@@ -402,6 +418,18 @@ class ConversationFactStore:
                 continue
             if name == "showtime_ordinal":
                 if type(value) is int and 1 <= value <= 10:
+                    result[name] = value
+                continue
+            if name == "candidate_shows":
+                if isinstance(value, list):
+                    fields = ("show_id", "start_time", "end_time", "hall_name", "dimension", "language")
+                    result[name] = [
+                        {key: _text(item.get(key), limit=120) for key in fields if _text(item.get(key), limit=120)}
+                        for item in value[:10] if isinstance(item, Mapping) and _text(item.get("start_time"), limit=120)
+                    ]
+                continue
+            if name == "verified":
+                if type(value) is bool:
                     result[name] = value
                 continue
             text = _text(value)

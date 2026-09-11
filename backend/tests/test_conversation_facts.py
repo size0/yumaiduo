@@ -154,3 +154,13 @@ async def test_agent_builder_loads_persistent_facts_without_confirming_them(tmp_
     continued = await AgentContextBuilder(fact_store=facts).build(body)
     assert continued.purchase_context_id == "purchase-1"
     assert continued.inherited_screenshot_context["facts"]["movie"] == FACTS["movie"]
+
+def test_ordinal_and_dimension_select_persisted_candidates():
+    facts = {"candidate_shows": [
+        {"show_id": "a", "start_time": "08:40", "dimension": "2D"},
+        {"show_id": "b", "start_time": "11:20", "dimension": "IMAX"},
+        {"show_id": "c", "start_time": "13:10", "dimension": "2D"},
+    ]}
+    parser = ConversationFactPatchParser()
+    assert parser.parse("第二场", facts).facts["showtime_start"] == "11:20"
+    assert parser.parse("IMAX那场", facts).facts["showtime_start"] == "11:20"
