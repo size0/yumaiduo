@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import logging
+from time import monotonic
 from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
 
@@ -20,7 +20,14 @@ AUTO_PRICING_SOURCE = "AUTO_PRICING"
 MANUAL_OPERATOR_SOURCE = "MANUAL_OPERATOR"
 AUTO_QUOTE_TTL_SECONDS = 1_800
 MANUAL_QUOTE_TTL_SECONDS = 7_200
-LOGGER = logging.getLogger(__name__)
+
+
+def _latency_mark(trace: Any, stage: str) -> None:
+    if not isinstance(trace, dict):
+        return
+    marks = trace.setdefault("marks", {})
+    if isinstance(marks, dict):
+        marks.setdefault(stage, monotonic())
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,8 @@ class CanonicalQuoteRequest:
     has_manual_mark: bool | None = None
     image_url: str | None = None
     message_id: str | None = None
+    # Ephemeral diagnostics only; never persisted or sent to a provider.
+    latency_trace: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -506,7 +515,6 @@ class CanonicalQuoteRuntime:
         pricing_rules_provider: Any,
         quote_service: QuoteV2Service,
         liangpiao_facts_adapter: Any,
-        fact_store: Any | None = None,
         manual_mark_detector: Any | None = None,
         pricing_engine: V4PricingEngine | None = None,
         reply_renderer: CanonicalBuyerReplyRenderer | None = None,
@@ -521,7 +529,6 @@ class CanonicalQuoteRuntime:
         self._rules_provider = pricing_rules_provider
         self._quotes = quote_service
         self._liangpiao_facts = liangpiao_facts_adapter
-        self._fact_store = fact_store
         self._manual_mark_detector = manual_mark_detector
         self._reply_renderer = reply_renderer
         self._engine = pricing_engine or V4PricingEngine()
@@ -564,10 +571,12 @@ class CanonicalQuoteRuntime:
             has_selected_seats=bool(request.selected_seats),
             has_manual_mark=request.has_manual_mark,
         )
+        _latency_mark(request.latency_trace, "T3")
         return await self.quote_recognition(
             recognition, identity=identity, image_url=request.image_url,
             ticket_count=request.ticket_count, ticket_mode=request.ticket_mode,
             area_quote_strategy=request.area_quote_strategy,
+            latency_trace=request.latency_trace,
         )
 
     async def refresh_expired_auto_quote(
@@ -689,17 +698,9 @@ class CanonicalQuoteRuntime:
             recognition = await self._recognition.recognize(
                 image_url, trace_id=identity["event_id"], idempotency_key=identity["event_id"],
             )
-            result = await self.quote_recognition(
+            return await self.quote_recognition(
                 recognition, identity=identity, image_url=image_url,
             )
-            if self._fact_store is not None:
-                try:
-                    self._fact_store.record_canonical_event(body, result)
-                except Exception:
-                    # Fact persistence is useful context, never permission to
-                    # fall through to Legacy or to fail a quote result.
-                    LOGGER.exception("event=conversation_facts_canonical_save_failed event_id=%s", identity["event_id"])
-            return result
         except Exception as error:
             # A provider or fact failure is a structured no-quote result, not
             # permission to re-enter the Legacy NLP/quote path.
@@ -708,16 +709,18 @@ class CanonicalQuoteRuntime:
     async def quote_recognition(
         self, recognition: Any, *, identity: dict[str, str], image_url: str | None = None,
         ticket_count: int | None = None, ticket_mode: str = "STANDARD",
-        area_quote_strategy: str | None = None,
+        area_quote_strategy: str | None = None, latency_trace: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         route = await self._route.resolve(recognition)
         if route.route == "UNRESOLVED":
             result = {"status": "ROUTE_UNRESOLVED", "reason": route.resolution_reason}
         else:
             rules = self._rules()
+            _latency_mark(latency_trace, "T5")
             if route.route == "WANDA_SELF":
                 result = await self._quote_wanda(
                     recognition, route, identity, image_url, rules, ticket_count=ticket_count,
+                    latency_trace=latency_trace,
                 )
             elif route.route == "LIANGPIAO":
                 result = await self._quote_liangpiao(
@@ -726,6 +729,7 @@ class CanonicalQuoteRuntime:
                 )
             else:
                 result = {"status": "ROUTE_UNRESOLVED", "reason": "UNKNOWN_ROUTE"}
+            _latency_mark(latency_trace, "T6")
         result = {
             **result,
             "route": route.route,
@@ -757,6 +761,7 @@ class CanonicalQuoteRuntime:
     async def _quote_wanda(
         self, recognition: Any, route: Any, identity: dict[str, str],
         image_url: str | None, rules: PricingRulesSnapshot, *, ticket_count: int | None = None,
+        latency_trace: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         show = await self._show.resolve({
             "route": "WANDA_SELF", "wanda_store_id": route.wanda_store_id,
@@ -764,6 +769,7 @@ class CanonicalQuoteRuntime:
             "start_time": recognition.start_time, "hall": recognition.hall,
             "language": recognition.language, "dimension": recognition.dimension,
         })
+        _latency_mark(latency_trace, "T4")
         if show.status != "RESOLVED":
             return {
                 "status": "SHOW_UNRESOLVED", "reason": show.resolution_reason,
@@ -852,8 +858,10 @@ class CanonicalQuoteRuntime:
         ids = _liangpiao_final_ids(recognition.raw_provider_result)
         cinema_id = ids.get("cinema_id")
         show_id = ids.get("show_id")
-        if not cinema_id or not recognition.selected_seats:
-            return {"status": "LIANGPIAO_FACTS_INCOMPLETE", "reason": "PROVIDER_IDS_OR_SELECTED_SEATS_REQUIRED"}
+        if not recognition.selected_seats:
+            return {"status": "LIANGPIAO_FACTS_INCOMPLETE", "reason": "SELECTED_SEATS_REQUIRED"}
+        if not cinema_id or not show_id:
+            return {"status": "PROVIDER_UNAVAILABLE", "reason": "PROVIDER_IDS_REQUIRED"}
         seats = _recognition_seats(recognition.selected_seats)
         if not seats:
             return {"status": "LIANGPIAO_FACTS_INCOMPLETE", "reason": "SEAT_COORDINATES_REQUIRED"}
