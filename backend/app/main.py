@@ -1114,6 +1114,16 @@ def create_app(
                     "canonical_runtime_reply": result.get("current_runtime_reply"),
                     "durable_reply_command_count": len(durable.get("commands", [])),
                 }
+                try:
+                    LOGGER.info(
+                        "canonical_quote_observability_v2 event=durable_reply_trace event_id=%s durable_command_count=%s action_types=%s has_quote_record_id=%s",
+                        str(accepted.get("event_id") or "")[:16],
+                        len(durable.get("commands", [])),
+                        sorted({str(item.get("type") or "") for item in durable.get("commands", []) if isinstance(item, Mapping)}),
+                        bool(result.get("quote_record_id") or (result.get("quote") or {}).get("record_id")),
+                    )
+                except Exception:
+                    pass
             else:
                 accepted = {
                     "event_id": str(envelope.get("id") or ""), "accepted": True,
