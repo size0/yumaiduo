@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from decimal import Decimal, InvalidOperation
 
 from .quote_v2.service import CanonicalQuoteRequest
+from .conversation_fact_store import ConversationFactStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -368,24 +369,27 @@ class AgentContextBuilder:
     event and platform history remain owned by their existing stores/services.
     """
 
-    def __init__(self, *, quote_store: Any | None = None, transaction_store: Any | None = None, recognition_store: Any | None = None) -> None:
+    def __init__(
+        self, *, quote_store: Any | None = None, transaction_store: Any | None = None,
+        recognition_store: Any | None = None, fact_store: ConversationFactStore | None = None,
+    ) -> None:
         self._quote_store = quote_store
         self._transaction_store = transaction_store
         self._recognition_store = recognition_store
+        self._fact_store = fact_store
 
     async def build(self, body: Mapping[str, Any]) -> AgentContext:
         envelope = _mapping(body.get("envelope"))
         payload = _mapping(envelope.get("payload"))
         session = _mapping(body.get("session"))
+        explicit_purchase_context_id = _pick(payload, "itemId", "item_id")
         identity = {
             "tenant_id": _pick(envelope, "tenantId", "tenant_id") or _text(body.get("tenant_id")),
             "shop_id": _pick(session, "accountUnb", "account_unb") or _pick(payload, "accountUnb", "account_unb"),
             "buyer_id": _pick(session, "peerUnb", "peer_unb") or _pick(payload, "peerUnb", "peer_unb"),
             "chat_id": _pick(session, "chatId", "chat_id") or _pick(payload, "chatId", "chat_id"),
-            "purchase_context_id": _pick(payload, "itemId", "item_id") or "",
+            "purchase_context_id": explicit_purchase_context_id or f'chat:{_pick(session, "chatId", "chat_id") or _pick(payload, "chatId", "chat_id")}',
         }
-        if not identity["purchase_context_id"]:
-            identity["purchase_context_id"] = f'chat:{identity["chat_id"]}'
 
         history = [_history_item(item) for item in _list(body.get("recent_messages") or body.get("recentMessages"))]
         current_message = _history_item({
@@ -477,7 +481,35 @@ class AgentContextBuilder:
         confirmed = _confirmed_facts(current_quote, transaction)
         candidate = dict(recognition or {})
         inherited_screenshot = _inherited_screenshot_context(recognition)
+        durable_facts: dict[str, Any] = {}
+        durable_context: dict[str, Any] = {}
+        if self._fact_store is not None and all(identity.values()):
+            try:
+                durable_context = self._fact_store.load_context(
+                    tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
+                    buyer_id=identity["buyer_id"], chat_id=identity["chat_id"],
+                    purchase_context_id=explicit_purchase_context_id,
+                )
+                if not explicit_purchase_context_id and durable_context.get("purchase_context_id"):
+                    identity["purchase_context_id"] = str(durable_context["purchase_context_id"])
+                durable_facts = _mapping(durable_context.get("facts"))
+            except Exception:
+                durable_context = {}
+        if not inherited_screenshot and durable_facts:
+            inherited_screenshot = {
+                "available": True, "fact_tier": str(durable_context.get("fact_tier") or "candidate"),
+                "source": str(durable_context.get("source") or "persistent_conversation_facts"),
+                "facts": dict(durable_facts), "carry_forward_fields": sorted(durable_facts),
+                "expires_at": durable_context.get("expires_at"),
+            }
         expired = _list_of_mappings(body.get("expired_facts"))
+        if not expired and durable_context.get("expired"):
+            expired = [{
+                "source": durable_context.get("source"),
+                "expires_at": durable_context.get("expires_at"),
+            }]
+        if durable_facts:
+            candidate = {**durable_facts, **candidate}
         return AgentContext(
             **identity,
             fishmore_im_history=history,

@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 
 
 PUBLIC_GATEWAY_SUFFIXES = (

@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import RLock
 from time import monotonic, perf_counter
 from collections.abc import Mapping
-from typing import Annotated, Callable, Protocol
+from typing import Annotated, Any, Callable, Protocol
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -27,6 +27,7 @@ from .canonical_event_handler import CanonicalEventHandler
 from .canonical_agent_audit_store import CanonicalAgentAuditStore
 from .cinema_route_v2.service import CinemaRouteV2Service
 from .conversation_policy_store import ConversationPolicyStore
+from .conversation_fact_store import ConversationFactStore
 from .diagnostics import DiagnosticsStore
 from .errors import ImageValidationError, ProviderError, RecognitionError
 from .config import Settings
@@ -198,7 +199,11 @@ def _quote_delivery_record_id(action: Mapping[str, object], *, event_id: str) ->
     ):
         return None
     record_id = str(action.get("quote_record_id") or "").strip()
-    return record_id or None
+    # event_id is an inbox identity, never a QuoteRecord identity. Refuse the
+    # common malformed fallback instead of allowing delivery state corruption.
+    if not record_id or record_id == normalized_event:
+        return None
+    return record_id
 
 
 def _new_flow_reprice_input(body: Mapping[str, object]) -> tuple[str, dict[str, str], Mapping[str, object]] | None:
@@ -333,6 +338,7 @@ def create_app(
     shop_automation_store: ShopAutomationStore | None = None,
     reply_template_store: ReplyTemplateStore | None = None,
     conversation_policy_store: ConversationPolicyStore | None = None,
+    conversation_fact_store: ConversationFactStore | None = None,
     quote_record_store: QuoteRecordStore | None = None,
     order_quote_binding_service: OrderQuoteBindingV2Service | None = None,
     reminder_store: ReminderStore | None = None,
@@ -358,6 +364,7 @@ def create_app(
     shops_path = Path(os.getenv("WANDA_SHOP_AUTOMATION_PATH", "data/shop-automation.json"))
     templates_path = Path(os.getenv("WANDA_REPLY_TEMPLATES_PATH", "data/reply-templates.json"))
     conversation_policy_path = Path(os.getenv("WANDA_CONVERSATION_POLICY_PATH", "data/conversation-policy.json"))
+    conversation_facts_path = Path(os.getenv("WANDA_CONVERSATION_FACTS_PATH", "data/conversation-facts.sqlite3"))
     quote_records_path = Path(os.getenv("WANDA_QUOTE_RECORDS_PATH", "data/quote-records.json"))
     reminders_path = Path(os.getenv("WANDA_REMINDERS_PATH", "data/reminders.json"))
     knowledge_path = Path(os.getenv("WANDA_KNOWLEDGE_BASE_PATH", "data/knowledge-base.json"))
@@ -369,6 +376,10 @@ def create_app(
     persistent_shop_automation = shop_automation_store or ShopAutomationStore(shops_path)
     persistent_reply_templates = reply_template_store or ReplyTemplateStore(templates_path)
     persistent_conversation_policy = conversation_policy_store or ConversationPolicyStore(conversation_policy_path)
+    persistent_conversation_facts = conversation_fact_store or ConversationFactStore(
+        conversation_facts_path,
+        ttl_seconds=int(os.getenv("WANDA_CONVERSATION_FACT_TTL_SECONDS", "1800")),
+    )
     persistent_quote_records = quote_record_store or QuoteRecordStore(quote_records_path)
     persistent_reminders = reminder_store or ReminderStore(reminders_path)
     persistent_knowledge = knowledge_store or KnowledgeStore(knowledge_path)
@@ -501,6 +512,7 @@ def create_app(
                 ),
                 quote_service=canonical_quote_store_service,
                 liangpiao_facts_adapter=LiangpiaoPricingFactsAdapter(),
+                fact_store=persistent_conversation_facts,
                 manual_mark_detector=canonical_manual_mark_detector,
                 reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
             )
@@ -533,6 +545,8 @@ def create_app(
             quote_confirmer=persistent_quote_records.confirm_latest,
             quote_binder=persistent_quote_records.bind_order,
             quote_order_confirmer=persistent_quote_records.confirm_for_order,
+            conversation_fact_store=persistent_conversation_facts,
+            conversation_fact_recorder=persistent_conversation_facts.record_legacy_event,
             ai_assist_enabled=ai_assist_enabled,
         )
         if service is None and authoritative_quote_service is not None
@@ -546,7 +560,10 @@ def create_app(
         )
 
     canonical_agent = canonical_conversation_agent or CanonicalConversationAgent(
-        AgentContextBuilder(quote_store=persistent_quote_records, transaction_store=persistent_transaction_states),
+        AgentContextBuilder(
+            quote_store=persistent_quote_records, transaction_store=persistent_transaction_states,
+            fact_store=persistent_conversation_facts,
+        ),
         resolve_canonical_chat_model("", "", purpose="conversation_agent"),
         tool_backend=CanonicalAgentToolBackend(
             quote_runtime=configured_canonical_quote_runtime, quote_store=persistent_quote_records,
@@ -624,6 +641,7 @@ def create_app(
     app.state.canonical_quote_runtime = configured_canonical_quote_runtime
     app.state.canonical_quote_runtime_enabled = canonical_quote_runtime_enabled
     app.state.canonical_quote_store_service = canonical_quote_store_service
+    app.state.conversation_fact_store = persistent_conversation_facts
     app.state.wplus_fulfillment_mark_service = configured_wplus_mark_service
     app.state.payment_validation_service = configured_payment_validation
     app.state.rules_first_runtime = durable_runtime
@@ -813,7 +831,6 @@ def create_app(
             return value
 
         calls = run.get("tool_calls") if isinstance(run.get("tool_calls"), list) else []
-        safe_calls = [safe(item) for item in calls if isinstance(item, Mapping)]
         return {
             "run_id": run.get("run_id"), "tenant_id": run.get("tenant_id"),
             "shop_id": run.get("shop_id") or identity.get("shop_id"),
@@ -1082,6 +1099,7 @@ def create_app(
                 if configured_canonical_quote_runtime is not None
                 else {"status": "CANONICAL_COMPOSITION_UNAVAILABLE"}
             )
+            persistent_conversation_facts.record_canonical_event(body, result)
             configured_wplus_mark_service.record_quote_context(body, result)
             if durable_runtime is not None:
                 durable = durable_runtime.accept_canonical_result(body, result)

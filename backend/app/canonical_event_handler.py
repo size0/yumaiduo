@@ -33,8 +33,13 @@ class CanonicalEventHandler:
         shop = str(payload.get("accountUnb") or payload.get("account_unb") or session.get("accountUnb") or session.get("account_unb") or "")
         if not self._shops.is_canonical_quote_enabled(tenant, shop):
             return None
-        if not self._shops.is_enabled(tenant, shop) or not self._shops.is_canonical_conversation_enabled(tenant, shop):
+        if not self._shops.is_enabled(tenant, shop):
             return self._outcome("CANONICAL_TEXT_DISABLED")
+        # Canonical quote rollout and Canonical conversation rollout are
+        # independent. With conversation disabled, return None so the existing
+        # Legacy text reducer can consume persisted Conversation Facts.
+        if not self._shops.is_canonical_conversation_enabled(tenant, shop):
+            return None
         roles = {str(payload.get(key) or "").lower() for key in ("direction", "sender", "senderType", "fromRole", "role")}
         if payload.get("agent_generated") is True or roles & {"seller", "outbound", "sent", "staff", "human", "operator", "merchant", "system"}:
             return self._outcome("CANONICAL_NON_BUYER_MESSAGE")

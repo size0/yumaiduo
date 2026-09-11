@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .chat import build_recognition_reply
+from .conversation_fact_patch_parser import ConversationFactPatchParser, merge_conversation_facts
 from .errors import RecognitionError
 from .models import MovieImageInfo, RealQuote, SelectedSeat
 from .observability import LOGGER
@@ -351,6 +352,43 @@ def _structured_ticket_request(value: str) -> MovieImageInfo | None:
         selected_count_visible=len(seat_numbers), confidence=1,
         missing_fields=[] if count else ["ticket_count"],
         warnings=[] if seat_numbers else ["structured_text_without_specific_seats"],
+    )
+
+
+def _recognition_from_conversation_facts(facts: Mapping[str, Any]) -> MovieImageInfo | None:
+    """Build a fresh provider request from candidate facts, never a prior quote."""
+    def value(*keys: str) -> str | None:
+        for key in keys:
+            text = str(facts.get(key) or "").strip()
+            if text:
+                return text
+        return None
+
+    city = value("city", "city_text")
+    cinema = value("cinema", "cinema_name", "cinema_text")
+    movie = value("movie", "movie_name")
+    quote_date = value("quote_date", "show_date", "date_text", "date")
+    showtime = value("showtime_start", "start_time", "showtime")
+    if not all((city, cinema, movie, quote_date, showtime)):
+        return None
+    try:
+        parsed_date = date.fromisoformat(quote_date) if quote_date else None
+    except ValueError:
+        parsed_date = None
+    seats_value = facts.get("selected_seats")
+    seats = [
+        SelectedSeat(seat_number=str(item).strip())
+        for item in seats_value
+        if str(item).strip()
+    ] if isinstance(seats_value, list) else []
+    return MovieImageInfo(
+        platform="conversation_fact_patch", city=city, cinema_name=cinema,
+        cinema_address=value("cinema_address", "address"), movie_name=movie,
+        date_text=quote_date, date=parsed_date, showtime_start=showtime,
+        showtime_end=value("showtime_end", "end_time"), hall_name=value("hall", "hall_name"),
+        language=value("language"), format=value("dimension", "format"),
+        selected_seats=seats, selected_count_visible=len(seats), confidence=0,
+        missing_fields=[], warnings=["conversation_facts_are_candidate_input"],
     )
 
 
@@ -1033,6 +1071,8 @@ class RulesFirstDecisionEngine:
         quote_binder: Callable[..., Mapping[str, Any] | None] | None = None,
         quote_order_confirmer: Callable[..., Mapping[str, Any] | None] | None = None,
         pending_cinema_candidate_store: PendingCinemaCandidateStore | None = None,
+        conversation_fact_store: Any | None = None,
+        conversation_fact_recorder: Callable[[Mapping[str, Any]], object] | None = None,
         ai_assist_enabled: bool = True,
     ) -> None:
         # The rules engine is the only production decision path. ``mode`` is
@@ -1052,6 +1092,9 @@ class RulesFirstDecisionEngine:
         self._quote_binder = quote_binder
         self._quote_order_confirmer = quote_order_confirmer
         self._pending_candidate_store = pending_cinema_candidate_store
+        self._conversation_fact_store = conversation_fact_store
+        self._conversation_fact_recorder = conversation_fact_recorder
+        self._fact_patch_parser = ConversationFactPatchParser()
         self._ai_assist_enabled = bool(ai_assist_enabled)
         self._owned_loader = SecureImageLoader() if image_loader is None else None
         self._load_image = image_loader or self._owned_loader
@@ -1128,6 +1171,13 @@ class RulesFirstDecisionEngine:
         )
         if identity is None:
             return {"decision": {"mode": "auto", "actions": [], "reason": reason}}
+        if self._conversation_fact_store is not None and not isinstance(body.get("conversation_facts"), Mapping):
+            try:
+                loaded = self._conversation_fact_store.context_for_event(body)
+                if isinstance(loaded, Mapping) and loaded.get("facts"):
+                    body = {**dict(body), "conversation_facts": dict(loaded["facts"]), "conversation_fact_context": dict(loaded)}
+            except Exception:
+                LOGGER.exception("event=conversation_facts_load_failed event_id=%s", identity.get("event_id"))
         if self._shops is not None and not self._shops.is_enabled(identity["tenant_id"], identity["shop_id"]):
             return {"decision": {"mode": "auto", "actions": [], "reason": "shop_automation_disabled"}}
         canonical_quote_enabled = False
@@ -1157,6 +1207,7 @@ class RulesFirstDecisionEngine:
                 generic_ai_reply_enabled=generic_ai_reply_enabled,
                 canonical_quote_enabled=canonical_quote_enabled,
                 canonical_conversation_enabled=canonical_conversation_enabled,
+                conversation_facts=(body.get("conversation_facts") if isinstance(body.get("conversation_facts"), Mapping) else {}),
             )
         if event_type in {"order.paid", "order.shipped"}:
             order_state = _authoritative_order_state(body.get("order"))
@@ -1181,8 +1232,11 @@ class RulesFirstDecisionEngine:
         source: str,
         quote_error: str | None = None,
         order: object = None,
+        fact_updates: Mapping[str, Any] | None = None,
     ) -> None:
-        if self._quote_recorder is None or (quote is None and not quote_error):
+        if self._quote_recorder is None and self._conversation_fact_recorder is None:
+            return
+        if quote is None and not quote_error:
             return
         event_time = _event_time_ms(envelope)
         created_at = datetime.fromtimestamp(event_time / 1000, tz=timezone.utc).isoformat() if event_time else datetime.now(timezone.utc).isoformat()
@@ -1247,10 +1301,24 @@ class RulesFirstDecisionEngine:
             })
         else:
             record["failure_reason"] = quote_error
-        try:
-            self._quote_recorder(record)
-        except Exception:
-            LOGGER.exception("event=quote_record_save_failed record_id=%s", identity["event_id"])
+        if self._quote_recorder is not None:
+            try:
+                self._quote_recorder(record)
+            except Exception:
+                LOGGER.exception("event=quote_record_save_failed record_id=%s", identity["event_id"])
+        if self._conversation_fact_recorder is not None:
+            try:
+                self._conversation_fact_recorder({
+                    "identity": dict(identity), "envelope": dict(envelope),
+                    "recognition": recognition.model_dump(mode="json"),
+                    "quote": (
+                        quote.model_dump(mode="json") if hasattr(quote, "model_dump")
+                        else dict(quote) if isinstance(quote, Mapping) else None
+                    ),
+                    "source": source, "fact_updates": dict(fact_updates or {}),
+                })
+            except Exception:
+                LOGGER.exception("event=conversation_facts_save_failed event_id=%s", identity["event_id"])
 
     def _quote_record_context(
         self, identity: Mapping[str, str], envelope: Mapping[str, Any], order: object = None,
@@ -1465,6 +1533,7 @@ class RulesFirstDecisionEngine:
         messages: Sequence[object],
         pending: MovieImageInfo,
         choice: int,
+        order: object = None,
     ) -> dict[str, object]:
         conversation_id = f'{identity["tenant_id"]}:{identity["shop_id"]}:{identity["chat_id"]}'
         confirm = getattr(self._recognition, "confirm_recognition_candidate", None)
@@ -1640,6 +1709,7 @@ class RulesFirstDecisionEngine:
         generic_ai_reply_enabled: bool = True,
         canonical_quote_enabled: bool = False,
         canonical_conversation_enabled: bool = False,
+        conversation_facts: Mapping[str, Any] | None = None,
     ) -> dict[str, object]:
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
         payload_message_type = str(payload.get("messageType", payload.get("message_type", ""))).strip()
@@ -1702,7 +1772,7 @@ class RulesFirstDecisionEngine:
             return {"decision": {
                 "mode": "auto", "actions": [], "reason": "canonical_shop_legacy_image_fenced",
             }}
-        if not has_image and (canonical_quote_enabled or canonical_conversation_enabled) and normalized_message_type in {"", "1"}:
+        if not has_image and canonical_conversation_enabled and normalized_message_type in {"", "1"}:
             return {"decision": {
                 "mode": "auto", "actions": [], "reason": "canonical_shop_legacy_text_fenced",
             }}
@@ -1794,7 +1864,7 @@ class RulesFirstDecisionEngine:
                         "rule_governed": True,
                     }], "reason": "liangpiao_cinema_choice_required"}}
                 return await self._reprice_after_cinema_choice(
-                    envelope, identity, messages, pending, choice,
+                    envelope, identity, messages, pending, choice, order=order,
                 )
             if _is_buyer_deferral(message):
                 return {"decision": {
@@ -1826,6 +1896,12 @@ class RulesFirstDecisionEngine:
             lifecycle_order_relevant = bool(
                 not active_quote_signal
                 or (quote_bound_order_id and quote_bound_order_id == current_order_id)
+            )
+            fact_patch = self._fact_patch_parser.parse(message, conversation_facts)
+            merged_facts = merge_conversation_facts(conversation_facts, fact_patch.facts)
+            patched_recognition = (
+                _recognition_from_conversation_facts(merged_facts)
+                if fact_patch.recognized and fact_patch.requires_requote else None
             )
             explicit_seats = _explicit_seats_in_buyer_hint(message)
             if explicit_seats and isinstance(durable_quote, Mapping):
@@ -1879,6 +1955,36 @@ class RulesFirstDecisionEngine:
                         templates=self._templates(),
                     )
                     decision_reason = "structured_text_quote_unavailable"
+                keyword_rule = None
+                event_time_ms = None
+                prior_image = None
+                is_context_clarification = False
+            elif patched_recognition is not None:
+                # A short follow-up is resolved against durable candidate facts,
+                # then sent through the normal provider quote path again. The
+                # prior QuoteRecord is deliberately not reused.
+                try:
+                    quote = await self._quote.quote(patched_recognition)
+                    explicit_count = fact_patch.facts.get("ticket_count")
+                    quote = _apply_declared_ticket_count(quote, explicit_count)
+                    self._record_quote(
+                        identity, envelope, patched_recognition, quote,
+                        source="conversation_fact_patch", order=order,
+                        fact_updates=fact_patch.facts,
+                    )
+                    remember = getattr(self._chat, "remember_image_context", None)
+                    if callable(remember):
+                        remember(conversation_id, patched_recognition, quote, None)
+                    reply = build_recognition_reply(
+                        patched_recognition, quote=quote, templates=self._templates(),
+                    )
+                    decision_reason = "conversation_fact_patch_requoted"
+                except RecognitionError as error:
+                    reply = build_recognition_reply(
+                        patched_recognition, quote=None, quote_error=error.message,
+                        templates=self._templates(),
+                    )
+                    decision_reason = "conversation_fact_patch_requote_unavailable"
                 keyword_rule = None
                 event_time_ms = None
                 prior_image = None
@@ -2011,6 +2117,7 @@ class RulesFirstDecisionEngine:
                 "custom_keyword_reply_ready", "structured_text_quote_ready",
                 "structured_text_quote_unavailable", "seat_selection_order_guidance_ready",
                 "seat_selection_context_unavailable", "seat_selection_quote_unavailable",
+                "conversation_fact_patch_requoted", "conversation_fact_patch_requote_unavailable",
             }:
                 pass
             elif prior_image and is_context_clarification:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ AUTO_PRICING_SOURCE = "AUTO_PRICING"
 MANUAL_OPERATOR_SOURCE = "MANUAL_OPERATOR"
 AUTO_QUOTE_TTL_SECONDS = 1_800
 MANUAL_QUOTE_TTL_SECONDS = 7_200
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -504,6 +506,7 @@ class CanonicalQuoteRuntime:
         pricing_rules_provider: Any,
         quote_service: QuoteV2Service,
         liangpiao_facts_adapter: Any,
+        fact_store: Any | None = None,
         manual_mark_detector: Any | None = None,
         pricing_engine: V4PricingEngine | None = None,
         reply_renderer: CanonicalBuyerReplyRenderer | None = None,
@@ -518,6 +521,7 @@ class CanonicalQuoteRuntime:
         self._rules_provider = pricing_rules_provider
         self._quotes = quote_service
         self._liangpiao_facts = liangpiao_facts_adapter
+        self._fact_store = fact_store
         self._manual_mark_detector = manual_mark_detector
         self._reply_renderer = reply_renderer
         self._engine = pricing_engine or V4PricingEngine()
@@ -685,9 +689,17 @@ class CanonicalQuoteRuntime:
             recognition = await self._recognition.recognize(
                 image_url, trace_id=identity["event_id"], idempotency_key=identity["event_id"],
             )
-            return await self.quote_recognition(
+            result = await self.quote_recognition(
                 recognition, identity=identity, image_url=image_url,
             )
+            if self._fact_store is not None:
+                try:
+                    self._fact_store.record_canonical_event(body, result)
+                except Exception:
+                    # Fact persistence is useful context, never permission to
+                    # fall through to Legacy or to fail a quote result.
+                    LOGGER.exception("event=conversation_facts_canonical_save_failed event_id=%s", identity["event_id"])
+            return result
         except Exception as error:
             # A provider or fact failure is a structured no-quote result, not
             # permission to re-enter the Legacy NLP/quote path.

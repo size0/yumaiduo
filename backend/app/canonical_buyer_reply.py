@@ -51,7 +51,6 @@ def _purchase_summary_message(quote: Mapping[str, Any]) -> str | None:
         return None
     cinema = _text(quote.get("cinema") or quote.get("cinema_name"))
     movie = _text(quote.get("movie") or quote.get("movie_name"))
-    show_date = _date_label(quote.get("quote_date") or quote.get("show_date"))
     start_time = _text(quote.get("showtime_start") or quote.get("start_time"))
     # Keep the buyer-facing context scannable and stable: one fact per line.
     return f"{cinema}\n{movie}\n{quote.get('quote_date') or quote.get('show_date')} {start_time}"
