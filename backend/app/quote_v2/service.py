@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import logging
 from time import monotonic
 from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
@@ -20,6 +22,38 @@ AUTO_PRICING_SOURCE = "AUTO_PRICING"
 MANUAL_OPERATOR_SOURCE = "MANUAL_OPERATOR"
 AUTO_QUOTE_TTL_SECONDS = 1_800
 MANUAL_QUOTE_TTL_SECONDS = 7_200
+LOGGER = logging.getLogger(__name__)
+
+
+def _trace_hash(value: object) -> str | None:
+    text = str(value or "").strip()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] if text else None
+
+
+def _recognition_trace(recognition: Any) -> dict[str, Any]:
+    def present(*names: str) -> bool:
+        return any(bool(getattr(recognition, name, None)) for name in names)
+    seats = getattr(recognition, "selected_seats", None)
+    candidates = getattr(recognition, "candidate_shows", None)
+    return {
+        "city": present("city_text", "city"), "cinema": present("cinema_text", "cinema"),
+        "movie": present("movie"), "date": present("show_date", "date"),
+        "showtime_start": present("start_time", "showtime_start"),
+        "selected_seats_count": len(seats) if isinstance(seats, list) else 0,
+        "has_selected_seats": bool(getattr(recognition, "has_selected_seats", False)),
+        "candidate_shows_count": len(candidates) if isinstance(candidates, list) else 0,
+    }
+
+
+def _safe_reason(value: object) -> dict[str, str | None]:
+    raw = str(value or "").strip()
+    if not raw:
+        reason_class = None
+    else:
+        upper = raw.upper()
+        known = ("MISSING", "REQUIRED", "UNAVAILABLE", "UNRESOLVED", "INVALID", "NOT_FOUND", "TIMEOUT")
+        reason_class = next((item for item in known if item in upper), "UNCLASSIFIED")
+    return {"reason_class": reason_class, "reason_hash": _trace_hash(raw)}
 
 
 def _latency_mark(trace: Any, stage: str) -> None:
@@ -28,6 +62,17 @@ def _latency_mark(trace: Any, stage: str) -> None:
     marks = trace.setdefault("marks", {})
     if isinstance(marks, dict):
         marks.setdefault(stage, monotonic())
+
+
+def _stage_trace(event_id: object, stage: str, *, status: object = None, failure: object = None) -> None:
+    """Best-effort stage telemetry; never participates in quote decisions."""
+    try:
+        LOGGER.info(
+            "canonical_quote_observability_v2 event=stage_trace event_id=%s stage=%s status=%s failure=%s",
+            _trace_hash(event_id), stage, str(status or ""), str(failure or ""),
+        )
+    except Exception:
+        pass
 
 
 @dataclass(frozen=True)
@@ -711,7 +756,44 @@ class CanonicalQuoteRuntime:
         ticket_count: int | None = None, ticket_mode: str = "STANDARD",
         area_quote_strategy: str | None = None, latency_trace: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        trace_base = {
+            "event_id": identity.get("event_id"),
+            "tenant_id_hash": _trace_hash(identity.get("tenant_id")),
+            "shop_id_hash": _trace_hash(identity.get("shop_id")),
+            "buyer_id_hash": _trace_hash(identity.get("buyer_id")),
+            "chat_id_hash": _trace_hash(identity.get("chat_id")),
+            "purchase_context_id_hash": _trace_hash(identity.get("purchase_context_id")),
+            "recognition_present_fields": _recognition_trace(recognition),
+        }
+        _stage_trace(identity.get("event_id"), "RECOGNITION", status="COMPLETED")
+        try:
+            facts = self._fact_store.load_context(**{
+                key: identity.get(key, "") for key in
+                ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")
+            }) if self._fact_store is not None else None
+            trace_base["facts_lookup_attempted"] = self._fact_store is not None
+            trace_base["facts_found"] = bool(facts and facts.get("available"))
+            trace_base["facts_expired"] = bool(facts and facts.get("expired"))
+            fact_values = facts.get("facts", {}) if isinstance(facts, Mapping) else {}
+            trace_base["facts_present_fields"] = {
+                "city": bool(fact_values.get("city")), "cinema": bool(fact_values.get("cinema")),
+                "movie": bool(fact_values.get("movie")), "date": bool(fact_values.get("quote_date") or fact_values.get("date")),
+                "showtime_start": bool(fact_values.get("showtime_start")), "show_id": bool(fact_values.get("show_id")),
+                "selected_seats_count": len(fact_values.get("selected_seats") or []) if isinstance(fact_values.get("selected_seats"), list) else 0,
+                "candidate_shows_count": len(fact_values.get("candidate_shows") or []) if isinstance(fact_values.get("candidate_shows"), list) else 0,
+            }
+        except Exception as error:
+            trace_base.update({"facts_lookup_attempted": True, "facts_lookup_error": type(error).__name__})
+        try:
+            LOGGER.info("canonical_quote_observability_v2 event=recognition_facts_trace data=%s", trace_base)
+        except Exception:
+            pass
         route = await self._route.resolve(recognition)
+        _stage_trace(identity.get("event_id"), "ROUTE", status=route.route, failure=route.resolution_reason if route.route == "UNRESOLVED" else None)
+        try:
+            LOGGER.info("canonical_quote_observability_v2 event=route_trace event_id=%s route=%s reason=%s has_city=%s has_cinema=%s has_movie=%s has_date=%s has_showtime=%s has_selected_seats=%s", trace_base["event_id"], route.route, _safe_reason(route.resolution_reason), bool(getattr(recognition, "city_text", None)), bool(getattr(recognition, "cinema_text", None)), bool(getattr(recognition, "movie", None)), bool(getattr(recognition, "show_date", None)), bool(getattr(recognition, "start_time", None)), bool(getattr(recognition, "selected_seats", None)))
+        except Exception:
+            pass
         if route.route == "UNRESOLVED":
             result = {"status": "ROUTE_UNRESOLVED", "reason": route.resolution_reason}
         else:
@@ -737,6 +819,7 @@ class CanonicalQuoteRuntime:
                 mode="json", exclude={"raw_provider_result"},
             ) if hasattr(recognition, "model_dump") else None,
         }
+        _stage_trace(identity.get("event_id"), "QUOTE_PERSIST", status="COMPLETED" if result.get("quote") else "NOT_CREATED", failure=result.get("status") if not result.get("quote") else None)
         return self._render_buyer_reply(result, recognition=recognition)
 
     def _render_buyer_reply(self, result: dict[str, Any], *, recognition: Any) -> dict[str, Any]:
@@ -749,6 +832,10 @@ class CanonicalQuoteRuntime:
             for item in replies
             if isinstance(item, Mapping) and item.get("kind") and item.get("text")
         ] if isinstance(replies, list) else []
+        try:
+            LOGGER.info("canonical_quote_observability_v2 event=reply_trace rendered_reply_count=%s reply_kind=%s has_quote_record_id=%s is_quote_reply=%s", len(normalized_replies), rendered.get("kind"), bool(result.get("quote_record_id")), str(rendered.get("kind") or "").startswith("QUOTE"))
+        except Exception:
+            pass
         return {
             **result,
             # Keep the first/legacy text field while exposing the ordered
@@ -763,6 +850,7 @@ class CanonicalQuoteRuntime:
         image_url: str | None, rules: PricingRulesSnapshot, *, ticket_count: int | None = None,
         latency_trace: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        _stage_trace(identity.get("event_id"), "SHOW", status="STARTED")
         show = await self._show.resolve({
             "route": "WANDA_SELF", "wanda_store_id": route.wanda_store_id,
             "movie": recognition.movie, "show_date": recognition.show_date,
@@ -771,6 +859,7 @@ class CanonicalQuoteRuntime:
         })
         _latency_mark(latency_trace, "T4")
         if show.status != "RESOLVED":
+            _stage_trace(identity.get("event_id"), "SHOW", status=show.status, failure=show.resolution_reason)
             return {
                 "status": "SHOW_UNRESOLVED", "reason": show.resolution_reason,
                 "show_facts": show.model_dump(mode="json") if hasattr(show, "model_dump") else None,
@@ -781,6 +870,7 @@ class CanonicalQuoteRuntime:
             # A missing formal seat selection is the normal W+ quote case. It
             # does not require a hand-mark detector or a hand-marked image.
             manual_mark = False
+        _stage_trace(identity.get("event_id"), "SEAT", status="STARTED")
         seat_facts = await self._seats.resolve(
             {
                 "route": "WANDA_SELF", "wanda_store_id": route.wanda_store_id,
@@ -802,14 +892,17 @@ class CanonicalQuoteRuntime:
                 "seat_facts": seat_facts.model_dump(mode="json"),
             }
         if seat_facts.status not in {"EXACT_SEATS_RESOLVED", "WPLUS_AREA_RESOLVED"}:
+            _stage_trace(identity.get("event_id"), "SEAT", status=seat_facts.status, failure=seat_facts.resolution_reason)
             return {
                 "status": "SEAT_FACTS_UNAVAILABLE", "reason": seat_facts.resolution_reason,
                 "manual_mark_result": seat_facts.has_manual_mark,
                 "seat_facts_status": seat_facts.status,
                 "seat_facts": seat_facts.model_dump(mode="json"),
             }
+        _stage_trace(identity.get("event_id"), "COST", status="STARTED")
         cost = self._cost.resolve(show, seat_facts)
         if cost.status != "COST_READY":
+            _stage_trace(identity.get("event_id"), "COST", status=cost.status, failure=cost.reason)
             return {
                 "status": cost.status, "reason": cost.reason or "COST_FACTS_NOT_READY",
                 "manual_mark_result": seat_facts.has_manual_mark,
@@ -818,11 +911,13 @@ class CanonicalQuoteRuntime:
                 "pricing_called": cost.pricing_called, "quote": None,
                 "cost_facts": cost.model_dump(mode="json"),
             }
+        _stage_trace(identity.get("event_id"), "PRICING", status="STARTED")
         pricing = self._wanda_pricing.price(
             cost, show, seat_facts, rules,
             ticket_count=(ticket_count if seat_facts.seat_request_type == "WPLUS_AREA" else None),
         )
         if pricing.status != "PRICED":
+            _stage_trace(identity.get("event_id"), "PRICING", status=pricing.status, failure=pricing.reason)
             return {
                 "status": "PRICING_UNAVAILABLE", "reason": pricing.reason,
                 "manual_mark_result": seat_facts.has_manual_mark,
@@ -832,6 +927,7 @@ class CanonicalQuoteRuntime:
                 "cost_facts": cost.model_dump(mode="json"),
                 "pricing_result": pricing.model_dump(mode="json"),
             }
+        _stage_trace(identity.get("event_id"), "QUOTE_PERSIST", status="STARTED")
         record = self._quotes.persist(
             pricing, show, tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
             buyer_id=identity["buyer_id"], chat_id=identity["chat_id"],

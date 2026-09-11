@@ -207,6 +207,17 @@ def _quote_delivery_record_id(action: Mapping[str, object], *, event_id: str) ->
     return record_id
 
 
+def _delivery_receipt_result(*, succeeded: bool, message_id: str, record_id: str | None,
+                             action_type: str) -> tuple[bool, str, str]:
+    """Classify receipt tracing without changing receipt eligibility."""
+    attempted = bool(succeeded and message_id and record_id)
+    if attempted:
+        return True, "PENDING", ""
+    if succeeded and message_id and action_type == "send_message":
+        return False, ("SKIPPED_NO_QUOTE_RECORD" if not record_id else "SKIPPED_NOT_QUOTE_REPLY"), ""
+    return False, "NOT_ATTEMPTED", "COMMAND_RESULT_NOT_SUCCEEDED_OR_MESSAGE_ID_MISSING"
+
+
 def _new_flow_reprice_input(body: Mapping[str, object]) -> tuple[str, dict[str, str], Mapping[str, object]] | None:
     envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
     if str(envelope.get("event") or "").strip() != "order.created":
@@ -1114,6 +1125,16 @@ def create_app(
                     "canonical_runtime_reply": result.get("current_runtime_reply"),
                     "durable_reply_command_count": len(durable.get("commands", [])),
                 }
+                try:
+                    LOGGER.info(
+                        "canonical_quote_observability_v2 event=durable_reply_trace event_id=%s durable_command_count=%s action_types=%s has_quote_record_id=%s",
+                        str(accepted.get("event_id") or "")[:16],
+                        len(durable.get("commands", [])),
+                        sorted({str(item.get("type") or "") for item in durable.get("commands", []) if isinstance(item, Mapping)}),
+                        bool(result.get("quote_record_id") or (result.get("quote") or {}).get("record_id")),
+                    )
+                except Exception:
+                    pass
             else:
                 accepted = {
                     "event_id": str(envelope.get("id") or ""), "accepted": True,
@@ -1222,19 +1243,39 @@ def create_app(
             record_id = _quote_delivery_record_id(
                 action, event_id=str(command.get("event_id") or ""),
             )
-            if result.get("status") == "succeeded" and message_id and record_id:
-                delivered = persistent_quote_records.mark_delivered(
-                    tenant_id=command["tenant_id"], record_id=record_id,
-                    delivered_at=datetime.now(timezone.utc), message_id=message_id,
-                )
+            receipt_attempted, receipt_result, failure_code = _delivery_receipt_result(
+                succeeded=result.get("status") == "succeeded", message_id=message_id,
+                record_id=record_id, action_type=str(action.get("type") or ""),
+            )
+            if receipt_attempted:
+                try:
+                    delivered = persistent_quote_records.mark_delivered(
+                        tenant_id=command["tenant_id"], record_id=record_id,
+                        delivered_at=datetime.now(timezone.utc), message_id=message_id,
+                    )
+                    receipt_result = "MARKED_DELIVERED" if delivered is not None else "FAILED"
+                    failure_code = "MARK_DELIVERED_RETURNED_NONE" if delivered is None else ""
+                except Exception:
+                    receipt_result = "FAILED"
+                    failure_code = "MARK_DELIVERED_EXCEPTION"
+                    raise
                 LOGGER.info(
-                    "event=quote_delivery_receipt_recorded command_id=%s record_id=%s message_id=%s recorded=%s",
-                    command_id, record_id, message_id, str(delivered is not None).lower(),
+                    "event=quote_delivery_receipt_trace command_id=%s attempted=true result=%s failure_code=%s",
+                    command_id, receipt_result, failure_code,
                 )
-            elif result.get("status") == "succeeded" and message_id and action.get("type") == "send_message":
+            elif receipt_result.startswith("SKIPPED_"):
+                LOGGER.info(
+                    "event=quote_delivery_receipt_trace command_id=%s attempted=false result=%s failure_code=%s",
+                    command_id, receipt_result, "",
+                )
                 LOGGER.info(
                     "event=quote_delivery_receipt_skipped command_id=%s event_id=%s reason=quote_record_id_missing_or_action_not_quote_reply",
                     command_id, command.get("event_id"),
+                )
+            else:
+                LOGGER.info(
+                    "event=quote_delivery_receipt_trace command_id=%s attempted=false result=NOT_ATTEMPTED failure_code=%s",
+                    command_id, "COMMAND_RESULT_NOT_SUCCEEDED_OR_MESSAGE_ID_MISSING",
                 )
         return recorded
 
