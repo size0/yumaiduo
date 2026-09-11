@@ -201,7 +201,7 @@ class CanonicalBuyerReplyRenderer:
                 "kind": "PROBE_REQUIRED",
                 "text": "当前还无法取得可核验的实时价格，我先不乱报价哈。",
             }
-        if status == "LIANGPIAO_FACTS_INCOMPLETE" or "SELECTED_SEATS" in reason:
+        if status == "LIANGPIAO_FACTS_INCOMPLETE" and "SELECTED_SEATS" in reason:
             return {
                 "kind": "SELECTED_SEATS_REQUIRED",
                 "text": "这场需要先选好座位，把选座截图发我就可以哈",
