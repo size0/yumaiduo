@@ -518,7 +518,6 @@ def create_app(
                 ),
                 quote_service=canonical_quote_store_service,
                 liangpiao_facts_adapter=LiangpiaoPricingFactsAdapter(),
-                fact_store=persistent_conversation_facts,
                 manual_mark_detector=canonical_manual_mark_detector,
                 reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
             )
