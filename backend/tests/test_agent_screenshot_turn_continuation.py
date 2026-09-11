@@ -16,6 +16,7 @@ from app.chat import (
     extract_ticket_count,
     is_cancel_message,
     is_show_confirmation_message,
+    is_show_change_message,
 )
 from app.models import MovieImageInfo
 
@@ -196,6 +197,7 @@ def test_image_followup_intents_are_not_swallowed_by_quote_failure() -> None:
     assert "2张" in build_image_followup_reply("我要两张", recognition)
     assert "换" in build_image_followup_reply("换下一场可以吗", recognition)
     assert "4排7座" in build_image_followup_reply("4排7座可以吗", recognition)
+    assert is_show_change_message("换下一场可以吗")
 
 
 @pytest.mark.asyncio

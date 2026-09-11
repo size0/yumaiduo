@@ -21,6 +21,8 @@ from .chat import (
     build_guidance_reply,
     build_recognition_reply,
     build_show_confirmation_reply,
+    is_cancel_message,
+    is_show_change_message,
     is_show_confirmation_message,
 )
 from .chat_service import CustomerServiceChatService
@@ -1626,7 +1628,12 @@ def create_app(
         recognition_context.add(normalized.conversation_id, recognition)
         quote: RealQuote | None = None
         quote_error: str | None = None
-        if authoritative_quote_service is not None and not is_show_confirmation_message(message_text):
+        skip_quote = (
+            is_show_confirmation_message(message_text)
+            or is_cancel_message(message_text)
+            or is_show_change_message(message_text)
+        )
+        if authoritative_quote_service is not None and not skip_quote:
             try:
                 quote = await authoritative_quote_service.quote(recognition)
             except RecognitionError as error:
