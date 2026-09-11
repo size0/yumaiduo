@@ -161,6 +161,10 @@ class MovieImageInfo(BaseModel):
     selected_count_visible: int = Field(default=0, ge=0, le=30)
     ticket_codes: list[str] = Field(default_factory=list, max_length=20)
     displayed_total: float | None = Field(default=None, ge=0)
+    # Only populated when a separate OCR pass sees an explicit bottom
+    # "W+会员" total and its printed ticket count matches selected_seats.
+    screenshot_wplus_total_price_fen: int | None = Field(default=None, ge=1)
+    screenshot_wplus_ticket_count: int | None = Field(default=None, ge=1, le=20)
     currency: Literal["CNY"] = "CNY"
     price_zones: list[PriceZone] = Field(default_factory=list, max_length=20)
     confidence: float = Field(default=0, ge=0, le=1)

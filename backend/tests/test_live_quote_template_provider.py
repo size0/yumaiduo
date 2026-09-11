@@ -21,5 +21,5 @@ def test_saved_templates_are_read_live_without_mutating_quote(tmp_path):
     assert second['messages'][1]['text'] == '更新61.2\n需要几张呀。'
     assert quote == before
     ready = renderer.render({'quote': {**quote, 'ticket_count': 2, 'total_sell_price_fen': 12240}})
-    assert ready['messages'][1]['text'] == '更新61.2\n共2张，合计122.4元'
+    assert ready['messages'][1]['text'] == '更新61.2\n共2张，合计122.4元\n请直接提交订单，拍下后先不要付款，我这边改价。'
     assert '{' not in ready['messages'][1]['text']

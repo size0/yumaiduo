@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.probe.account_pool import FixtureProbeAccountPool, ProbeAccount
+from app.probe.canonical import CancelResult
 from app.probe.coordinator import ProbeCoordinator, ProbeRequest
 from app.probe.errors import ProbeError
 from app.probe.lease_store import DurableAccountLeaseStore
@@ -42,7 +43,29 @@ def _request(show_id: str) -> ProbeRequest:
 
 
 def _seats() -> list[LiveSeat]:
-    return [LiveSeat(seat_id="seat-1", label="1排1座", area_code="A", zone_type="W+", available=True, wplus=True)]
+    return [LiveSeat(
+        seat_id="seat-1", label="1排1座", area_code="A", zone_type="W+",
+        available=True, wplus=True, original_price_cents=5000,
+    )]
+
+
+class IdempotentCancelProvider(FixtureWandaProvider):
+    async def cancel_probe_order(self, *, temporary_order_reference: str) -> CancelResult:
+        self.calls.append("cancel_order")
+        self._cancelled = True
+        return CancelResult(accepted=False)
+
+
+@pytest.mark.asyncio
+async def test_status_confirmed_cancellation_is_sufficient_after_idempotent_cancel(tmp_path: Path) -> None:
+    provider = IdempotentCancelProvider()
+    coordinator = await _coordinator(tmp_path / "probe.sqlite3", provider)
+
+    result = await coordinator.run(_request("show"), _seats())
+
+    assert result.status == "SUCCESS"
+    assert result.cancel_confirmed is True
+    assert result.release_verified is True
 
 
 @pytest.mark.asyncio

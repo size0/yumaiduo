@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .account_pool import FixtureProbeAccountPool, ProbeAccount
+from .account_pool import ProbeAccount
 from .errors import ProbeError
 from .lease_store import DurableAccountLeaseStore
 from .models import ProbeOrder, ProbeResult, ProbeStatus
@@ -14,6 +14,10 @@ from .policy import ProbePolicy, allow_active_probe
 from .probe_store import DurableProbeStore
 from .seat_selector import LiveSeat, ProbeSeatSelector
 from .wanda_active_probe import WandaActiveProbe
+
+
+class ProbeAccountPool(Protocol):
+    def select(self, *, now: datetime | None = None) -> ProbeAccount: ...
 
 
 class ProbeRequest(BaseModel):
@@ -34,7 +38,7 @@ class ProbeCoordinator:
         *,
         probe_store: DurableProbeStore,
         lease_store: DurableAccountLeaseStore,
-        account_pool: FixtureProbeAccountPool,
+        account_pool: ProbeAccountPool,
         seat_selector: ProbeSeatSelector,
         active_probe: WandaActiveProbe,
         policy: ProbePolicy,

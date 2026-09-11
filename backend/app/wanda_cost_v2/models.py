@@ -38,7 +38,7 @@ class WandaCostFacts(BaseModel):
     cost_items: list[WandaCostItem] = Field(default_factory=list, max_length=30)
     probe_targets: list[WandaProbeTarget] = Field(default_factory=list, max_length=30)
     probe_required: bool = False
-    probe_executed: Literal[False] = False
+    probe_executed: bool = False
     pricing_called: Literal[False] = False
     normal_seat_member_price_supported: Literal[True] = True
     original_price_used_when_member_missing: Literal[False] = False

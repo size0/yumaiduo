@@ -51,7 +51,6 @@ def _purchase_summary_message(quote: Mapping[str, Any]) -> str | None:
         return None
     cinema = _text(quote.get("cinema") or quote.get("cinema_name"))
     movie = _text(quote.get("movie") or quote.get("movie_name"))
-    show_date = _date_label(quote.get("quote_date") or quote.get("show_date"))
     start_time = _text(quote.get("showtime_start") or quote.get("start_time"))
     # Keep the buyer-facing context scannable and stable: one fact per line.
     return f"{cinema}\n{movie}\n{quote.get('quote_date') or quote.get('show_date')} {start_time}"
@@ -59,7 +58,7 @@ def _purchase_summary_message(quote: Mapping[str, Any]) -> str | None:
 
 def _seat_labels(quote: Mapping[str, Any]) -> list[str]:
     items = quote.get("seat_quotes")
-    if not isinstance(items, list):
+    if not isinstance(items, list) or not items:
         items = quote.get("selected_seats")
     if not isinstance(items, list):
         return []
@@ -130,6 +129,12 @@ class CanonicalBuyerReplyRenderer:
                         **values, "报价单价": unit, "张数": count, "报价合计": total,
                         "张数提示": f"共{count}张，合计{total}元",
                     })
+                    order_guidance = _template(
+                        templates, "order_submit_unpaid_template",
+                        "请直接提交订单，拍下后先不要付款，我这边改价。", {"张数": count},
+                    )
+                    if order_guidance and order_guidance not in price_message:
+                        price_message = f"{price_message}\n{order_guidance}"
                     if summary_message is not None:
                         return {
                             "kind": "QUOTE_READY_WPLUS",
@@ -142,7 +147,7 @@ class CanonicalBuyerReplyRenderer:
                     prefix = f"{summary}，" if summary else ""
                     return {
                         "kind": "QUOTE_READY_WPLUS",
-                        "text": f"{prefix}W+ {unit}/张，共{count}张{total}，直接拍就行哈",
+                        "text": f"{prefix}W+ {unit}/张，共{count}张{total}。\n{order_guidance}",
                     }
                 if unit:
                     summary_message = _template(templates, "recognition_template", "{影院}\n《{影片}》\n{日期} {场次}", values)
@@ -163,11 +168,12 @@ class CanonicalBuyerReplyRenderer:
                 labels = _seat_labels(quote)
                 unit = _amount(quote.get("unit_sell_price_fen") or quote.get("unit_quote_cents"))
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
-                if labels and unit and total:
+                if labels and total:
                     prefix = f"{summary}，" if summary else ""
+                    unit_text = f"{unit}/张，" if unit else ""
                     return {
                         "kind": "QUOTE_READY_EXACT",
-                        "text": f"{prefix}{'、'.join(labels)}，{unit}/张，共{total}，直接拍就行哈",
+                        "text": f"{prefix}{'、'.join(labels)}，{unit_text}共{total}，直接拍就行哈",
                     }
             if provider_route == "LIANGPIAO" and not quote.get("selected_seats"):
                 return {

@@ -101,8 +101,29 @@ def test_canonical_renderer_includes_wplus_purchase_summary_when_ready() -> None
     assert result["text"] == "牡丹江万达\n《坠落2》\n2026-09-05 19:55"
     assert result["messages"] == [
         {"kind": "purchase_summary", "text": "牡丹江万达\n《坠落2》\n2026-09-05 19:55"},
-        {"kind": "price", "text": "W+ 28一张，共2张56元。"},
+        {
+            "kind": "price",
+            "text": "W+ 28一张，共2张56元。\n请直接提交订单，拍下后先不要付款，我这边改价。",
+        },
     ]
+
+
+def test_canonical_wplus_ready_guidance_uses_configured_order_submit_template() -> None:
+    class Templates:
+        area_quote_template = "W+ {报价单价}一张，共{张数}张{报价合计}元。"
+        order_submit_unpaid_template = "后台配置：提交{张数}张订单，先别付款。"
+
+    result = CanonicalBuyerReplyRenderer(Templates()).render({
+        "status": "QUOTED", "quote": {
+            "provider_route": "WANDA_SELF", "request_type": "WPLUS_AREA",
+            "cinema": "牡丹江万达", "movie": "坠落2",
+            "quote_date": "2026-09-05", "showtime_start": "19:55",
+            "unit_sell_price_fen": 2800, "total_sell_price_fen": 5600,
+            "ticket_count": 2,
+        },
+    })
+
+    assert result["messages"][1]["text"].endswith("后台配置：提交2张订单，先别付款。")
 
 
 def test_canonical_renderer_keeps_seat_failure_buyer_safe_without_price() -> None:
@@ -138,6 +159,7 @@ def test_canonical_wplus_preview_creates_ordered_durable_commands_once(tmp_path:
     runtime = RulesFirstRuntime(outbox, object(), RuleStateCoordinator(states), states)
     result = {
         "status": "QUOTED", "route": "WANDA_SELF",
+        "quote": {"record_id": "record-1"},
         "current_runtime_replies": [
             {"kind": "purchase_summary", "text": "影院\n《电影》\n9月5日19:55这场"},
             {"kind": "price", "text": "W+ 49.9一张，需要几张呀"},
@@ -148,6 +170,12 @@ def test_canonical_wplus_preview_creates_ordered_durable_commands_once(tmp_path:
     claimed = outbox.claim_commands(limit=2)
     second = runtime.accept_canonical_result(event(), result)
     assert [item["action"]["canonical_reply_sequence"] for item in claimed] == [1, 2]
+    assert [item["action"]["id"] for item in claimed] == [
+        "canonical-event:reply:0", "canonical-event:reply:1",
+    ]
+    assert [item["action"]["quote_record_id"] for item in claimed] == [
+        "record-1", "record-1",
+    ]
     assert [item["action"]["canonical_reply_kind"] for item in first["commands"]] == [
         "QUOTE_PREVIEW_WPLUS:purchase_summary", "QUOTE_PREVIEW_WPLUS:price",
     ]

@@ -15,7 +15,7 @@ from .canonical import (
 )
 from .errors import ProbeError
 from .models import ProbeOrder, ProbeResult, ProbeSeatTypePrice, ProbeStatus
-from .policy import ProbePolicy
+from .policy import ProbePolicy, allow_probe_recovery
 from .probe_store import DurableProbeStore
 from .release_tracker import ReleaseTracker
 from .seat_selector import LiveSeat
@@ -32,7 +32,7 @@ class WandaProbeProvider(Protocol):
 
 
 class WandaActiveProbe:
-    """Fixture-only implementation of the frozen V3 lifecycle."""
+    """Execute the frozen V3 lifecycle for fixture or explicitly wired live providers."""
 
     def __init__(
         self,
@@ -42,8 +42,9 @@ class WandaActiveProbe:
         release_tracker: ReleaseTracker,
         policy: ProbePolicy,
         audit: ProbeAuditStore | None = None,
+        allow_live_provider: bool = False,
     ) -> None:
-        if not getattr(provider, "fixture", False):
+        if not getattr(provider, "fixture", False) and not allow_live_provider:
             raise ValueError("real_provider_forbidden_in_m2")
         self._provider = provider
         self._store = probe_store
@@ -66,7 +67,13 @@ class WandaActiveProbe:
                 continue
             if not order.temporary_order_reference:
                 continue
-            release_verified, _, _ = await self._cleanup(order, order.temporary_order_reference, provider=provider)
+            bind_order = getattr(provider, "bind_probe_order", None)
+            if callable(bind_order):
+                bind_order(order)
+            with allow_probe_recovery():
+                release_verified, _, _ = await self._cleanup(
+                    order, order.temporary_order_reference, provider=provider,
+                )
             if release_verified:
                 recovered.append(order.probe_id)
         return recovered
@@ -165,12 +172,12 @@ class WandaActiveProbe:
             ProbeStatus.RELEASE_UNVERIFIED,
         }:
             self._store.transition(order.probe_id, ProbeStatus.CANCEL_REQUESTED, cancel_requested_at=_now())
-        cancel_call_ok = True
         try:
-            cancel_response = await provider.cancel_probe_order(temporary_order_reference=temporary_ref)
-            cancel_call_ok = cancel_response.accepted
+            await provider.cancel_probe_order(temporary_order_reference=temporary_ref)
         except Exception:
-            cancel_call_ok = False
+            # Follow-up authoritative order status decides whether cleanup is
+            # complete; cancel is intentionally idempotent during recovery.
+            pass
         status_confirmed = False
         try:
             status = await provider.get_order_status(temporary_order_reference=temporary_ref)
@@ -178,11 +185,22 @@ class WandaActiveProbe:
         except Exception:
             status_confirmed = False
         current = self._store.get(order.probe_id)
-        if status_confirmed and current and current.status == ProbeStatus.CANCEL_REQUESTED:
-            self._store.transition(order.probe_id, ProbeStatus.CANCEL_CONFIRMED, cancel_confirmed_at=_now())
+        if status_confirmed and current:
+            if current.status == ProbeStatus.CANCEL_REQUESTED:
+                self._store.transition(
+                    order.probe_id, ProbeStatus.CANCEL_CONFIRMED, cancel_confirmed_at=_now(),
+                )
+            elif current.cancel_confirmed_at is None:
+                self._store.update(
+                    order.probe_id, expected_revision=current.revision,
+                    cancel_confirmed_at=_now(),
+                )
         self._record(order.probe_id, "cancel_requested")
+        # The durable order status is the authoritative cancellation proof.
+        # A repeated/idempotent cancel may return a non-accepted response even
+        # though the follow-up status already confirms CANCELLED.
         release_verified = await self._release_tracker.verify(
-            order, provider, cancel_confirmed=cancel_call_ok and status_confirmed,
+            order, provider, cancel_confirmed=status_confirmed,
         )
         if release_verified:
             self._record(order.probe_id, "release_verified")
@@ -194,8 +212,8 @@ class WandaActiveProbe:
             self._release_tracker.schedule_reconciliation(order, provider)
         return (
             release_verified,
-            None if cancel_call_ok and status_confirmed and release_verified else "temporary_lock_release_unverified",
-            cancel_call_ok and status_confirmed,
+            None if status_confirmed and release_verified else "temporary_lock_release_unverified",
+            status_confirmed,
         )
 
 

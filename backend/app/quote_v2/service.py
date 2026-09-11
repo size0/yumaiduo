@@ -12,6 +12,10 @@ from app.quote_record_store import QuoteRecordStore
 from app.canonical_buyer_reply import CanonicalBuyerReplyRenderer
 from app.show_resolve_v2.models import ShowResolutionResult
 from app.wanda_pricing_v2.models import WandaPricingResult
+from app.wplus_screenshot_price import (
+    WPLUS_SCREENSHOT_MINIMUM_UNIT_PRICE_FEN,
+    quote_from_screenshot_wplus_total,
+)
 
 
 QuoteQueryStatus = str
@@ -414,7 +418,7 @@ class QuoteV2Service:
             }
             for quote in pricing.seat_quotes
         ]
-        if reference_only and original_selected_seats:
+        if original_selected_seats and (reference_only or not selected):
             selected = [
                 item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
                 for item in original_selected_seats
@@ -478,6 +482,9 @@ class QuoteV2Service:
             "unit_quote_cents": pricing.unit_sell_price_fen,
             "total_quote_cents": None if reference_only else pricing.total_sell_price_fen,
             "seat_quotes": [quote.model_dump(mode="json") for quote in pricing.seat_quotes],
+            "pricing_source": pricing.pricing_source,
+            "price_source": pricing.price_source,
+            "calculation_evidence": dict(pricing.calculation_evidence),
             # QuoteRecordStore assigns every lifecycle field, including the
             # terms fingerprint and quote hash.
             "source": AUTO_PRICING_SOURCE,
@@ -488,7 +495,9 @@ class CanonicalQuoteRuntime:
     """Read-only composition for the Phase 9B.2.2 quote path.
 
     This class deliberately stops at ``QuoteRecordStore``.  It has no order,
-    payment, callback, outbound-message, probe, or transaction dependencies.
+    payment, callback, outbound-message, or transaction dependencies. An
+    explicitly injected Probe cost resolver is the sole controlled exception
+    for missing W+ cost facts.
     Provider-specific IDs are accepted only inside their provider branch and
     are stored as lineage metadata rather than promoted to shared IDs.
     """
@@ -507,6 +516,7 @@ class CanonicalQuoteRuntime:
         quote_service: QuoteV2Service,
         liangpiao_facts_adapter: Any,
         manual_mark_detector: Any | None = None,
+        probe_cost_resolver: Any | None = None,
         pricing_engine: V4PricingEngine | None = None,
         reply_renderer: CanonicalBuyerReplyRenderer | None = None,
     ) -> None:
@@ -521,6 +531,7 @@ class CanonicalQuoteRuntime:
         self._quotes = quote_service
         self._liangpiao_facts = liangpiao_facts_adapter
         self._manual_mark_detector = manual_mark_detector
+        self._probe_cost_resolver = probe_cost_resolver
         self._reply_renderer = reply_renderer
         self._engine = pricing_engine or V4PricingEngine()
 
@@ -823,8 +834,17 @@ class CanonicalQuoteRuntime:
                 "seat_facts_status": seat_facts.status,
                 "seat_facts": seat_facts.model_dump(mode="json"),
             }
-        cost = self._cost.resolve(show, seat_facts)
-        if cost.status != "COST_READY":
+        screenshot_pricing = _screenshot_wplus_pricing(recognition, seat_facts)
+        pricing = screenshot_pricing
+        cost = None if pricing is not None else self._cost.resolve(show, seat_facts)
+        if (
+            pricing is None and cost.status == "PROBE_REQUIRED"
+            and self._probe_cost_resolver is not None
+        ):
+            resolve_probe = getattr(self._probe_cost_resolver, "resolve", None)
+            if callable(resolve_probe):
+                cost = await resolve_probe(show, seat_facts, cost, identity)
+        if pricing is None and cost.status != "COST_READY":
             return {
                 "status": cost.status, "reason": cost.reason or "COST_FACTS_NOT_READY",
                 "manual_mark_result": seat_facts.has_manual_mark,
@@ -833,10 +853,11 @@ class CanonicalQuoteRuntime:
                 "pricing_called": cost.pricing_called, "quote": None,
                 "cost_facts": cost.model_dump(mode="json"),
             }
-        pricing = self._wanda_pricing.price(
-            cost, show, seat_facts, rules,
-            ticket_count=(ticket_count if seat_facts.seat_request_type == "WPLUS_AREA" else None),
-        )
+        if pricing is None:
+            pricing = self._wanda_pricing.price(
+                cost, show, seat_facts, rules,
+                ticket_count=(ticket_count if seat_facts.seat_request_type == "WPLUS_AREA" else None),
+            )
         if pricing.status != "PRICED":
             return {
                 "status": "PRICING_UNAVAILABLE", "reason": pricing.reason,
@@ -857,7 +878,7 @@ class CanonicalQuoteRuntime:
             has_manual_mark=seat_facts.has_manual_mark if selected_seats else None,
             mark_image_reference=image_url if manual_mark is True else None,
             mark_message_id=identity.get("message_id") if manual_mark is True else None,
-            original_selected_seats=seat_facts.exact_seats if same_type_reference else None,
+            original_selected_seats=seat_facts.exact_seats if selected_seats else None,
             same_type_reference=seat_facts.same_type_reference if same_type_reference else None,
         )
         return {
@@ -952,6 +973,47 @@ class CanonicalQuoteRuntime:
             return None
         result["purchase_context_id"] = pick(payload.get("itemId"), payload.get("item_id"), f'chat:{result["chat_id"]}')
         return result
+
+
+def _screenshot_wplus_pricing(
+    recognition: Any, seat_facts: Any,
+) -> WandaPricingResult | None:
+    total_fen = getattr(recognition, "screenshot_wplus_total_price_fen", None)
+    screenshot_count = getattr(recognition, "screenshot_wplus_ticket_count", None)
+    selected_count = len(getattr(recognition, "selected_seats", []) or [])
+    if (
+        seat_facts.status != "EXACT_SEATS_RESOLVED"
+        or not isinstance(total_fen, int)
+        or isinstance(total_fen, bool)
+        or total_fen <= 0
+        or not isinstance(screenshot_count, int)
+        or isinstance(screenshot_count, bool)
+        or screenshot_count != selected_count
+        or selected_count < 1
+    ):
+        return None
+    amounts = quote_from_screenshot_wplus_total(
+        total_fen,
+        ticket_count=selected_count,
+        minimum_unit_price_fen=WPLUS_SCREENSHOT_MINIMUM_UNIT_PRICE_FEN,
+    )
+    return WandaPricingResult(
+        status="PRICED",
+        request_type="EXACT_SEATS",
+        unit_sell_price_fen=amounts["unit_sell_price_fen"],
+        total_sell_price_fen=amounts["total_sell_price_fen"],
+        ticket_count=selected_count,
+        needs_ticket_count=False,
+        pricing_engine_applied=False,
+        pricing_source="截图底部明确显示的W+会员总价（总价向上取整）",
+        price_source="screenshot_bottom_wplus",
+        calculation_evidence={
+            "screenshot_wplus_total_price_fen": total_fen,
+            "screenshot_wplus_ticket_count": screenshot_count,
+            "screenshot_wplus_rounded_total_price_fen": amounts["total_sell_price_fen"],
+            "minimum_unit_price_fen": WPLUS_SCREENSHOT_MINIMUM_UNIT_PRICE_FEN,
+        },
+    )
 
 
 def _liangpiao_final_ids(raw: Any) -> dict[str, str]:

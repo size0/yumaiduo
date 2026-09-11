@@ -87,23 +87,23 @@ class RulesFirstRuntime:
         agent_run_id = str(result.get("agent_run_id") or "").strip()
         actions: list[dict[str, object]] = []
         if isinstance(rendered_replies, list) and rendered_replies:
-            for index, item in enumerate(rendered_replies, start=1):
+            for index, item in enumerate(rendered_replies):
                 if not isinstance(item, Mapping):
                     continue
                 text = str(item.get("text") or "").strip()
                 kind = str(item.get("kind") or "").strip()
                 if not text or not kind:
                     continue
-                suffix = "summary" if kind == "purchase_summary" else "price" if kind == "price" else str(index)
-                action_id = f"{event_id}:reply" if suffix == "price" else f"{event_id}:reply:{suffix}"
+                sequence = index + 1
+                suffix = "summary" if kind == "purchase_summary" else "price" if kind == "price" else str(sequence)
                 actions.append({
-                    "id": action_id,
+                    "id": f"{event_id}:reply:{index}",
                     "type": "send_message",
                     "text": text,
                     "rule_governed": True,
                     "source": source,
                     "canonical_reply_kind": f"{result.get('canonical_reply_kind') or ''}:{kind}",
-                    "canonical_reply_sequence": index,
+                    "canonical_reply_sequence": sequence,
                     "dedupe_key": f"reply:{event_id}:{suffix}",
                     "quote_record_id": (
                         (result.get("quote") or {}).get("record_id")

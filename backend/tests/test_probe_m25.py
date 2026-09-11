@@ -25,7 +25,7 @@ from app.probe.release_tracker import FakeClock, ReleaseTracker
 from app.probe.seat_selector import LiveSeat, ProbeSeatSelector
 from app.probe.wanda_active_probe import FixtureWandaProvider, WandaActiveProbe
 from app.probe.official_provider import OfficialWandaProbeProvider
-from app.probe.policy import ProbePolicy
+from app.probe.policy import ProbePolicy, allow_probe_recovery
 from app.probe.replay import V3CaptureReplayProvider
 
 
@@ -197,3 +197,11 @@ def test_active_probe_default_is_independent_from_liangpiao_flags() -> None:
     with pytest.raises(ProbeError, match="active_probe_disabled"):
         ProbePolicy.from_settings(settings).ensure_allowed()
     assert Settings(wanda_active_probe_enabled=False).liangpiao_selected_seat_quote_enabled is False
+
+
+def test_probe_recovery_context_allows_cleanup_without_reopening_probe() -> None:
+    policy = ProbePolicy(active_probe_enabled=False, external_writes_enabled=False)
+    with allow_probe_recovery():
+        policy.ensure_cleanup_allowed()
+        assert policy.context_allows_probe_recovery() is True
+    assert policy.context_allows_probe_recovery() is False

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,4 +46,7 @@ class WandaPricingResult(BaseModel):
     pricing_rule_revision: int | None = Field(default=None, ge=0)
     pricing_rule_version: str | None = Field(default=None, min_length=1, max_length=160)
     pricing_engine_applied: bool = False
+    pricing_source: str = Field(default="", max_length=300)
+    price_source: str | None = Field(default=None, max_length=120)
+    calculation_evidence: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = Field(default=None, max_length=160)

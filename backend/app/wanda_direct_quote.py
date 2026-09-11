@@ -1118,8 +1118,13 @@ class WandaDirectQuoteService:
         # Probe lifecycle. Guard it as well as the lifecycle entry so callers
         # cannot bypass admission by invoking the helper directly.
         try:
-            ProbePolicy.from_settings(self._settings_provider).ensure_allowed()
-            self._probe_policy.ensure_allowed()
+            settings_policy = ProbePolicy.from_settings(self._settings_provider)
+            if settings_policy.context_allows_probe_recovery():
+                settings_policy.ensure_cleanup_allowed()
+                self._probe_policy.ensure_cleanup_allowed()
+            else:
+                settings_policy.ensure_allowed()
+                self._probe_policy.ensure_allowed()
         except ProbeError as error:
             raise ProviderError(error.code, error.message) from error
         parsed = urlsplit(origin)

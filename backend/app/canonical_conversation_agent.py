@@ -307,8 +307,8 @@ class OpenAICompatibleAgentModel:
                 self._completion_url(self._base_url),
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json={
-                    "model": self._model, "messages": messages,
-                    **({"tools": list(tools)} if tools else {}), "temperature": self._temperature,
+                    "model": self._model, "messages": messages, "tools": list(tools),
+                    "temperature": self._temperature,
                     **({"max_tokens": self._max_tokens} if self._max_tokens is not None else {}),
                 },
                 ), timeout=self._timeout)
@@ -841,7 +841,10 @@ class CanonicalConversationAgent:
                 if not guard.allowed:
                     result = {
                         "status": "AGENT_REPLY_UNAVAILABLE", "reason": guard.reason,
-                        "reply": "", "reply_guard": guard.to_dict(),
+                        # Keep the rejected candidate in the protected audit
+                        # projection so operators can see why no send action
+                        # was created. It is never exposed as final_reply.
+                        "reply": "", "model_reply": reply, "reply_guard": guard.to_dict(),
                         "context": context.to_dict(), "tool_trace": trace, "actions": [], "agent_run_id": run_id,
                     }
                     self._finish_audit_run(run_id, result, context, started_at=trace_started)
@@ -962,8 +965,9 @@ class CanonicalConversationAgent:
             audit_trace = {
                 "user_input": _text(current_input),
                 "tool_calls": list(result.get("tool_trace") or []),
-                "model_reply": _text(result.get("reply")),
+                "model_reply": _text(result.get("model_reply") or result.get("reply")),
                 "final_reply": _text(result.get("reply")) if status == "ready" else "",
+                "reply_guard": result.get("reply_guard") if isinstance(result.get("reply_guard"), Mapping) else None,
                 "duration_ms": round((time.monotonic() - started_at) * 1000, 1) if started_at else None,
                 "end_reason": _text(result.get("reason")) or ("reply_ready" if status == "ready" else "agent_failed"),
             }

@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..probe.seat_selector import LiveSeat
+from ..show_resolve_v2.models import ShowResolutionResult
 from ..wanda_direct_quote import (
     APP_CHANNEL,
     CINEMA_ORIGIN,
@@ -75,6 +77,26 @@ class WandaDirectQuoteV2ReadSource:
             channel=APP_CHANNEL, event="wanda_v2_realtime_seats_response",
         )
 
+    async def get_probe_live_seats(self, show: ShowResolutionResult) -> list[LiveSeat]:
+        """Read the current seat map with official area prices for Probe."""
+        if not show.wanda_store_id or not show.wanda_show_id or not show.show_date:
+            raise ValueError("probe_show_facts_incomplete")
+        showtimes = await self.get_showtimes(show.wanda_store_id, show.show_date.replace("-", ""))
+        showtime = _find_showtime(showtimes, show.wanda_show_id)
+        if showtime is None:
+            raise ValueError("probe_showtime_not_found")
+        payload = await self.get_realtime_seats(show.wanda_show_id)
+        facts = self._wanda._seat_facts(payload, self._wanda._area_prices(showtime))
+        return [LiveSeat(
+            seat_id=str(item.get("seat_id") or ""),
+            label=str(item.get("label") or ""),
+            area_code=str(item.get("area_id") or ""),
+            zone_type=str(item.get("area_name") or "未知"),
+            available=item.get("available") is True,
+            wplus=item.get("wplus") is True,
+            original_price_cents=item.get("price"),
+        ) for item in facts if item.get("seat_id") and item.get("label") and item.get("area_id")]
+
     def _cache_rows(self) -> list[sqlite3.Row]:
         settings = self._settings_provider()
         path = Path(settings.wanda_cinema_cache_path)
@@ -86,3 +108,24 @@ class WandaDirectQuoteV2ReadSource:
                 ).fetchall())
         except sqlite3.Error:
             return []
+
+
+def _find_showtime(payload: Mapping[str, Any], show_id: str) -> Mapping[str, Any] | None:
+    wanted = str(show_id).strip()
+
+    def visit(value: Any) -> Mapping[str, Any] | None:
+        if isinstance(value, Mapping):
+            if str(value.get("showtimeId") or "").strip() == wanted:
+                return value
+            for nested in value.values():
+                found = visit(nested)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = visit(nested)
+                if found is not None:
+                    return found
+        return None
+
+    return visit(payload)

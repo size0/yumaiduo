@@ -103,7 +103,11 @@ class ReleaseTracker:
         current = self._store.get(order.probe_id)
         if current is None or current.status == ProbeStatus.RELEASE_VERIFIED:
             return True
-        return await self.verify(current, provider)
+        # Seat availability alone is not proof that the temporary order was
+        # cancelled. Only a persisted authoritative cancellation status can
+        # unlock the release gate during delayed/background reconciliation.
+        cancel_confirmed = current.cancel_confirmed_at is not None or current.status == ProbeStatus.CANCEL_CONFIRMED
+        return await self.verify(current, provider, cancel_confirmed=cancel_confirmed)
 
     async def reconcile_pending(self, provider: ReleaseProvider) -> list[str]:
         verified: list[str] = []

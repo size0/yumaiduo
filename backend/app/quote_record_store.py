@@ -448,15 +448,12 @@ class QuoteRecordStore:
             return None
         with self._lock:
             records = self._read_records()
+            # ``record_id`` is the only writable lifecycle identity. Event and
+            # quote ids are related audit fields, not aliases; accepting either
+            # here can mark the wrong record when one event produces multiple
+            # quote generations or reply commands.
             selected = next(
-                (
-                    item for item in records
-                    if (
-                        item.get("record_id") == wanted_record
-                        or item.get("event_id") == wanted_record
-                        or item.get("quote_id") == wanted_record
-                    )
-                ),
+                (item for item in records if item.get("record_id") == wanted_record),
                 None,
             )
             if (

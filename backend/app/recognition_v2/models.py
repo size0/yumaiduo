@@ -26,6 +26,11 @@ class RecognitionResult(BaseModel):
     selected_seats: list[str] = Field(default_factory=list, max_length=30)
     has_selected_seats: bool = False
     image_total_price_fen: int | None = Field(default=None, ge=0)
+    # A narrowly-scoped screenshot fact. It is populated only when the image
+    # explicitly shows a bottom "W+会员" total and the visible seat count
+    # agrees; it is never inferred from area IDs or provider settle prices.
+    screenshot_wplus_total_price_fen: int | None = Field(default=None, ge=1)
+    screenshot_wplus_ticket_count: int | None = Field(default=None, ge=1, le=20)
     confidence: float | None = Field(default=None, ge=0, le=1)
     # Recognition quality is evidence about the screenshot only.  It is not
     # Wanda realtime availability and cannot authorize a quote by itself.

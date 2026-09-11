@@ -399,6 +399,25 @@ async def test_agent_model_failure_is_fail_closed_without_send_action():
     assert result["actions"] == []
 
 
+@pytest.mark.asyncio
+async def test_audit_trace_keeps_rejected_model_reply_and_guard_reason(tmp_path):
+    from app.rules_first_store import RulesFirstStore
+
+    store = RulesFirstStore(tmp_path / "rules.sqlite3")
+    candidate = "系统显示价格是99元。"
+    result = await CanonicalConversationAgent(
+        AgentContextBuilder(), FakeModel([{"reply": candidate}]), audit_store=store,
+    ).process(body(text="现在多少钱"))
+
+    assert result["reason"] == "reply_fact_unverified"
+    run = store.get_agent_run(result["agent_run_id"])
+    assert run is not None
+    trace = run["context"]["agent_trace"]
+    assert trace["model_reply"] == candidate
+    assert trace["final_reply"] == ""
+    assert trace["reply_guard"]["reason"] == "reply_fact_unverified"
+
+
 def test_tool_surface_is_high_level_and_excludes_legacy_intent_rules():
     names = {item["function"]["name"] for item in AGENT_TOOL_SCHEMAS}
     assert names == {

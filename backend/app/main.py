@@ -67,6 +67,14 @@ from .payment_validation import AuthoritativePaymentValidationService
 from .quote_record_store import QuoteRecordStore
 from .quote_v2.service import CanonicalQuoteRuntime, QuoteV2Service
 from .quote_v2.wanda_source import WandaDirectQuoteV2ReadSource
+from .probe.seat_selector import ProbeSeatSelector
+from .probe.coordinator import ProbeCoordinator
+from .probe.lease_store import DurableAccountLeaseStore
+from .probe.policy import ProbePolicy
+from .probe.probe_store import DurableProbeStore
+from .probe.release_tracker import ReleaseTracker
+from .probe.wanda_active_probe import WandaActiveProbe
+from .probe.wanda_provider import WandaDirectProbeProvider, WandaProbeAccountPool
 from .reminder_service import plan_shipped_order_reminders
 from .reminder_store import ReminderStore
 from .reply_template_store import ReplyTemplateStore
@@ -79,6 +87,7 @@ from .recognition_v2.manual_mark import ManualMarkDetector
 from .recognition_v2.service import RecognitionV2Service
 from .seat_facts_v2.service import SeatFactsV2Service
 from .show_resolve_v2.service import ShowResolveV2Service
+from .wanda_cost_v2.probe_resolver import CanonicalWandaProbeCostResolver
 from .wanda_cost_v2.service import WandaCostResolutionService
 from .wanda_fulfillment_callbacks import (
     CallbackError as WandaFulfillmentCallbackError,
@@ -178,6 +187,37 @@ def _order_created_at(body: Mapping[str, object]) -> datetime | None:
     if numeric_ts > 10_000_000_000:
         numeric_ts /= 1000
     return datetime.fromtimestamp(numeric_ts, tz=timezone.utc) if numeric_ts > 0 else None
+
+
+def _quote_delivery_record_id(action: Mapping[str, object], *, event_id: str) -> str | None:
+    """Return a quote record id only for a recognized quote reply action.
+
+    The action carries the authoritative record identity.  In particular, the
+    event id is never used as a substitute: canonical V2 records intentionally
+    use a different ``record_id`` from the inbound event id.
+    """
+    if str(action.get("type") or "").strip() != "send_message":
+        return None
+    normalized_event = str(event_id or "").strip()
+    action_id = str(action.get("id") or "").strip()
+    if not normalized_event or not action_id:
+        return None
+    accepted = {
+        f"{normalized_event}:reply",
+        f"{normalized_event}:canonical-reply",
+        f"{normalized_event}:repriced-quote",
+    }
+    indexed_prefixes = (
+        f"{normalized_event}:reply:",
+        f"{normalized_event}:canonical-reply:",
+    )
+    if action_id not in accepted and not any(
+        action_id.startswith(prefix) and action_id[len(prefix):].isdigit()
+        for prefix in indexed_prefixes
+    ):
+        return None
+    record_id = str(action.get("quote_record_id") or "").strip()
+    return record_id or None
 
 
 def _new_flow_reprice_input(body: Mapping[str, object]) -> tuple[str, dict[str, str], Mapping[str, object]] | None:
@@ -406,6 +446,11 @@ def create_app(
         else None
     )
     runtime_settings = persistent_settings.current()
+    probe_policy = ProbePolicy.from_settings(persistent_settings.current)
+    probe_coordinator = None
+    probe_cost_resolver = None
+    probe_provider = None
+    wanda_v2_source = None
     # The canonical image entry is an explicit rollout fence.  When enabled,
     # image events are never handed to the Legacy NLP quote path, even if the
     # canonical provider composition is unavailable.
@@ -493,13 +538,53 @@ def create_app(
             persistent_settings.current,
             diagnostics=diagnostics,
             pricing_rules=persistent_pricing_rules.current,
+            probe_policy=probe_policy,
         )
         if service is None
         else None
     )
+    if (
+        configured_canonical_quote_runtime is None
+        and canonical_quote_runtime_enabled
+        and isinstance(authoritative_quote_service, WandaDirectQuoteService)
+    ):
+        wanda_v2_source = WandaDirectQuoteV2ReadSource(authoritative_quote_service)
+        probe_account_pool = WandaProbeAccountPool(
+            authoritative_quote_service, persistent_settings.current,
+        )
+        probe_provider = WandaDirectProbeProvider(authoritative_quote_service, probe_account_pool)
+        probe_store_path = Path(os.getenv(
+            "WANDA_PROBE_DATABASE_PATH",
+            str(Path(rules_database_path).with_name("probe.sqlite3")),
+        ))
+        probe_store = DurableProbeStore(probe_store_path)
+        probe_lease_store = DurableAccountLeaseStore(probe_store_path)
+        probe_active = WandaActiveProbe(
+            probe_provider,
+            probe_store=probe_store,
+            release_tracker=ReleaseTracker(probe_store),
+            policy=probe_policy,
+            allow_live_provider=True,
+        )
+        probe_coordinator = ProbeCoordinator(
+            probe_store=probe_store,
+            lease_store=probe_lease_store,
+            account_pool=probe_account_pool,
+            seat_selector=ProbeSeatSelector(),
+            active_probe=probe_active,
+            policy=probe_policy,
+        )
+        if runtime_settings.wanda_active_probe_enabled and runtime_settings.external_writes_enabled:
+            probe_cost_resolver = CanonicalWandaProbeCostResolver(
+                probe_coordinator, wanda_v2_source, provider=probe_provider,
+            )
+            LOGGER.warning("event=canonical_active_probe_composed mode=real_provider")
+        else:
+            LOGGER.info("event=canonical_active_probe_composed mode=recovery_only")
     if configured_canonical_quote_runtime is None and canonical_quote_runtime_enabled:
-        # The default composition reuses the existing Wanda adapter strictly as
-        # a signed read transport. All pricing and persistence below remain V2.
+        # The default quote composition uses a signed read facade. The
+        # separately composed Probe provider above is the only allow-listed
+        # path that may perform temporary lock/cancel writes.
         if isinstance(authoritative_quote_service, WandaDirectQuoteService):
             wanda_v2_source = WandaDirectQuoteV2ReadSource(authoritative_quote_service)
             # Reuse the persistent vision settings for the existing detector;
@@ -507,7 +592,9 @@ def create_app(
             canonical_settings = runtime_settings
             canonical_transport = LiangpiaoV2Transport(canonical_settings)
             canonical_recognition = RecognitionV2Service(
-                canonical_transport, enrichment_service=canonical_transport,
+                canonical_transport,
+                enrichment_service=canonical_transport,
+                screenshot_price_detector=recognition_service,
             )
             canonical_manual_mark_detector = ManualMarkDetector(
                 settings=canonical_settings, result_store=persistent_rules_store,
@@ -528,6 +615,7 @@ def create_app(
                 quote_service=canonical_quote_store_service,
                 liangpiao_facts_adapter=LiangpiaoPricingFactsAdapter(),
                 manual_mark_detector=canonical_manual_mark_detector,
+                probe_cost_resolver=probe_cost_resolver,
                 reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
             )
         else:
@@ -623,6 +711,11 @@ def create_app(
     )
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        if probe_coordinator is not None and probe_provider is not None:
+            try:
+                await probe_coordinator.recover(probe_provider)
+            except Exception:
+                LOGGER.exception("event=canonical_probe_recovery_failed")
         if durable_runtime is not None:
             await durable_runtime.start()
         try:
@@ -661,6 +754,7 @@ def create_app(
     )
     app.state.canonical_quote_runtime = configured_canonical_quote_runtime
     app.state.canonical_quote_runtime_enabled = canonical_quote_runtime_enabled
+    app.state.active_probe_enabled = probe_cost_resolver is not None
     app.state.canonical_quote_store_service = canonical_quote_store_service
     app.state.wplus_fulfillment_mark_service = configured_wplus_mark_service
     app.state.payment_validation_service = configured_payment_validation
@@ -1411,17 +1505,26 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from None
         if command is not None:
             action = command.get("action") if isinstance(command.get("action"), dict) else {}
-            message_id = str(result.get("message_id") or "").strip()
-            if (
-                action.get("id") in {
-                    f"{command['event_id']}:reply",
-                    f"{command['event_id']}:repriced-quote",
-                }
-                and result.get("status") == "succeeded" and message_id
-            ):
-                persistent_quote_records.mark_delivered(
-                    tenant_id=command["tenant_id"], record_id=command["event_id"],
+            message_id = str(
+                result.get("message_id") or result.get("messageId")
+                or result.get("sent_message_id") or result.get("sentMessageId") or ""
+            ).strip()
+            record_id = _quote_delivery_record_id(
+                action, event_id=str(command.get("event_id") or ""),
+            )
+            if result.get("status") == "succeeded" and message_id and record_id:
+                delivered = persistent_quote_records.mark_delivered(
+                    tenant_id=command["tenant_id"], record_id=record_id,
                     delivered_at=datetime.now(timezone.utc), message_id=message_id,
+                )
+                LOGGER.info(
+                    "event=quote_delivery_receipt_recorded command_id=%s record_id=%s message_id=%s recorded=%s",
+                    command_id, record_id, message_id, str(delivered is not None).lower(),
+                )
+            elif result.get("status") == "succeeded" and message_id and action.get("type") == "send_message":
+                LOGGER.info(
+                    "event=quote_delivery_receipt_skipped command_id=%s event_id=%s reason=quote_record_id_missing_or_action_not_quote_reply",
+                    command_id, command.get("event_id"),
                 )
         return recorded
 

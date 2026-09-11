@@ -29,9 +29,16 @@ class RecognitionV2Transport(Protocol):
 class RecognitionV2Service:
     """Isolated recognition facts: provider call, raw preservation, normalization."""
 
-    def __init__(self, transport: RecognitionV2Transport, *, enrichment_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        transport: RecognitionV2Transport,
+        *,
+        enrichment_service: Any | None = None,
+        screenshot_price_detector: Any | None = None,
+    ) -> None:
         self._transport = transport
         self._enrichment_service = enrichment_service
+        self._screenshot_price_detector = screenshot_price_detector
 
     @classmethod
     def from_settings(cls, settings: Any) -> "RecognitionV2Service":
@@ -56,6 +63,16 @@ class RecognitionV2Service:
             raw_provider_result=provider.raw_provider_result,
             has_manual_mark=None,
         )
+        detect = getattr(self._screenshot_price_detector, "detect_wplus_member_total_from_url", None)
+        if result.selected_seats and callable(detect):
+            try:
+                screenshot_facts = await detect(image_url)
+            except Exception:
+                # The auxiliary OCR pass must never block the authoritative
+                # recognition path or turn an ordinary screenshot into a
+                # quote failure.
+                screenshot_facts = None
+            result = apply_screenshot_wplus_facts(result, screenshot_facts)
         enrich = getattr(self._enrichment_service, "enrich", None)
         if callable(enrich):
             enriched = await enrich(result)
@@ -110,6 +127,32 @@ def _normalize(
         has_manual_mark=has_manual_mark,
         raw_provider_result=dict(raw_provider_result),
     )
+
+
+def apply_screenshot_wplus_facts(
+    recognition: RecognitionResult,
+    facts: Mapping[str, Any] | None,
+) -> RecognitionResult:
+    """Attach an explicit bottom W+ total only when seat facts agree."""
+    if not isinstance(recognition, RecognitionResult) or not isinstance(facts, Mapping):
+        return recognition
+    total = _positive_int(facts.get("total_price_fen"))
+    raw_ticket_count = facts.get("ticket_count")
+    explicit_ticket_count = _positive_int(raw_ticket_count)
+    visible_count = len(recognition.selected_seats)
+    ticket_count = explicit_ticket_count if raw_ticket_count is not None else visible_count
+    if (
+        total is None or visible_count < 1 or ticket_count is None
+        or ticket_count != visible_count or not 1 <= ticket_count <= 20
+    ):
+        return recognition.model_copy(update={
+            "screenshot_wplus_total_price_fen": None,
+            "screenshot_wplus_ticket_count": None,
+        })
+    return recognition.model_copy(update={
+        "screenshot_wplus_total_price_fen": total,
+        "screenshot_wplus_ticket_count": ticket_count,
+    })
 
 
 def _quality_facts(value: Any) -> dict[str, Any]:
@@ -202,6 +245,16 @@ def _price_fen(raw_results: Mapping[str, Any]) -> int | None:
         return int(amount * 100)
     except (InvalidOperation, ValueError):
         return None
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _confidence(value: Any) -> float | None:

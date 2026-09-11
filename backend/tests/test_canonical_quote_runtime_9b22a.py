@@ -70,9 +70,9 @@ class Seats:
             status="EXACT_SEATS_RESOLVED", seat_request_type="EXACT_SEATS",
             wanda_store_id="store-1", wanda_show_id="show-1", has_manual_mark=False,
             exact_seats=[ExactSeatFact(
-                label="8排9座", seat_label="8排9座", seat_id="seat-1", status="AVAILABLE",
+                label=seat_label, seat_label=seat_label, seat_id=f"seat-{index}", status="AVAILABLE",
                 area_code="36", zone_type="W+", area_original_price_fen=6200,
-            )],
+            ) for index, seat_label in enumerate(request.get("selected_seats") or [], start=1)],
         )
 
 
@@ -99,6 +99,11 @@ class NoPricing:
     def price(self, *args, **kwargs):
         self.calls += 1
         raise AssertionError("pricing must not run when cost is not ready")
+
+
+class CostMustNotRun:
+    def resolve(self, *args, **kwargs):
+        raise AssertionError("screenshot W+ pricing must not require provider cost")
 
 
 class Detector:
@@ -201,6 +206,28 @@ async def test_unmarked_selected_seats_uses_exact_seats(tmp_path: Path):
     )
     assert result["quote"]["request_type"] == "EXACT_SEATS"
     assert result["quote"]["selected_seats"][0]["seat_label"] == "8排9座"
+
+
+@pytest.mark.asyncio
+async def test_explicit_bottom_wplus_total_is_persisted_and_rendered(tmp_path: Path):
+    image_recognition = recognition(
+        selected_seats=["8排9座", "8排10座"], has_manual_mark=False,
+    ).model_copy(update={
+        "screenshot_wplus_total_price_fen": 9_932,
+        "screenshot_wplus_ticket_count": 2,
+    })
+    result = await runtime(tmp_path, cost=CostMustNotRun()).quote_recognition(
+        image_recognition, identity=IDENTITY,
+    )
+
+    quote = result["quote"]
+    assert result["status"] == "QUOTED"
+    assert quote["total_sell_price_fen"] == 10_000
+    assert quote["unit_sell_price_fen"] == 5_000
+    assert quote["pricing_source"] == "截图底部明确显示的W+会员总价（总价向上取整）"
+    assert quote["price_source"] == "screenshot_bottom_wplus"
+    assert quote["calculation_evidence"]["screenshot_wplus_total_price_fen"] == 9_932
+    assert "100" in result["current_runtime_reply"]
 
 
 @pytest.mark.asyncio

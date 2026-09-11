@@ -13,6 +13,7 @@ from .errors import ProbeDisabledError, ProbeError
 _ACTIVE_PROBE_CONTEXT: ContextVar[bool] = ContextVar("active_probe_context", default=False)
 _PROBE_LEASE_CONTEXT: ContextVar[bool] = ContextVar("probe_lease_context", default=False)
 _PROBE_RISK_CONTEXT: ContextVar[bool] = ContextVar("probe_risk_context", default=False)
+_PROBE_RECOVERY_CONTEXT: ContextVar[bool] = ContextVar("probe_recovery_context", default=False)
 
 
 class ProbePolicy:
@@ -109,6 +110,15 @@ class ProbePolicy:
     def context_allows_active_probe() -> bool:
         return _ACTIVE_PROBE_CONTEXT.get()
 
+    @staticmethod
+    def context_allows_probe_recovery() -> bool:
+        return _PROBE_RECOVERY_CONTEXT.get()
+
+    def ensure_cleanup_allowed(self) -> None:
+        """Allow only durable cleanup while the normal Probe fuse is off."""
+        if not self.context_allows_probe_recovery():
+            self.ensure_allowed()
+
 
 @contextmanager
 def allow_active_probe(*, lease_acquired: bool = False, risk_approved: bool = False) -> Iterator[None]:
@@ -129,6 +139,15 @@ def _explicit_env_flag(name: str) -> bool | None:
     if value is None:
         return None
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@contextmanager
+def allow_probe_recovery() -> Iterator[None]:
+    token = _PROBE_RECOVERY_CONTEXT.set(True)
+    try:
+        yield
+    finally:
+        _PROBE_RECOVERY_CONTEXT.reset(token)
 
 
 @contextmanager

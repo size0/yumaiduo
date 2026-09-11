@@ -23,6 +23,8 @@ class ProbeAccount(BaseModel):
     # Internal-only fixture fields. public_view intentionally excludes them.
     token: str | None = Field(default=None, repr=False)
     phone: str | None = Field(default=None, repr=False)
+    user_identifier: str | None = Field(default=None, repr=False)
+    shumei_box_id: str | None = Field(default=None, repr=False)
 
     def eligible(self, *, now: datetime) -> bool:
         cooldown = _parse(self.cooldown_until)
