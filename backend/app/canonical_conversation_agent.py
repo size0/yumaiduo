@@ -1312,16 +1312,44 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _normalized_user_text(value: Any) -> str:
+    return "".join(str(value or "").split()).lower()
+
+
+def _conversation_intent(text: str, *, quote: Mapping[str, Any] | None) -> str:
+    """Classify a turn by semantic precedence, keeping ambiguous facts unresolved."""
+    text = _normalized_user_text(text)
+    cancel = ("取消", "不要了", "不买了", "不用继续", "不想买", "算了", "先放着", "不用报价", "停止帮我查", "改天再看", "不用回复", "别家看看", "暂时不需要", "先这样", "晚点再说", "不用帮我下单", "我自己买", "停止查询", "不用继续跟进", "谢谢先不用")
+    seat_scope = ("不要座位", "不挑座位", "区域票", "普通区域", "普通区", "不用选具体座位", "不要指定座位", "w+", "便宜一点的区域")
+    if any(item in text for item in cancel) and not any(item in text for item in seat_scope):
+        return "CANCEL_PURCHASE"
+    if quote and any(item in text for item in ("刚才", "前面", "之前", "原来", "继续刚才", "再看看报价", "报价能保留", "报价变了", "还能按刚才")):
+        return "REVIEW_CURRENT_QUOTE"
+    if any(item in text for item in ("多少钱", "价格", "报价", "贵吗", "贵不贵", "能买", "算一下", "总价", "服务费", "费用", "会员价", "儿童票", "学生优惠", "优惠")):
+        return "UNDERSTAND_OR_REQUEST_QUOTE"
+    # A quantity modifier wins over show-change words such as “改成”。
+    if re.search(r"(?:[0-9一二三四五六七八九十两]+\s*[张票位]|[几多]\s*[张位])", text) and not any(item in text for item in ("多少钱", "价格", "总价", "报价", "贵吗", "贵不贵")):
+        if not text.startswith(("想订", "想买", "我要看")):
+            return "SET_TICKET_COUNT"
+    if any(item in text for item in seat_scope):
+        return "SET_TICKET_COUNT"
+    if any(item in text for item in ("换", "改成", "第二场", "第三场", "imax那场", "那场", "这场", "更晚", "晚一点", "之后那场", "明天还有", "后天", "今天晚上", "周末有场", "早一点", "最晚几点", "普通厅", "换日期", "2d")):
+        return "CHANGE_SHOW"
+    if quote:
+        return "REVIEW_CURRENT_QUOTE"
+    return "BUY_MOVIE_TICKET"
+
+
 def _task_phase(*, current_text: str, candidate: Mapping[str, Any], quote: Mapping[str, Any] | None) -> tuple[str, str]:
     """Expose a small task view so the model sees where this turn belongs."""
-    text = "".join(str(current_text or "").split())
-    if any(token in text for token in ("取消", "不要了", "不买了")):
+    intent = _conversation_intent(current_text, quote=quote)
+    if intent == "CANCEL_PURCHASE":
         return "WAITING_USER", "CANCEL_OR_CLOSE_TASK"
-    if any(token in text for token in ("换", "改成", "第二场", "第三场", "IMAX", "那场", "这场")):
+    if intent == "CHANGE_SHOW":
         return "RESOLVE_SHOW", "RESOLVE_OR_REQUOTE"
-    if any(token in text for token in ("几张", "张票", "票", "两张", "三张")):
+    if intent == "SET_TICKET_COUNT":
         return "COLLECT_SEAT_OR_COUNT", "RESOLVE_TICKET_COUNT"
-    if quote:
+    if intent in {"UNDERSTAND_OR_REQUEST_QUOTE", "REVIEW_CURRENT_QUOTE"} and quote:
         return "QUOTE_REVIEW", "ANSWER_OR_REQUOTE"
     if candidate:
         return "IDENTIFY", "RESOLVE_MISSING_FACTS"
@@ -1329,18 +1357,7 @@ def _task_phase(*, current_text: str, candidate: Mapping[str, Any], quote: Mappi
 
 
 def _user_goal(text: str, *, quote: Mapping[str, Any] | None) -> str:
-    normalized = "".join(str(text or "").split())
-    if any(token in normalized for token in ("取消", "不要了", "不买了")):
-        return "CANCEL_PURCHASE"
-    if any(token in normalized for token in ("多少钱", "价格", "报价", "贵吗", "能买")):
-        return "UNDERSTAND_OR_REQUEST_QUOTE"
-    if any(token in normalized for token in ("换", "改成", "第二场", "第三场", "IMAX", "那场", "这场")):
-        return "CHANGE_SHOW"
-    if any(token in normalized for token in ("几张", "张票", "票", "两张", "三张")):
-        return "SET_TICKET_COUNT"
-    if quote:
-        return "REVIEW_CURRENT_QUOTE"
-    return "BUY_MOVIE_TICKET"
+    return _conversation_intent(text, quote=quote)
 
 
 def _context_identity(context: Mapping[str, Any]) -> dict[str, str]:
