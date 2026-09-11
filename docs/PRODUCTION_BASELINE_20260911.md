@@ -40,3 +40,21 @@ The running ticket process was observed under:
 ```
 
 No server files, services, release pointers, or databases were modified during this reconstruction.
+
+## Agent continuation repair
+
+The canonical conversation agent now exposes `inherited_screenshot_context` as a
+candidate-only projection of the latest same-conversation recognition. It is
+used to carry city, cinema, movie, date, showtime, hall, format, language, and
+selected-seat context into short follow-up turns, while remaining excluded from
+reply authority. A structured tool update therefore changes only the field
+stated by the buyer (for example, `13点10分那场` changes `showtime_start`),
+and quote/order/provider facts still require their existing authoritative
+backend tools.
+
+The focused regression suite is in
+`backend/tests/test_agent_screenshot_turn_continuation.py` and covers the
+screenshot → follow-up sequence plus the requested reference phrases. Release
+archives are built from `backend/` and
+`plugin-runtime/wanda-seat-autoquote/`; the builder does not include
+`ticket-system` or provider write capabilities.

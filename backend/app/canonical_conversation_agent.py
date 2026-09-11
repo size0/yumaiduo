@@ -204,6 +204,7 @@ class AgentContext:
     fishmore_im_history: list[dict[str, Any]] = field(default_factory=list)
     fishmore_history_available: bool = True
     recent_canonical_recognition: dict[str, Any] | None = None
+    inherited_screenshot_context: dict[str, Any] = field(default_factory=dict)
     current_purchase_context: dict[str, Any] = field(default_factory=dict)
     current_quote: dict[str, Any] | None = None
     quote_records: list[dict[str, Any]] = field(default_factory=list)
@@ -230,6 +231,7 @@ class AgentContext:
             "fishmore_im_history": self.fishmore_im_history,
             "fishmore_history_available": self.fishmore_history_available,
             "recent_canonical_recognition": self.recent_canonical_recognition,
+            "inherited_screenshot_context": self.inherited_screenshot_context,
             "current_purchase_context": self.current_purchase_context,
             "current_quote": self.current_quote,
             "quote_records": self.quote_records,
@@ -474,12 +476,14 @@ class AgentContextBuilder:
             manual_mark_result = recognition.get("manual_mark_result")
         confirmed = _confirmed_facts(current_quote, transaction)
         candidate = dict(recognition or {})
+        inherited_screenshot = _inherited_screenshot_context(recognition)
         expired = _list_of_mappings(body.get("expired_facts"))
         return AgentContext(
             **identity,
             fishmore_im_history=history,
             fishmore_history_available=body.get("authoritative_history_available") is not False,
             recent_canonical_recognition=recognition,
+            inherited_screenshot_context=inherited_screenshot,
             current_purchase_context=purchase_context,
             current_quote=current_quote,
             quote_records=quote_records,
@@ -657,7 +661,15 @@ class CanonicalAgentToolBackend:
         recognition = _mapping(context.get("recent_canonical_recognition"))
         confirmed = _mapping(context.get("confirmed_facts"))
         candidate = _mapping(context.get("candidate_facts"))
-        sources = (quote, purchase, confirmed, recognition, candidate)
+        inherited_screenshot = _mapping(context.get("inherited_screenshot_context"))
+        inherited_facts = _mapping(inherited_screenshot.get("facts"))
+        # A previous screenshot is still candidate evidence, but it is the
+        # structured input for resolving a short follow-up.  Keep it separate
+        # from confirmed_facts so it cannot authorize price, inventory, or
+        # transaction claims, while ensuring a model tool call does not drop
+        # city/cinema/movie/date merely because the current turn says “that
+        # one” or supplies only a showtime/quantity.
+        sources = (quote, purchase, confirmed, inherited_facts, recognition, candidate)
 
         def value(*keys: str) -> Any:
             for source in sources:
@@ -774,6 +786,11 @@ class CanonicalConversationAgent:
             "candidate_facts需要核验，expired_facts不可直接使用。不要自行计算价格，"
             "不要改变金额、座位可售性、付款、出票、退款或订单状态。需要补充信息时只追问真正缺失或歧义的字段。"
             "普通非购票消息也要自然回答，但不能覆盖交易事实。"
+            "inherited_screenshot_context 是同一会话最近一张截图的结构化候选事实；它不是实时库存、最终价格或交易确认，"
+            "但必须用于当前短跟进的指代解析和补全 purchase request。当前消息只改变它明确指出的字段；"
+            "例如‘13点10分那场’只更新 showtime_start，‘两张’只更新 ticket_count，‘就这个’、‘这个场次’、‘第二场’、"
+            "‘IMAX那场’、‘刚才截图那个’、‘还是刚才那个影院’都不得重新索要截图、影院、影片、日期或已知场次。"
+            "只有真正缺失或存在多个候选的字段才可以追问。"
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -1046,6 +1063,52 @@ def _safe_metadata_mapping(value: Any, model: Any | None) -> dict[str, Any]:
 def _safe_model_metadata(model: Any) -> dict[str, Any]:
     audit = getattr(model, "audit_view", None)
     return _safe_metadata_mapping(audit() if callable(audit) else {}, None)
+
+
+def _inherited_screenshot_context(recognition: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Expose screenshot facts as carry-forward candidates, not authorities.
+
+    The event store supplies the latest successful recognition from the same
+    tenant/shop/buyer/chat.  Keeping a small normalized projection makes the
+    boundary explicit: an agent can resolve references against the prior
+    screenshot, but only quote/order tools can turn those facts into an
+    authoritative result.
+    """
+    source = _mapping(recognition)
+    if not source:
+        return {}
+    aliases = {
+        "city": ("city", "city_text"),
+        "cinema": ("cinema", "cinema_text"),
+        "cinema_address": ("cinema_address", "address"),
+        "movie": ("movie", "movie_name"),
+        "quote_date": ("quote_date", "show_date", "date"),
+        "showtime_start": ("showtime_start", "start_time", "showtime"),
+        "hall": ("hall", "hall_name"),
+        "language": ("language",),
+        "dimension": ("dimension", "format"),
+        "selected_seats": ("selected_seats", "seats"),
+    }
+    facts: dict[str, Any] = {}
+    for name, keys in aliases.items():
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, list):
+                if value:
+                    facts[name] = list(value)
+                    break
+            elif value is not None and str(value).strip():
+                facts[name] = value
+                break
+    if not facts:
+        return {}
+    return {
+        "available": True,
+        "fact_tier": "candidate",
+        "source": "recent_canonical_screenshot",
+        "facts": facts,
+        "carry_forward_fields": sorted(facts),
+    }
 
 
 def _confirmed_facts(quote: Mapping[str, Any] | None, transaction: Mapping[str, Any] | None) -> dict[str, Any]:
