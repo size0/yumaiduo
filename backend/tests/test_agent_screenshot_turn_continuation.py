@@ -165,6 +165,22 @@ async def test_operator_policy_and_knowledge_reach_canonical_agent_prompt() -> N
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("text", "phase", "next_action"),
+    [
+        ("13点10分那场", "RESOLVE_SHOW", "RESOLVE_OR_REQUOTE"),
+        ("两张", "COLLECT_SEAT_OR_COUNT", "RESOLVE_TICKET_COUNT"),
+        ("不要了", "WAITING_USER", "CANCEL_OR_CLOSE_TASK"),
+    ],
+)
+async def test_context_exposes_task_phase_for_natural_language_followups(text, phase, next_action) -> None:
+    context = await AgentContextBuilder().build(body(text))
+    task = context.to_dict()["task"]
+    assert task["conversation_phase"] == phase
+    assert task["next_action"] == next_action
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "text",
     [
         "就这个",

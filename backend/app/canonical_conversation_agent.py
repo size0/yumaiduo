@@ -221,6 +221,9 @@ class AgentContext:
     human_manual_context: list[dict[str, Any]] = field(default_factory=list)
     same_type_reference_quote: dict[str, Any] | None = None
     manual_mark_result: Any = None
+    user_goal: str = "BUY_MOVIE_TICKET"
+    conversation_phase: str = "DISCOVER"
+    next_action: str = "UNDERSTAND_REQUEST"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -248,6 +251,11 @@ class AgentContext:
             "human_manual_context": self.human_manual_context,
             "same_type_reference_quote": self.same_type_reference_quote,
             "manual_mark_result": self.manual_mark_result,
+            "task": {
+                "user_goal": self.user_goal,
+                "conversation_phase": self.conversation_phase,
+                "next_action": self.next_action,
+            },
         }
 
 
@@ -510,6 +518,7 @@ class AgentContextBuilder:
             }]
         if durable_facts:
             candidate = {**durable_facts, **candidate}
+        phase, next_action = _task_phase(current_text=_current_text(body), candidate=candidate, quote=current_quote)
         return AgentContext(
             **identity,
             fishmore_im_history=history,
@@ -531,6 +540,8 @@ class AgentContextBuilder:
             human_manual_context=human_messages,
             same_type_reference_quote=same_type_reference,
             manual_mark_result=manual_mark_result,
+            conversation_phase=phase,
+            next_action=next_action,
         )
 
 
@@ -828,6 +839,9 @@ class CanonicalConversationAgent:
             "例如‘13点10分那场’只更新 showtime_start，‘两张’只更新 ticket_count，‘就这个’、‘这个场次’、‘第二场’、"
             "‘IMAX那场’、‘刚才截图那个’、‘还是刚才那个影院’都不得重新索要截图、影院、影片、日期或已知场次。"
             "只有真正缺失或存在多个候选的字段才可以追问。"
+            "先读取后端上下文中的task.user_goal、task.conversation_phase和task.next_action；"
+            "它们用于理解当前任务，不是让你跳过工具校验。报价后用户可以继续改场次、改票数、取消或询问规则，"
+            "不得把已经生成报价当成对话结束。"
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -1265,6 +1279,22 @@ def _tool_result(value: Any) -> dict[str, Any]:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _task_phase(*, current_text: str, candidate: Mapping[str, Any], quote: Mapping[str, Any] | None) -> tuple[str, str]:
+    """Expose a small task view so the model sees where this turn belongs."""
+    text = "".join(str(current_text or "").split())
+    if any(token in text for token in ("取消", "不要了", "不买了")):
+        return "WAITING_USER", "CANCEL_OR_CLOSE_TASK"
+    if any(token in text for token in ("换", "改成", "第二场", "第三场", "IMAX", "那场", "这场")):
+        return "RESOLVE_SHOW", "RESOLVE_OR_REQUOTE"
+    if any(token in text for token in ("几张", "张票", "票", "两张", "三张")):
+        return "COLLECT_SEAT_OR_COUNT", "RESOLVE_TICKET_COUNT"
+    if quote:
+        return "QUOTE_REVIEW", "ANSWER_OR_REQUOTE"
+    if candidate:
+        return "IDENTIFY", "RESOLVE_MISSING_FACTS"
+    return "DISCOVER", "UNDERSTAND_REQUEST"
 
 
 def _context_identity(context: Mapping[str, Any]) -> dict[str, str]:
