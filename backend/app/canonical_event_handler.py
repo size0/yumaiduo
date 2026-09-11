@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .canonical_buyer_reply import CanonicalBuyerReplyRenderer
+from .canonical_conversation_agent import _latency_mark, _latency_report
 
 
 class CanonicalEventHandler:
@@ -18,6 +19,11 @@ class CanonicalEventHandler:
         self._reply_renderer = reply_renderer or CanonicalBuyerReplyRenderer()
 
     async def process_event(self, body: Mapping[str, Any]) -> dict[str, Any] | None:
+        latency_trace = body.get("_canonical_latency_trace")
+        if not isinstance(latency_trace, dict):
+            latency_trace = {"marks": {}}
+        _latency_mark(latency_trace, "T0")
+        _latency_mark(latency_trace, "T1")
         envelope = _mapping(body.get("envelope"))
         payload = _mapping(envelope.get("payload"))
         session = _mapping(body.get("session"))
@@ -42,7 +48,7 @@ class CanonicalEventHandler:
             return self._outcome("CANONICAL_EMPTY_TEXT")
         try:
             stored_context = self._inbox.latest_canonical_context(body)
-            enriched = {**dict(body), **stored_context}
+            enriched = {**dict(body), **stored_context, "_canonical_latency_trace": latency_trace}
             result = await self._agent.process(enriched)
         except Exception:
             return self._outcome("AGENT_REPLY_UNAVAILABLE", reason="canonical_agent_failed")
@@ -77,6 +83,7 @@ class CanonicalEventHandler:
             or payload.get("itemId") or payload.get("item_id") or ""
         )
         if reply:
+            _latency_mark(latency_trace, "T9")
             event_id = str(envelope.get("id") or envelope.get("eventId") or "")
             messages = rendered.get("messages") if isinstance(rendered, Mapping) else None
             ordered = [item for item in messages if isinstance(item, Mapping) and str(item.get("text") or "").strip()] if isinstance(messages, list) else []
@@ -90,6 +97,13 @@ class CanonicalEventHandler:
                 "dedupe_key": f"canonical-reply:{event_id}:{index}",
                 "quote_record_id": _mapping(outcome.get("quote")).get("record_id"),
             } for index, item in enumerate(ordered)]
+            _latency_mark(latency_trace, "T10")
+        outcome["latency_trace"] = _latency_report(latency_trace)
+        if outcome["latency_trace"]["marks"]:
+            import logging
+            logging.getLogger(__name__).info(
+                "event=canonical_latency_trace trace=%s", outcome["latency_trace"],
+            )
         return outcome
 
     @staticmethod

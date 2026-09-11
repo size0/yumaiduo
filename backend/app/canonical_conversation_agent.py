@@ -6,6 +6,7 @@ import time
 import re
 import asyncio
 import logging
+import unicodedata
 from time import monotonic
 from dataclasses import dataclass, field
 
@@ -220,6 +221,7 @@ class AgentContext:
     human_manual_context: list[dict[str, Any]] = field(default_factory=list)
     same_type_reference_quote: dict[str, Any] | None = None
     manual_mark_result: Any = None
+    latency_trace: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -247,6 +249,7 @@ class AgentContext:
             "human_manual_context": self.human_manual_context,
             "same_type_reference_quote": self.same_type_reference_quote,
             "manual_mark_result": self.manual_mark_result,
+            "latency_trace": _latency_report(self.latency_trace),
         }
 
 
@@ -478,6 +481,7 @@ class AgentContextBuilder:
         candidate = dict(recognition or {})
         inherited_screenshot = _inherited_screenshot_context(recognition)
         expired = _list_of_mappings(body.get("expired_facts"))
+        latency_trace = body.get("_canonical_latency_trace")
         return AgentContext(
             **identity,
             fishmore_im_history=history,
@@ -499,6 +503,7 @@ class AgentContextBuilder:
             human_manual_context=human_messages,
             same_type_reference_quote=same_type_reference,
             manual_mark_result=manual_mark_result,
+            latency_trace=latency_trace if isinstance(latency_trace, dict) else {},
         )
 
 
@@ -687,10 +692,17 @@ class CanonicalAgentToolBackend:
             return value(name, *aliases)
 
         selected = updated("selected_seats", "seats")
+        explicit_selected = None
+        if isinstance(updates, Mapping):
+            explicit_selected = updates.get("selected_seats", updates.get("seats"))
         if selected is not None and not isinstance(selected, list):
             selected = None
         request_type = str(value("seat_request_type", "request_type", "quote_scope") or "").upper()
-        if request_type not in {"WPLUS_AREA", "EXACT_SEATS"}:
+        if isinstance(explicit_selected, list) and explicit_selected:
+            # Explicit seat labels in the current buyer turn replace a prior
+            # W+ area preference; they are an exact-seat request.
+            request_type = "EXACT_SEATS"
+        elif request_type not in {"WPLUS_AREA", "EXACT_SEATS"}:
             request_type = "EXACT_SEATS" if selected else "WPLUS_AREA"
         required = {
             "tenant_id": identity.get("tenant_id"),
@@ -734,8 +746,14 @@ class CanonicalAgentToolBackend:
                 if isinstance(item, Mapping) else str(item)
                 for item in selected
             ] if selected else None,
-            has_manual_mark=value("has_manual_mark"), image_url=_optional_text(value("image_url")),
+            # A seat list explicitly supplied in buyer text is an exact-seat
+            # request, not a claim that the screenshot contains a hand mark.
+            # Do not make the text follow-up depend on a second image.
+            has_manual_mark=(False if request_type == "EXACT_SEATS" and isinstance(explicit_selected, list) and explicit_selected
+                              else value("has_manual_mark")),
+            image_url=_optional_text(value("image_url")),
             message_id=_optional_text(purchase.get("message_id") or value("message_id")),
+            latency_trace=context.get("_latency_trace") if isinstance(context.get("_latency_trace"), dict) else None,
         ), []
 
 
@@ -767,6 +785,8 @@ class CanonicalConversationAgent:
 
     async def process(self, body: Mapping[str, Any]) -> dict[str, Any]:
         trace_started = time.monotonic()
+        inbound_trace = body.get("_canonical_latency_trace")
+        _latency_mark(inbound_trace, "T1")
         context = await self._context_builder.build(body)
         model, model_metadata = self._resolve_model(context)
         run_id = self._start_audit_run(context, body, model_metadata)
@@ -777,6 +797,7 @@ class CanonicalConversationAgent:
             }
             self._finish_audit_run(run_id, result, context, started_at=trace_started)
             return result
+        _latency_mark(context.latency_trace, "T2")
         current_text = _current_text(body)
         if os.getenv("CANONICAL_TRACE_LOG") == "1":
             LOGGER.info("canonical_trace stage=input event_id=%s text=%s", _pick(_mapping(body.get("envelope")), "id", "eventId"), current_text)
@@ -798,13 +819,63 @@ class CanonicalConversationAgent:
             {"role": "user", "content": current_text},
         ]
         trace: list[dict[str, Any]] = []
+        auto_updates = _followup_updates(current_text, context.to_dict())
+        if auto_updates is not None and self._tool_backend is not None:
+            auto_call = {"name": "update_purchase_request", "arguments": auto_updates}
+            auto_result = await self._invoke_tool(auto_call, context)
+            trace.append({
+                "tool": "update_purchase_request",
+                "raw_arguments": auto_updates,
+                "validated_arguments": auto_updates if auto_result.get("status") in {
+                    "success", "QUOTED", "QUOTE_UPDATED", "QUOTE_SELECTED",
+                } else {},
+                "result": auto_result,
+            })
+            self._record_tool_audit(run_id, "update_purchase_request", auto_call, auto_result)
+            if auto_result.get("status") in {"QUOTED", "QUOTE_UPDATED"} and (
+                auto_result.get("current_runtime_reply") or auto_result.get("status") == "QUOTED"
+            ):
+                _latency_mark(context.latency_trace, "T7")
+                _latency_mark(context.latency_trace, "T8")
+                reply = _text(auto_result.get("current_runtime_reply"))
+                result = {
+                    "status": "AGENT_REPLY_READY", "reply": reply,
+                    "context": context.to_dict(), "tool_trace": trace,
+                    "agent_run_id": run_id, "actions": [],
+                }
+                _latency_mark(context.latency_trace, "T8")
+                self._finish_audit_run(run_id, result, context, started_at=trace_started)
+                return result
+            if auto_result.get("status") in {"SHOW_UNRESOLVED", "ROUTE_UNRESOLVED"}:
+                _latency_mark(context.latency_trace, "T7")
+                _latency_mark(context.latency_trace, "T8")
+                reply = _followup_quote_failure_reply(current_text, auto_updates, auto_result)
+                result = {
+                    "status": "AGENT_REPLY_READY", "reply": reply,
+                    "context": context.to_dict(), "tool_trace": trace,
+                    "agent_run_id": run_id, "actions": [],
+                }
+                self._finish_audit_run(run_id, result, context, started_at=trace_started)
+                return result
+            # An incomplete/failed auto attempt is passed to the normal model
+            # loop with its structured result. It must not be retried by a
+            # second resolver path in this run.
+            messages.extend([
+                {"role": "assistant", "tool_calls": [{
+                    "name": "update_purchase_request", "arguments": auto_updates,
+                }]},
+                {"role": "tool", "name": "update_purchase_request",
+                 "tool_call_id": "auto-followup", "content": json.dumps(auto_result, ensure_ascii=False, separators=(",", ":"))},
+            ])
         # The tool budget counts execution rounds, not the final prose turn.
         # Always allow the model to consume the final tool results once, with
         # no tools offered. Do not execute calls returned beyond the budget.
         for round_index in range(self._max_tool_rounds + 1):
+            _latency_mark(context.latency_trace, "T7")
             try:
                 response = await model.complete(messages, AGENT_TOOL_SCHEMAS if round_index < self._max_tool_rounds else ())
             except Exception as error:
+                _latency_mark(context.latency_trace, "T8")
                 result = {
                     "status": "AGENT_REPLY_UNAVAILABLE", "reason": "agent_model_failed",
                     "reply": "", "context": context.to_dict(), "tool_trace": trace, "actions": [],
@@ -816,6 +887,7 @@ class CanonicalConversationAgent:
                 }
                 self._finish_audit_run(run_id, result, context, started_at=trace_started)
                 return result
+            _latency_mark(context.latency_trace, "T8")
             tool_calls = response.get("tool_calls") if isinstance(response, Mapping) else None
             if isinstance(tool_calls, list) and tool_calls:
                 if round_index == self._max_tool_rounds:
@@ -1012,17 +1084,20 @@ class CanonicalConversationAgent:
                 return {"status": "error", "reason": "tool_arguments_invalid"}
         if not isinstance(arguments, Mapping):
             return {"status": "error", "reason": "tool_arguments_invalid"}
+        view = context.to_dict()
+        # Keep the mutable trace out of the model JSON while allowing the
+        # deterministic tool backend to record resolver/provider timings.
+        view["_latency_trace"] = context.latency_trace
         if self._tool_backend is not None:
             method = getattr(self._tool_backend, name, None)
             if callable(method):
                 try:
-                    value = method(dict(arguments), context.to_dict())
+                    value = method(dict(arguments), view)
                     if hasattr(value, "__await__"):
                         value = await value
                     return _tool_result(value)
                 except Exception:
                     return {"status": "error", "reason": "tool_execution_failed"}
-        view = context.to_dict()
         defaults = {
             "get_current_context": view,
             "get_quote": {"status": "success", "quote": context.current_quote, "quotes": context.quote_records},
@@ -1065,6 +1140,154 @@ def _safe_model_metadata(model: Any) -> dict[str, Any]:
     return _safe_metadata_mapping(audit() if callable(audit) else {}, None)
 
 
+def _latency_mark(trace: Any, stage: str) -> None:
+    if not isinstance(trace, dict):
+        return
+    marks = trace.setdefault("marks", {})
+    if isinstance(marks, dict):
+        marks.setdefault(stage, monotonic())
+
+
+def _latency_report(trace: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw_marks = _mapping(trace).get("marks")
+    raw_marks = raw_marks if isinstance(raw_marks, Mapping) else {}
+    ordered = [f"T{index}" for index in range(11)]
+    present = [(name, float(raw_marks[name])) for name in ordered if isinstance(raw_marks.get(name), (int, float))]
+    if not present:
+        return {"marks": {}, "segments": {}, "total_ms": 0.0, "slowest": []}
+    origin = present[0][1]
+    marks = {name: round((stamp - origin) * 1000, 1) for name, stamp in present}
+    segments: dict[str, float] = {}
+    for (left, left_stamp), (right, right_stamp) in zip(present, present[1:], strict=False):
+        segments[f"{left}->{right}"] = round(max(0.0, (right_stamp - left_stamp) * 1000), 1)
+    slowest = [
+        {"segment": name, "duration_ms": duration}
+        for name, duration in sorted(segments.items(), key=lambda item: item[1], reverse=True)[:3]
+    ]
+    return {
+        "marks": marks,
+        "segments": segments,
+        "total_ms": round(max(0.0, present[-1][1] - origin) * 1000, 1),
+        "slowest": slowest,
+    }
+
+
+def _followup_updates(text: str, context: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Extract only high-confidence slot patches from short follow-ups.
+
+    Time, quantity, ordinal, and unique-format selections are structured
+    enough for deterministic parsing. Ambiguous prose stays with the model;
+    this parser never invents a show or bypasses the quote runtime.
+    """
+    normalized = unicodedata.normalize("NFKC", text or "")
+    compact = re.sub(r"\s+", "", normalized).lower()
+    if not compact:
+        return None
+    updates: dict[str, Any] = {}
+    recognized = False
+    time_match = re.search(r"(?<!\d)([01]?\d|2[0-3])(?::([0-5]\d)|点|时)(半|[0-5]?\d)?分?", compact)
+    if not time_match:
+        time_match = re.search(r"(?<![\d一二两三四五六七八九十])([一二两三四五六七八九十]{1,3})(?:点|时)(半|[0-5]?\d)?分?", compact)
+    if time_match:
+        hour_token = time_match.group(1)
+        hour = int(hour_token) if hour_token.isdigit() else _CHINESE_HOUR.get(hour_token)
+        minute_token = time_match.group(2) or time_match.group(3)
+        minute = 30 if minute_token == "半" else int(minute_token or 0)
+        if hour is not None:
+            updates["showtime_start"] = f"{hour:02d}:{minute:02d}"
+            recognized = True
+    date_match = re.search(r"(?:(今年|明年|去年)?(\d{1,2})月(\d{1,2})日?)", compact)
+    if date_match:
+        year_hint, month, day = date_match.groups()
+        now = datetime.now(timezone.utc).astimezone()
+        year = now.year + (1 if year_hint == "明年" else -1 if year_hint == "去年" else 0)
+        try:
+            updates["quote_date"] = datetime(year, int(month), int(day), tzinfo=now.tzinfo).date().isoformat()
+            recognized = True
+        except ValueError:
+            pass
+    relative_date = next((token for token in ("今天", "明天", "后天") if token in compact), None)
+    if relative_date:
+        from datetime import timedelta
+        now = datetime.now(timezone.utc).astimezone().date()
+        offset = {"今天": 0, "明天": 1, "后天": 2}[relative_date]
+        updates["quote_date"] = (now + timedelta(days=offset)).isoformat()
+        recognized = True
+    quantity_match = re.search(r"(\d+|[一二两三四五六七八九十])张", compact)
+    if quantity_match:
+        value = quantity_match.group(1)
+        updates["ticket_count"] = int(value) if value.isdigit() else _CHINESE_QUANTITY.get(value)
+        recognized = updates["ticket_count"] is not None
+    options = _show_options(context)
+    ordinal_match = re.search(r"第?([一二两三四五六七八九十\d]+)场", compact)
+    if ordinal_match and options:
+        index = _chinese_index(ordinal_match.group(1))
+        if index is not None and index < len(options):
+            _apply_show_option(updates, options[index])
+            recognized = True
+    if "imax" in compact and options:
+        imax = [item for item in options if "imax" in _option_text(item)]
+        if len(imax) == 1:
+            _apply_show_option(updates, imax[0])
+            recognized = True
+    reference_phrases = {"就这个", "这个场次", "刚才截图那个", "还是刚才那个影院"}
+    if compact in reference_phrases and _context_showtime(context):
+        recognized = True
+    if not recognized:
+        return None
+    return updates
+
+
+_CHINESE_QUANTITY = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_CHINESE_HOUR = {**_CHINESE_QUANTITY, "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15, "十六": 16, "十七": 17, "十八": 18, "十九": 19, "二十": 20, "二十一": 21, "二十二": 22, "二十三": 23}
+
+
+def _chinese_index(value: str) -> int | None:
+    if value.isdigit():
+        number = int(value)
+    elif value in _CHINESE_QUANTITY:
+        number = _CHINESE_QUANTITY[value]
+    else:
+        return None
+    return number - 1 if number > 0 else None
+
+
+def _show_options(context: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    purchase = _mapping(context.get("current_purchase_context"))
+    inherited = _mapping(context.get("inherited_screenshot_context"))
+    candidates = purchase.get("show_options") or inherited.get("show_options")
+    return [item for item in candidates if isinstance(item, Mapping)] if isinstance(candidates, list) else []
+
+
+def _option_text(option: Mapping[str, Any]) -> str:
+    return " ".join(str(option.get(key) or "") for key in ("dimension", "format", "hall", "name", "label")).lower()
+
+
+def _apply_show_option(updates: dict[str, Any], option: Mapping[str, Any]) -> None:
+    for field, keys in (
+        ("showtime_start", ("showtime_start", "start_time", "showtime")),
+        ("hall", ("hall", "hall_name")),
+        ("dimension", ("dimension", "format")),
+    ):
+        for key in keys:
+            if option.get(key) not in (None, ""):
+                updates[field] = option[key]
+                break
+
+
+def _context_showtime(context: Mapping[str, Any]) -> Any:
+    inherited = _mapping(_mapping(context.get("inherited_screenshot_context")).get("facts"))
+    return inherited.get("showtime_start") or _mapping(context.get("current_quote")).get("showtime_start")
+
+
+def _followup_quote_failure_reply(text: str, updates: Mapping[str, Any], result: Mapping[str, Any]) -> str:
+    showtime = _text(updates.get("showtime_start")) or "当前选择的"
+    status = _text(result.get("status"))
+    if status in {"SHOW_UNRESOLVED", "ROUTE_UNRESOLVED"}:
+        return f"我没核到 {showtime} 这一场，可以帮你查附近场次。"
+    return "当前场次暂时无法取得可核验价格，我先不乱报价哈。"
+
+
 def _inherited_screenshot_context(recognition: Mapping[str, Any] | None) -> dict[str, Any]:
     """Expose screenshot facts as carry-forward candidates, not authorities.
 
@@ -1088,6 +1311,7 @@ def _inherited_screenshot_context(recognition: Mapping[str, Any] | None) -> dict
         "language": ("language",),
         "dimension": ("dimension", "format"),
         "selected_seats": ("selected_seats", "seats"),
+        "show_options": ("show_options", "candidate_shows"),
     }
     facts: dict[str, Any] = {}
     for name, keys in aliases.items():
@@ -1102,13 +1326,16 @@ def _inherited_screenshot_context(recognition: Mapping[str, Any] | None) -> dict
                 break
     if not facts:
         return {}
-    return {
+    result = {
         "available": True,
         "fact_tier": "candidate",
         "source": "recent_canonical_screenshot",
         "facts": facts,
         "carry_forward_fields": sorted(facts),
     }
+    if isinstance(facts.get("show_options"), list):
+        result["show_options"] = facts["show_options"]
+    return result
 
 
 def _confirmed_facts(quote: Mapping[str, Any] | None, transaction: Mapping[str, Any] | None) -> dict[str, Any]:
