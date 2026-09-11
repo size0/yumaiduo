@@ -745,9 +745,20 @@ class CanonicalAgentToolBackend:
         selected = updated("selected_seats", "seats")
         if selected is not None and not isinstance(selected, list):
             selected = None
-        request_type = str(value("seat_request_type", "request_type", "quote_scope") or "").upper()
+        request_type = str(
+            (updates.get("seat_request_type") or updates.get("request_type") or updates.get("quote_scope"))
+            or value("seat_request_type", "request_type", "quote_scope") or ""
+        ).upper()
+        if selected and not any(updates.get(key) for key in ("seat_request_type", "request_type", "quote_scope")):
+            request_type = "EXACT_SEATS"
         if request_type not in {"WPLUS_AREA", "EXACT_SEATS"}:
             request_type = "EXACT_SEATS" if selected else "WPLUS_AREA"
+        # Explicit seats typed by the buyer are authoritative seat intent. A
+        # hand-mark detector is only for image annotations; leaving this as
+        # None incorrectly routes text such as “4排7座” to MANUAL_MARK_REQUIRED.
+        has_manual_mark = value("has_manual_mark")
+        if request_type == "EXACT_SEATS" and selected and has_manual_mark is None:
+            has_manual_mark = False
         required = {
             "tenant_id": identity.get("tenant_id"),
             "shop_id": identity.get("shop_id"),
@@ -790,7 +801,7 @@ class CanonicalAgentToolBackend:
                 if isinstance(item, Mapping) else str(item)
                 for item in selected
             ] if selected else None,
-            has_manual_mark=value("has_manual_mark"), image_url=_optional_text(value("image_url")),
+            has_manual_mark=has_manual_mark, image_url=_optional_text(value("image_url")),
             message_id=_optional_text(purchase.get("message_id") or value("message_id")),
         ), []
 

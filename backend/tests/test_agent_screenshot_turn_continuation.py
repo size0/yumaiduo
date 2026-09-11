@@ -112,6 +112,37 @@ class FollowupModel:
         return {"reply": "已按这张截图切换到13:10场，还需要几张？"}
 
 
+class ExactSeatModel:
+    def __init__(self) -> None:
+        self.messages = []
+
+    async def complete(self, messages, tools):
+        if len(self.messages) == 0:
+            self.messages.append(messages)
+            return {"tool_calls": [{
+                "name": "update_purchase_request",
+                "arguments": {"selected_seats": ["4排7座"]},
+            }]}
+        self.messages.append(messages)
+        return {"reply": "已收到你指定的座位，我先核验实时座位和价格。"}
+
+
+@pytest.mark.asyncio
+async def test_text_seat_selection_does_not_require_manual_mark_image() -> None:
+    runtime = QuoteRuntimeStub([])
+    result = await CanonicalConversationAgent(
+        AgentContextBuilder(), ExactSeatModel(),
+        tool_backend=CanonicalAgentToolBackend(quote_runtime=runtime),
+        max_tool_rounds=1,
+    ).process(body("4排7座"))
+
+    assert result["status"] == "AGENT_REPLY_READY", result
+    request = runtime.requests[0]
+    assert request.selected_seats == ["4排7座"]
+    assert request.seat_request_type == "EXACT_SEATS"
+    assert request.has_manual_mark is False
+
+
 @pytest.mark.asyncio
 async def test_showtime_followup_updates_only_showtime_and_reuses_screenshot_facts() -> None:
     runtime = QuoteRuntimeStub([])
