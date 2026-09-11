@@ -9,6 +9,7 @@ from app.canonical_conversation_agent import (
     CanonicalAgentToolBackend,
     CanonicalConversationAgent,
 )
+from app.canonical_event_handler import _show_confirmation_reply
 
 
 IDENTITY = {
@@ -141,6 +142,18 @@ async def test_text_seat_selection_does_not_require_manual_mark_image() -> None:
     assert request.selected_seats == ["4排7座"]
     assert request.seat_request_type == "EXACT_SEATS"
     assert request.has_manual_mark is False
+
+
+def test_show_list_confirmation_does_not_emit_quote_copy() -> None:
+    reply = _show_confirmation_reply({"candidate_facts": {
+        "cinema": "UME影城（Onyx LED 4K巨幕新天地店）", "movie": "奥德赛",
+        "show_date": "2026-09-12", "showtime_start": "18:02",
+    }}, {})
+    assert "UME影城" in reply
+    assert "9月12日" in reply
+    assert "18:02" in reply
+    assert "列表价先不当最终报价" in reply
+    assert "直接拍" not in reply
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 from .canonical_buyer_reply import CanonicalBuyerReplyRenderer
@@ -66,7 +67,13 @@ class CanonicalEventHandler:
         # model turn it into an unverifiable seat-level claim.
         current_quote = _mapping(_mapping(result.get("context")).get("current_quote"))
         current_text = str(payload.get("content") or payload.get("text") or "").strip()
-        if current_quote.get("request_type") == "WPLUS_AREA" and _is_area_purchase_question(current_text):
+        if _is_show_confirmation(current_text):
+            reply = _show_confirmation_reply(result.get("context"), current_quote)
+            result["status"] = "AGENT_REPLY_READY"
+            result["reason"] = "show_confirmation_without_quote"
+        if (not _is_show_confirmation(current_text)
+                and current_quote.get("request_type") == "WPLUS_AREA"
+                and _is_area_purchase_question(current_text)):
             reply = "可以购买，需要几张呢"
             result["status"] = "AGENT_REPLY_READY"
             result["reason"] = "wplus_area_purchase_question"
@@ -121,3 +128,22 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 def _is_area_purchase_question(text: str) -> bool:
     normalized = "".join(str(text or "").split())
     return "能买吗" in normalized or "可以买吗" in normalized or "能购买吗" in normalized
+
+
+def _is_show_confirmation(text: str) -> bool:
+    normalized = "".join(str(text or "").split()).lower()
+    return bool(normalized and ("对吧" in normalized or "是不是" in normalized) and
+                any(token in normalized for token in ("影院", "影城", "奥德赛", "场", "18.02", "18:02")))
+
+
+def _show_confirmation_reply(context: Any, quote: Mapping[str, Any]) -> str:
+    data = _mapping(context)
+    facts = _mapping(data.get("candidate_facts"))
+    cinema = str(facts.get("cinema") or facts.get("cinema_text") or quote.get("cinema") or "").strip()
+    movie = str(facts.get("movie") or facts.get("movie_name") or quote.get("movie") or "").strip()
+    date = str(facts.get("quote_date") or facts.get("show_date") or quote.get("quote_date") or "").strip()
+    time = str(facts.get("showtime_start") or facts.get("start_time") or quote.get("showtime_start") or "").strip()
+    if date and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        date = f"{int(date[5:7])}月{int(date[8:10])}日"
+    summary = "，".join(item for item in (cinema, date, time, f"《{movie}》" if movie else "") if item)
+    return f"对，是{summary}这场。截图里的列表价先不当最终报价，你确定场次后把选座和张数告诉我，我再按实时座位核价。"
