@@ -519,6 +519,7 @@ class AgentContextBuilder:
         if durable_facts:
             candidate = {**durable_facts, **candidate}
         phase, next_action = _task_phase(current_text=_current_text(body), candidate=candidate, quote=current_quote)
+        user_goal = _user_goal(_current_text(body), quote=current_quote)
         return AgentContext(
             **identity,
             fishmore_im_history=history,
@@ -540,6 +541,7 @@ class AgentContextBuilder:
             human_manual_context=human_messages,
             same_type_reference_quote=same_type_reference,
             manual_mark_result=manual_mark_result,
+            user_goal=user_goal,
             conversation_phase=phase,
             next_action=next_action,
         )
@@ -1295,6 +1297,21 @@ def _task_phase(*, current_text: str, candidate: Mapping[str, Any], quote: Mappi
     if candidate:
         return "IDENTIFY", "RESOLVE_MISSING_FACTS"
     return "DISCOVER", "UNDERSTAND_REQUEST"
+
+
+def _user_goal(text: str, *, quote: Mapping[str, Any] | None) -> str:
+    normalized = "".join(str(text or "").split())
+    if any(token in normalized for token in ("取消", "不要了", "不买了")):
+        return "CANCEL_PURCHASE"
+    if any(token in normalized for token in ("多少钱", "价格", "报价", "贵吗", "能买")):
+        return "UNDERSTAND_OR_REQUEST_QUOTE"
+    if any(token in normalized for token in ("换", "改成", "第二场", "第三场", "IMAX", "那场", "这场")):
+        return "CHANGE_SHOW"
+    if any(token in normalized for token in ("几张", "张票", "票", "两张", "三张")):
+        return "SET_TICKET_COUNT"
+    if quote:
+        return "REVIEW_CURRENT_QUOTE"
+    return "BUY_MOVIE_TICKET"
 
 
 def _context_identity(context: Mapping[str, Any]) -> dict[str, str]:

@@ -181,6 +181,16 @@ async def test_context_exposes_task_phase_for_natural_language_followups(text, p
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("text", "goal"),
+    [("13点10分那场", "CHANGE_SHOW"), ("两张", "SET_TICKET_COUNT"), ("不要了", "CANCEL_PURCHASE"), ("多少钱", "UNDERSTAND_OR_REQUEST_QUOTE")],
+)
+async def test_context_exposes_user_goal_for_common_customer_intents(text, goal) -> None:
+    context = await AgentContextBuilder().build(body(text))
+    assert context.to_dict()["task"]["user_goal"] == goal
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "text",
     [
         "就这个",
