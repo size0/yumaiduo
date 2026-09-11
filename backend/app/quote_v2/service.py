@@ -963,7 +963,7 @@ def _recognition_seats(values: list[str]) -> list[Any]:
     from app.selected_seat_quote_service import SelectedSeat
     result: list[Any] = []
     for value in values:
-        match = re.search(r"(\d+)\s*[排行]\s*(\d+)\s*[座號号]", str(value))
+        match = re.fullmatch(r"\s*(\d+)\s*[排行]\s*(\d+)\s*[座號号列]\s*", str(value))
         if not match:
             return []
         result.append(SelectedSeat(row_no=int(match.group(1)), col_no=int(match.group(2)), seat_no=str(value)))

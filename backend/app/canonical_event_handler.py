@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .canonical_buyer_reply import CanonicalBuyerReplyRenderer
+from .canonical_conversation_agent import _user_goal
 
 
 class CanonicalEventHandler:
@@ -75,6 +76,12 @@ class CanonicalEventHandler:
             reply = str(rendered.get("text") or "")
             if callable(self._quote_context_writer):
                 self._quote_context_writer(body, quoted)
+        elif (reply and current_quote and _user_goal(current_text, quote=current_quote)
+              in {"UNDERSTAND_OR_REQUEST_QUOTE", "REVIEW_CURRENT_QUOTE"}):
+            # Price follow-ups must use the same saved template as fresh quotes.
+            # A model reading an existing quote need not call request_quote again.
+            rendered = self._reply_renderer.render({"status": "QUOTED", "quote": current_quote})
+            reply = str(rendered.get("text") or "")
         outcome = self._outcome("AGENT_REPLY_READY" if reply else "AGENT_REPLY_UNAVAILABLE", reason=result.get("reason"))
         outcome.update({"agent_run_id": result.get("agent_run_id"), "tool_trace": result.get("tool_trace") or []})
         if quoted:

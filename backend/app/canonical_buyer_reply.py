@@ -172,7 +172,10 @@ class CanonicalBuyerReplyRenderer:
                     prefix = f"{summary}，" if summary else ""
                     return {
                         "kind": "QUOTE_READY_EXACT",
-                        "text": f"{prefix}{'、'.join(labels)}，{unit}/张，共{total}，直接拍就行哈",
+                        "text": _template(templates, "exact_quote_template",
+                            f"{prefix}{'、'.join(labels)}，{unit}/张，共{total}，直接拍就行哈",
+                            {**values, "报价单价": unit, "报价合计": total,
+                             "逐座报价": "、".join(labels), "张数": quote.get("ticket_count")}),
                     }
             if provider_route == "LIANGPIAO" and not quote.get("selected_seats"):
                 return {
