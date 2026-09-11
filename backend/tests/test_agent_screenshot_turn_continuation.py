@@ -138,6 +138,32 @@ async def test_showtime_followup_updates_only_showtime_and_reuses_screenshot_fac
 
 
 @pytest.mark.asyncio
+async def test_operator_policy_and_knowledge_reach_canonical_agent_prompt() -> None:
+    model = FollowupModel()
+    policy = type("Policy", (), {
+        "persona_background": "怀柔店真人客服，先理解需求再推进。",
+        "agent_persona": "耐心专业",
+        "business_background": "只以官方实时报价为准。",
+        "reply_style": "自然、简短、先回答再给下一步。",
+        "customer_service_knowledge": "IMAX属于制式，不等于已选座。",
+    })()
+    await CanonicalConversationAgent(
+        AgentContextBuilder(), model,
+        conversation_policy_provider=lambda: policy,
+        knowledge_provider=lambda: [type("Knowledge", (), {
+            "title": "改场次",
+            "common_questions": "可以换场次吗",
+            "reply_guidance": "可以，重新核验后报价",
+            "handling_rules": "不得复用旧价格",
+        })()],
+    ).process(body("13点10分那场"))
+    prompt = model.messages[0][0]["content"]
+    assert "怀柔店真人客服" in prompt
+    assert "可以换场次吗" in prompt
+    assert "不得复用旧价格" in prompt
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "text",
     [

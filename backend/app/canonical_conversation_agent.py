@@ -788,6 +788,8 @@ class CanonicalConversationAgent:
         reply_guard: AgentReplyGuard | None = None,
         audit_store: Any | None = None,
         model_resolver: Callable[[str, str, str], Any] | None = None,
+        conversation_policy_provider: Callable[[], Any] | None = None,
+        knowledge_provider: Callable[[], list[Any]] | None = None,
     ) -> None:
         self._context_builder = context_builder
         self._model = model
@@ -796,6 +798,8 @@ class CanonicalConversationAgent:
         self._reply_guard = reply_guard or AgentReplyGuard()
         self._audit_store = audit_store
         self._model_resolver = model_resolver
+        self._conversation_policy_provider = conversation_policy_provider
+        self._knowledge_provider = knowledge_provider
 
     async def process(self, body: Mapping[str, Any]) -> dict[str, Any]:
         trace_started = time.monotonic()
@@ -812,7 +816,8 @@ class CanonicalConversationAgent:
         current_text = _current_text(body)
         if os.getenv("CANONICAL_TRACE_LOG") == "1":
             LOGGER.info("canonical_trace stage=input event_id=%s text=%s", _pick(_mapping(body.get("envelope")), "id", "eventId"), current_text)
-        system = (
+        system = self._system_prompt()
+        system += (
             "你是Canonical购票会话助手。只根据后端提供的上下文和高层工具工作；"
             "不要使用关键词、正则或固定意图规则。confirmed_facts才是已确认事实，"
             "candidate_facts需要核验，expired_facts不可直接使用。不要自行计算价格，"
@@ -915,6 +920,38 @@ class CanonicalConversationAgent:
         }
         self._finish_audit_run(run_id, result, context, started_at=trace_started)
         return result
+
+    def _system_prompt(self) -> str:
+        """Inject the operator-configured persona and knowledge into the canonical agent.
+
+        These values shape interpretation and phrasing only; tool results remain
+        authoritative for facts, prices, inventory, and lifecycle state.
+        """
+        policy = self._conversation_policy_provider() if self._conversation_policy_provider else None
+        parts = [
+            "你是当前店铺的真人电影票客服，先理解买家的真实目标，再决定下一步。",
+            "不要为了完成字段而机械追问；已有上下文足够时直接推进。",
+        ]
+        if policy is not None:
+            for label, attr in (("客服人设及业务背景", "persona_background"), ("客服人设", "agent_persona"),
+                                ("业务背景", "business_background"), ("回复风格", "reply_style"),
+                                ("客服知识补充", "customer_service_knowledge")):
+                value = str(getattr(policy, attr, "") or "").strip()
+                if value:
+                    parts.append(f"{label}：{value}")
+        if self._knowledge_provider is not None:
+            entries = self._knowledge_provider() or []
+            active = []
+            for entry in entries:
+                title = str(getattr(entry, "title", "") or "").strip()
+                questions = str(getattr(entry, "common_questions", "") or "").strip()
+                guidance = str(getattr(entry, "reply_guidance", "") or "").strip()
+                rules = str(getattr(entry, "handling_rules", "") or "").strip()
+                if title or questions or guidance or rules:
+                    active.append(f"- {title}\n  常见问法：{questions}\n  回复口径：{guidance}\n  处理规则：{rules}")
+            if active:
+                parts.append("客服知识库（仅用于理解和表达，不覆盖实时报价与安全规则）：\n" + "\n".join(active))
+        return "\n".join(parts) + "\n"
 
     def _resolve_model(self, context: AgentContext) -> tuple[AgentModel, dict[str, Any]]:
         """Resolve the active UI-owned config once per run; never put its key in context."""

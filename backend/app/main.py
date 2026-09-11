@@ -572,6 +572,8 @@ def create_app(
         ),
         model_resolver=resolve_canonical_chat_model,
         audit_store=persistent_agent_audit,
+        conversation_policy_provider=persistent_conversation_policy.current,
+        knowledge_provider=persistent_knowledge.active_for_prompt,
     )
     canonical_text = CanonicalEventHandler(
         agent=canonical_agent, shop_store=persistent_shop_automation, inbox=persistent_rules_store,
