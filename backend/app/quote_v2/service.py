@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import logging
 from time import monotonic
 from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
@@ -20,6 +22,32 @@ AUTO_PRICING_SOURCE = "AUTO_PRICING"
 MANUAL_OPERATOR_SOURCE = "MANUAL_OPERATOR"
 AUTO_QUOTE_TTL_SECONDS = 1_800
 MANUAL_QUOTE_TTL_SECONDS = 7_200
+LOGGER = logging.getLogger(__name__)
+
+
+def _trace_hash(value: object) -> str | None:
+    text = str(value or "").strip()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16] if text else None
+
+
+def _recognition_trace(recognition: Any) -> dict[str, Any]:
+    def present(*names: str) -> bool:
+        return any(bool(getattr(recognition, name, None)) for name in names)
+    seats = getattr(recognition, "selected_seats", None)
+    candidates = getattr(recognition, "candidate_shows", None)
+    return {
+        "city": present("city_text", "city"), "cinema": present("cinema_text", "cinema"),
+        "movie": present("movie"), "date": present("show_date", "date"),
+        "showtime_start": present("start_time", "showtime_start"),
+        "selected_seats_count": len(seats) if isinstance(seats, list) else 0,
+        "has_selected_seats": bool(getattr(recognition, "has_selected_seats", False)),
+        "candidate_shows_count": len(candidates) if isinstance(candidates, list) else 0,
+    }
+
+
+def _safe_reason(value: object) -> dict[str, str | None]:
+    raw = str(value or "").strip()
+    return {"reason_class": raw[:80] if raw else None, "reason_hash": _trace_hash(raw)}
 
 
 def _latency_mark(trace: Any, stage: str) -> None:
@@ -711,7 +739,42 @@ class CanonicalQuoteRuntime:
         ticket_count: int | None = None, ticket_mode: str = "STANDARD",
         area_quote_strategy: str | None = None, latency_trace: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        trace_base = {
+            "event_id": identity.get("event_id"),
+            "tenant_id_hash": _trace_hash(identity.get("tenant_id")),
+            "shop_id_hash": _trace_hash(identity.get("shop_id")),
+            "buyer_id_hash": _trace_hash(identity.get("buyer_id")),
+            "chat_id_hash": _trace_hash(identity.get("chat_id")),
+            "purchase_context_id_hash": _trace_hash(identity.get("purchase_context_id")),
+            "recognition_present_fields": _recognition_trace(recognition),
+        }
+        try:
+            facts = self._fact_store.load_context(**{
+                key: identity.get(key, "") for key in
+                ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")
+            }) if self._fact_store is not None else None
+            trace_base["facts_lookup_attempted"] = self._fact_store is not None
+            trace_base["facts_found"] = bool(facts and facts.get("available"))
+            trace_base["facts_expired"] = bool(facts and facts.get("expired"))
+            fact_values = facts.get("facts", {}) if isinstance(facts, Mapping) else {}
+            trace_base["facts_present_fields"] = {
+                "city": bool(fact_values.get("city")), "cinema": bool(fact_values.get("cinema")),
+                "movie": bool(fact_values.get("movie")), "date": bool(fact_values.get("quote_date") or fact_values.get("date")),
+                "showtime_start": bool(fact_values.get("showtime_start")), "show_id": bool(fact_values.get("show_id")),
+                "selected_seats_count": len(fact_values.get("selected_seats") or []) if isinstance(fact_values.get("selected_seats"), list) else 0,
+                "candidate_shows_count": len(fact_values.get("candidate_shows") or []) if isinstance(fact_values.get("candidate_shows"), list) else 0,
+            }
+        except Exception as error:
+            trace_base.update({"facts_lookup_attempted": True, "facts_lookup_error": type(error).__name__})
+        try:
+            LOGGER.info("canonical_quote_observability_v2 event=recognition_facts_trace data=%s", trace_base)
+        except Exception:
+            pass
         route = await self._route.resolve(recognition)
+        try:
+            LOGGER.info("canonical_quote_observability_v2 event=route_trace event_id=%s route=%s reason=%s has_city=%s has_cinema=%s has_movie=%s has_date=%s has_showtime=%s has_selected_seats=%s", trace_base["event_id"], route.route, _safe_reason(route.resolution_reason), bool(getattr(recognition, "city_text", None)), bool(getattr(recognition, "cinema_text", None)), bool(getattr(recognition, "movie", None)), bool(getattr(recognition, "show_date", None)), bool(getattr(recognition, "start_time", None)), bool(getattr(recognition, "selected_seats", None)))
+        except Exception:
+            pass
         if route.route == "UNRESOLVED":
             result = {"status": "ROUTE_UNRESOLVED", "reason": route.resolution_reason}
         else:
@@ -749,6 +812,10 @@ class CanonicalQuoteRuntime:
             for item in replies
             if isinstance(item, Mapping) and item.get("kind") and item.get("text")
         ] if isinstance(replies, list) else []
+        try:
+            LOGGER.info("canonical_quote_observability_v2 event=reply_trace rendered_reply_count=%s reply_kind=%s has_quote_record_id=%s is_quote_reply=%s", len(normalized_replies), rendered.get("kind"), bool(result.get("quote_record_id")), str(rendered.get("kind") or "").startswith("QUOTE"))
+        except Exception:
+            pass
         return {
             **result,
             # Keep the first/legacy text field while exposing the ordered
