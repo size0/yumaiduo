@@ -16,7 +16,12 @@ from uuid import uuid4
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from .chat import build_guidance_reply, build_recognition_reply
+from .chat import (
+    build_guidance_reply,
+    build_recognition_reply,
+    build_show_confirmation_reply,
+    is_show_confirmation_message,
+)
 from .chat_service import CustomerServiceChatService
 from .canonical_buyer_reply import CanonicalBuyerReplyRenderer
 from .canonical_conversation_agent import (
@@ -1621,7 +1626,7 @@ def create_app(
         recognition_context.add(normalized.conversation_id, recognition)
         quote: RealQuote | None = None
         quote_error: str | None = None
-        if authoritative_quote_service is not None:
+        if authoritative_quote_service is not None and not is_show_confirmation_message(message_text):
             try:
                 quote = await authoritative_quote_service.quote(recognition)
             except RecognitionError as error:
@@ -1631,16 +1636,24 @@ def create_app(
         remember_image_context = getattr(ai_chat_service, "remember_image_context", None)
         if callable(remember_image_context):
             remember_image_context(normalized.conversation_id, recognition, quote, quote_error)
-        return ChatMessageResponse(message=ChatAssistantMessage(
-            id=uuid4().hex,
-            conversation_id=normalized.conversation_id,
-            message_type="movie_recognition",
-            text=build_recognition_reply(
+        reply_text = (
+            build_show_confirmation_reply(
+                recognition,
+                templates=persistent_reply_templates.current(),
+            )
+            if is_show_confirmation_message(message_text)
+            else build_recognition_reply(
                 recognition,
                 quote=quote,
                 quote_error=quote_error,
                 templates=persistent_reply_templates.current(),
-            ),
+            )
+        )
+        return ChatMessageResponse(message=ChatAssistantMessage(
+            id=uuid4().hex,
+            conversation_id=normalized.conversation_id,
+            message_type="movie_recognition",
+            text=reply_text,
             recognition=recognition,
             quote=quote,
         ))

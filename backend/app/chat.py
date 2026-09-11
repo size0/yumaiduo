@@ -204,5 +204,28 @@ def build_recognition_reply(
     })
 
 
+def is_show_confirmation_message(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(text or "")).lower()
+    if not normalized or not any(token in normalized for token in ("对吧", "是不是", "对吗", "是吗")):
+        return False
+    return any(token in normalized for token in ("影院", "影城", "场", "电影", "影片"))
+
+
+def build_show_confirmation_reply(
+    recognition: MovieImageInfo,
+    *,
+    templates: ReplyTemplates | None = None,
+) -> str:
+    """Confirm a show-list screenshot without treating list prices as quotes."""
+    cinema = recognition.cinema_name or "截图中的影院"
+    date = recognition.date_text or (recognition.date.strftime("%m月%d日") if recognition.date else "截图日期")
+    showtime = recognition.showtime_start or "截图场次"
+    movie = recognition.movie_name or "截图影片"
+    return (
+        f"对，是{cinema}，{date}{showtime}《{movie}》这场。"
+        "截图里的列表价先不当最终报价，你确定场次后把选座和张数告诉我，我再按实时座位核价。"
+    )
+
+
 def build_guidance_reply(_: str, *, templates: ReplyTemplates | None = None) -> str:
     return (templates or ReplyTemplates()).guidance_template

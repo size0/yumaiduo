@@ -10,6 +10,8 @@ from app.canonical_conversation_agent import (
     CanonicalConversationAgent,
 )
 from app.canonical_event_handler import _show_confirmation_reply
+from app.chat import build_show_confirmation_reply, is_show_confirmation_message
+from app.models import MovieImageInfo
 
 
 IDENTITY = {
@@ -154,6 +156,24 @@ def test_show_list_confirmation_does_not_emit_quote_copy() -> None:
     assert "18:02" in reply
     assert "列表价先不当最终报价" in reply
     assert "直接拍" not in reply
+
+
+def test_chat_image_confirmation_uses_recognized_facts_and_skips_quote() -> None:
+    recognition = MovieImageInfo(
+        platform="猫眼",
+        cinema_name="UME影城（Onyx LED 4K巨幕新天地店）",
+        cinema_address="黄浦区兴业路123弄6号",
+        movie_name="奥德赛",
+        date_text="周六9月12日",
+        showtime_start="18:02",
+        hall_name="菁彩 OnyxLED 4K巨幕厅",
+    )
+    assert is_show_confirmation_message("是这个电影院18.02明天的奥德赛对吧")
+    reply = build_show_confirmation_reply(recognition)
+    assert reply == (
+        "对，是UME影城（Onyx LED 4K巨幕新天地店），周六9月12日18:02《奥德赛》这场。"
+        "截图里的列表价先不当最终报价，你确定场次后把选座和张数告诉我，我再按实时座位核价。"
+    )
 
 
 @pytest.mark.asyncio
