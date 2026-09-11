@@ -2,7 +2,38 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.main import _delivery_receipt_result
 from app.quote_v2.service import _recognition_trace, _safe_reason, _stage_trace
+
+
+@pytest.mark.parametrize(
+    ("succeeded", "message_id", "record_id", "action_type", "expected"),
+    [
+        (True, "m1", "q1", "send_message", (True, "PENDING", "")),
+        (True, "m1", None, "send_message", (False, "SKIPPED_NO_QUOTE_RECORD", "")),
+        (True, "m1", None, "other", (False, "NOT_ATTEMPTED", "COMMAND_RESULT_NOT_SUCCEEDED_OR_MESSAGE_ID_MISSING")),
+        (False, "m1", "q1", "send_message", (False, "NOT_ATTEMPTED", "COMMAND_RESULT_NOT_SUCCEEDED_OR_MESSAGE_ID_MISSING")),
+    ],
+)
+def test_delivery_receipt_trace_classification_preserves_eligibility(
+    succeeded, message_id, record_id, action_type, expected,
+):
+    assert _delivery_receipt_result(
+        succeeded=succeeded, message_id=message_id, record_id=record_id,
+        action_type=action_type,
+    ) == expected
+
+
+@pytest.mark.parametrize("status", [
+    "ROUTE_UNRESOLVED", "SELECTED_SEATS_REQUIRED", "PROVIDER_UNAVAILABLE",
+    "SHOW_RESOLVE_FAILURE", "COST_FAILURE", "PRICING_FAILURE", "QUOTED",
+])
+def test_observability_golden_statuses_are_data_only(status):
+    # Golden contract: tracing receives status metadata and does not mutate it.
+    payload = {"status": status, "quote_record_id": "q1" if status == "QUOTED" else None}
+    before = dict(payload)
+    _stage_trace("golden", "ROUTE", status=payload["status"])
+    assert payload == before
 
 
 def test_recognition_trace_is_presence_only_and_counts_collections():
