@@ -560,6 +560,7 @@ class CanonicalQuoteRuntime:
         pricing_rules_provider: Any,
         quote_service: QuoteV2Service,
         liangpiao_facts_adapter: Any,
+        fact_store: Any | None = None,
         manual_mark_detector: Any | None = None,
         pricing_engine: V4PricingEngine | None = None,
         reply_renderer: CanonicalBuyerReplyRenderer | None = None,
@@ -574,6 +575,7 @@ class CanonicalQuoteRuntime:
         self._rules_provider = pricing_rules_provider
         self._quotes = quote_service
         self._liangpiao_facts = liangpiao_facts_adapter
+        self._fact_store = fact_store
         self._manual_mark_detector = manual_mark_detector
         self._reply_renderer = reply_renderer
         self._engine = pricing_engine or V4PricingEngine()
