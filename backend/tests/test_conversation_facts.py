@@ -83,6 +83,19 @@ def test_store_merges_facts_and_isolates_purchase_identity(tmp_path: Path) -> No
     )
     assert saved["facts"] == FACTS
     assert facts.schema_version() == 2
+    assert facts.journal_mode() == "wal"
+    facts.save(
+        tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-a", chat_id="chat-a",
+        purchase_context_id="purchase-a", facts={"showtime_start": "13:10", "ticket_count": 2},
+        source="legacy_text_patch", event_id="text-1",
+    )
+    current = facts.get_current(tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-a", chat_id="chat-a", purchase_context_id="purchase-a")
+    assert current is not None
+    assert current["facts"]["cinema"] == FACTS["cinema"]
+    assert current["facts"]["showtime_start"] == "13:10"
+    assert current["facts"]["ticket_count"] == 2
+    assert facts.get_current(tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-other", chat_id="chat-a", purchase_context_id="purchase-a") is None
+    assert facts.get_current(tenant_id="tenant-a", shop_id="shop-other", buyer_id="buyer-a", chat_id="chat-a", purchase_context_id="purchase-a") is None
 
 
 def test_agent_state_is_durable_revisioned_and_identity_scoped(tmp_path: Path) -> None:
@@ -96,29 +109,6 @@ def test_agent_state_is_durable_revisioned_and_identity_scoped(tmp_path: Path) -
     updated = facts.save_agent_state(**identity, expected_revision=1, state={"user_goal": "SET_TICKET_COUNT", "conversation_phase": "COLLECT_SEAT_OR_COUNT"})
     assert updated["revision"] == 2
     assert facts.load_agent_state(**{**identity, "buyer_id": "buyer-b"}) == {}
-    assert facts.journal_mode() == "wal"
-
-    facts.save(
-        tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-a", chat_id="chat-a",
-        purchase_context_id="purchase-a", facts={"showtime_start": "13:10", "ticket_count": 2},
-        source="legacy_text_patch", event_id="text-1",
-    )
-    current = facts.get_current(
-        tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-a", chat_id="chat-a",
-        purchase_context_id="purchase-a",
-    )
-    assert current is not None
-    assert current["facts"]["cinema"] == FACTS["cinema"]
-    assert current["facts"]["showtime_start"] == "13:10"
-    assert current["facts"]["ticket_count"] == 2
-    assert facts.get_current(
-        tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-other", chat_id="chat-a",
-        purchase_context_id="purchase-a",
-    ) is None
-    assert facts.get_current(
-        tenant_id="tenant-a", shop_id="shop-other", buyer_id="buyer-a", chat_id="chat-a",
-        purchase_context_id="purchase-a",
-    ) is None
 
 
 def test_expired_facts_are_not_loaded(tmp_path: Path) -> None:

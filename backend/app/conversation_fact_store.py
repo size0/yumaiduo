@@ -292,7 +292,9 @@ class ConversationFactStore:
         keys = tuple(str(identity.get(key) or "").strip() for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id"))
         if any(not value for value in keys):
             raise ValueError("agent_state_identity_invalid")
-        now = _utc(); ttl = int(ttl_seconds or self._ttl_seconds); expires = now + timedelta(seconds=ttl)
+        now = _utc()
+        ttl = int(ttl_seconds or self._ttl_seconds)
+        expires = now + timedelta(seconds=ttl)
         with self._lock, self._connect() as connection:
             old = connection.execute("SELECT revision FROM agent_states WHERE tenant_id=? AND shop_id=? AND buyer_id=? AND chat_id=? AND purchase_context_id=?", keys).fetchone()
             revision = int(old[0]) if old else 0
