@@ -1635,19 +1635,36 @@ def create_app(
         remember_image_context = getattr(ai_chat_service, "remember_image_context", None)
         if callable(remember_image_context):
             remember_image_context(normalized.conversation_id, recognition, quote, quote_error)
-        reply_text = (
-            build_show_confirmation_reply(
+        if is_show_confirmation_message(message_text):
+            reply_text = build_show_confirmation_reply(
                 recognition,
                 templates=persistent_reply_templates.current(),
             )
-            if is_show_confirmation_message(message_text)
-            else build_recognition_reply(
+        elif (
+            message_text.strip()
+            and ai_chat_service is not None
+            and bool(persistent_settings.current().chat_api_key)
+        ):
+            try:
+                reply_text = await ai_chat_service.reply(
+                    message_text,
+                    normalized.conversation_id,
+                )
+            except RecognitionError as error:
+                diagnostics.add("chat_image_followup_fallback", code=error.code, message=error.message)
+                reply_text = build_recognition_reply(
+                    recognition,
+                    quote=quote,
+                    quote_error=quote_error,
+                    templates=persistent_reply_templates.current(),
+                )
+        else:
+            reply_text = build_recognition_reply(
                 recognition,
                 quote=quote,
                 quote_error=quote_error,
                 templates=persistent_reply_templates.current(),
             )
-        )
         return ChatMessageResponse(message=ChatAssistantMessage(
             id=uuid4().hex,
             conversation_id=normalized.conversation_id,
