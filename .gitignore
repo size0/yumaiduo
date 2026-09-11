@@ -4,49 +4,56 @@
 !.env.example
 **/config.json
 **/data/
-**/runtime/
 **/logs/
-**/*.log
+*.log
 .pi/
 .playwright-cli/
 
 # Dependencies and generated caches.
 **/node_modules/
 **/.venv/
+**/venv/
 **/__pycache__/
 **/.pytest_cache/
 *.py[cod]
-
-# Local inspection, release packages, and other generated artifacts.
-.tmp/
-.tmp-*/
-/.tmp-*
-/tmp-*
-/nul
-.v3-deploy-candidate/
-output/
-dist/
-!plugin-auto-reply-work/vendor/plugin-sdk-server/dist/
-!plugin-auto-reply-work/vendor/plugin-sdk-server/dist/**
-*.tar.gz
-*.tgz
-*.zip
-**/*.tmp
 **/.coverage
 **/htmlcov/
 **/.ruff_cache/
 **/.mypy_cache/
 **/.tox/
+coverage/
 
-# Historical local source trees intentionally excluded from the V3 baseline.
-/backend/
-/frontend/
-/ticket-system-v3-gateway-work/
-/wd-main/
+# Local inspection, release packages, and generated artifacts.
+.tmp/
+.tmp-*/
+/tmp-*
+/nul
+.v3-deploy-candidate/
+output/
+dist/
+*.tar.gz
+*.tgz
+*.zip
+**/*.tmp
+
+# Runtime and production data.
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/uploads/
+**/sessions/
+**/*.pid
+**/*.lock
+
+# Credentials and key material.
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+id_windsurf*
 
 # OS/editor files.
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-

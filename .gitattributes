@@ -6,3 +6,7 @@
 *.js text eol=lf
 *.py text eol=lf
 *.ps1 text eol=crlf
+
+# Preserve byte identity for the captured production source snapshots.
+/backend/app/** -text
+/plugin-runtime/wanda-seat-autoquote/** -text

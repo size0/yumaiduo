@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="wanda-ui-build" content="cockpit-4925798-r3">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>万达电影票 AI 客服</title>
+  <link rel="stylesheet" href="./ui/styles.css?v=cockpit-4925798-r3">
+</head>
+<body><svg class="icon-sprite" aria-hidden="true"><defs><symbol id="icon-home"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></symbol><symbol id="icon-store"><path d="M4 10h16v10H4zM3 10l2-6h14l2 6"/></symbol><symbol id="icon-price"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></symbol><symbol id="icon-history"><path d="M5 12a7 7 0 1 0 2-5M5 4v5h5M12 8v5l3 2"/></symbol><symbol id="icon-orders"><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></symbol><symbol id="icon-chat"><path d="M4 5h16v11H8l-4 4zM8 9h8M8 12h5"/></symbol><symbol id="icon-model"><path d="m12 3 2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></symbol><symbol id="icon-book"><path d="M5 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H5zM19 4h-6v14a2 2 0 0 1 2-2h4z"/></symbol><symbol id="icon-audit"><path d="M5 4h14v16H5zM8 8h8M8 12h5"/></symbol><symbol id="icon-task"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol><symbol id="icon-settings"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"/></symbol></defs></svg>
+<header class="plugin-page-header">
+  <div class="header-context">万达票务助手 <span>运营工作台</span></div>
+  <div class="plugin-page-status"><span></span><strong id="headerHealth">正在检查连接</strong><small>插件服务</small></div>
+</header>
+<!-- Legacy feature boundary retained without a first-level menu: data-workspace="chat" data-workspace="conversation" · 客服工作台 -->
+<aside class="site-navigation" id="siteNavigation">
+  <div class="site-brand"><span class="site-brand-dot"></span><div><strong>万达票务助手</strong><small>Wanda Plugin Cockpit</small></div></div>
+  <nav class="site-nav-list" role="tablist" aria-label="万达票务助手功能导航">
+    <button class="site-nav-button active" type="button" role="tab" aria-selected="true" data-workspace="overview"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-home"></use></svg></span><span>概览</span></button>
+    <div class="nav-section-title">业务</div>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="shops"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-store"></use></svg></span><span>店铺开关</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="pricing"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-price"></use></svg></span><span>运营报价</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="quote-records"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-history"></use></svg></span><span>报价记录</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="orders"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-orders"></use></svg></span><span>订单管理</span></button>
+    <div class="nav-section-title">配置 / AI</div>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="templates"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-chat"></use></svg></span><span>回复话术</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="model"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-model"></use></svg></span><span>模型接口</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="knowledge"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-book"></use></svg></span><span>知识库</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="agent-audit"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-audit"></use></svg></span><span>Agent审计</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="manual-tasks"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-task"></use></svg></span><span>人工任务</span></button>
+    <button class="site-nav-button" type="button" role="tab" aria-selected="false" data-workspace="settings"><span class="site-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#icon-settings"></use></svg></span><span>设置</span></button>
+  </nav>
+</aside>
+<div class="page" id="mainPage">
+  <section class="workspace-page overview-page" id="overviewPage" data-workspace-page="overview" aria-label="万达票务助手概览">
+    <div class="page-heading"><div><span class="eyebrow">OVERVIEW</span><h2>万达票务助手概览</h2><p>查看当前插件运行状态、报价服务与最近处理记录。</p></div><button class="outline-button" id="refreshOverview" type="button">↻ 刷新</button></div>
+    <div class="overview-kpis">
+      <article class="overview-kpi"><span class="kpi-icon blue">⌁</span><div><small>今日识别报价</small><strong id="overviewQuoteCount">—</strong><em id="overviewQuoteMeta">正在读取</em></div></article>
+      <article class="overview-kpi"><span class="kpi-icon green">✦</span><div><small>Agent 状态</small><strong id="overviewAgentStatus">—</strong><em id="overviewAgentMeta">正在读取</em></div></article>
+      <article class="overview-kpi"><span class="kpi-icon violet">店</span><div><small>已开启店铺</small><strong id="overviewShopCount">—</strong><em id="overviewShopMeta">正在读取</em></div></article>
+      <article class="overview-kpi"><span class="kpi-icon orange">!</span><div><small>最近异常</small><strong id="overviewExceptionCount">—</strong><em id="overviewExceptionMeta">正在读取</em></div></article>
+    </div>
+    <div class="overview-grid">
+      <section class="cockpit-card config-card"><header><div><h3>当前生效配置</h3><p>来自当前作用域的真实配置，不展示密钥。</p></div><span class="status-badge success" id="overviewConfigStatus">检查中</span></header><div class="config-list" id="overviewConfigList"><div class="empty-state">正在读取配置…</div></div></section>
+      <section class="cockpit-card quick-card"><header><div><h3>快捷操作</h3><p>前往已有功能页面。</p></div></header><div class="quick-actions"><button type="button" data-quick-workspace="chat">识别报价<span>打开现有图片识别与报价入口</span></button><button type="button" data-quick-workspace="shops">管理店铺开关<span>查看自动化与 Canonical 状态</span></button><button type="button" data-quick-workspace="pricing">编辑报价规则<span>配置现有后台报价规则</span></button><button type="button" data-quick-workspace="quote-records">查看报价记录<span>浏览真实核价结果</span></button><button type="button" data-quick-workspace="model">模型接口<span>管理作用域模型配置</span></button></div></section>
+    </div>
+    <section class="cockpit-card runs-card"><header><div><h3>最近运行记录</h3><p>只读展示 Agent 审计与人工任务摘要。</p></div><button class="text-button" type="button" data-quick-workspace="agent-audit">查看全部</button></header><div class="overview-runs" id="overviewRuns"><div class="empty-state">正在读取运行记录…</div></div></section>
+  </section>
+  <section class="workspace-page" id="workspaceChat" data-workspace-page="chat">
+  <main class="chat-app" aria-label="万达电影票 AI 客服对话">
+    <header class="chat-header">
+      <div class="agent">
+        <div class="avatar">AI</div>
+        <div class="agent-copy"><strong>万达电影票 AI 客服</strong><div class="presence"><i></i>在线 · 图片识别已启用</div></div>
+      </div>
+      <div class="header-actions"><span class="mode">混合识图模式</span><button class="model-badge" id="openSettings" type="button" title="打开模型设置"><span>当前模型</span><b id="currentModel">qwen3.5-flash-2026-02-23</b></button><button class="icon-btn" id="clearChat" type="button" title="清空对话" aria-label="清空对话">↻</button></div>
+    </header>
+
+    <section class="chat-window" id="chatWindow" aria-live="polite">
+      <div class="date-divider">今天</div>
+      <article class="message assistant" data-role="assistant">
+        <div class="message-avatar">AI</div>
+        <div class="message-stack">
+          <div class="sender">AI 客服</div>
+          <div class="bubble">你好，我可以帮你识别电影票或选座截图。请直接发送图片，我会提取影院、影片、场次、影厅和可见座位信息。</div>
+          <div class="message-time">刚刚</div>
+        </div>
+      </article>
+      <div class="drag-overlay"><div>松开即可添加图片<span>拖拽图片到对话区 · 支持 JPG / PNG / WebP</span></div></div>
+    </section>
+
+    <footer class="composer-wrap">
+      <div class="pending" id="pending">
+        <img id="pendingImage" alt="待发送图片">
+        <div class="pending-copy"><strong id="pendingName"></strong><span id="pendingSize"></span></div>
+        <button class="remove-file" id="removeFile" type="button" aria-label="移除图片">×</button>
+      </div>
+      <div class="composer-row">
+        <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        <button class="attach" id="attach" type="button" aria-label="上传图片" title="上传图片">＋</button>
+        <textarea id="composer" rows="1" maxlength="2000" placeholder="输入消息，或拖拽图片到对话区…" aria-label="消息内容"></textarea>
+        <button class="send" id="send" type="button">发送</button>
+      </div>
+      <div class="composer-hint">Enter 发送 · Shift + Enter 换行 · 识别金额仅为截图原文，不代表最终报价</div>
+    </footer>
+  </main>
+  </section>
+  <section class="diagnostics-panel workspace-page" id="diagnosticsPanel" data-workspace-page="logs" aria-label="调试日志" hidden>
+    <div class="diagnostics-head">
+      <div class="diagnostics-title"><strong>调试日志与完整返回参数</strong><span>模型及万达官方只读接口返回仅保存在当前进程内存，重启后自动清空</span></div>
+      <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshDiagnostics" type="button">刷新</button><button class="diagnostics-button" id="clearDiagnostics" type="button">清空</button></div>
+    </div>
+    <div class="diagnostics-entries" id="diagnosticsEntries"><div class="diagnostic-empty">发送图片后，这里会格式化显示模型响应、万达官方场次/座位响应和校验详情。</div></div>
+  </section>
+  <section class="diagnostics-panel workspace-page" id="agentAuditPanel" data-workspace-page="agent-audit" aria-label="Canonical Agent审计" hidden>
+    <div class="diagnostics-head">
+      <div class="diagnostics-title"><strong>Canonical Agent 与 RulesFirst 审计</strong><span>只读展示当前租户的 Agent 运行、上下文摘要、工具调用、回复与发送门禁结果；不展示密钥或原始受保护载荷。</span></div>
+      <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshAgentAudit" type="button">刷新</button></div>
+    </div>
+    <div class="audit-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="agentAuditSearch" type="search" autocomplete="off" placeholder="搜索买家、聊天ID、事件ID、工具或失败原因"></label><span>页面不会自动刷新</span></div>
+    <div class="diagnostics-entries" id="agentAuditEntries"><div class="diagnostic-empty">暂无 Canonical Agent 运行记录。</div></div>
+  </section>
+  <section class="diagnostics-panel workspace-page" id="manualTasksPanel" data-workspace-page="manual-tasks" aria-label="人工任务" hidden>
+    <div class="diagnostics-head">
+      <div class="diagnostics-title"><strong>人工处理任务</strong><span>展示当前 RulesFirst 真实人工任务。领取和完成只调用受控任务接口，不会自动改订单、出票、退款或发送消息。</span></div>
+      <div class="diagnostics-actions"><button class="diagnostics-button" id="refreshManualTasks" type="button">刷新</button></div>
+    </div>
+    <div class="audit-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="manualTaskSearch" type="search" autocomplete="off" placeholder="搜索买家、聊天ID、任务编号、状态或原因"></label><span>页面不会自动刷新</span></div>
+    <div class="diagnostics-entries" id="manualTaskEntries"><div class="diagnostic-empty">暂无人工任务。</div></div>
+  </section>
+</div>
+<div class="settings-backdrop" id="settingsBackdrop"></div>
+<aside class="settings-drawer workspace-page" id="settingsDrawer" aria-label="系统设置中心" aria-hidden="true">
+  <div class="settings-head">
+    <div><h2 id="workspaceSettingsTitle">模型与接口</h2><p id="workspaceSettingsDescription">独立管理识图与AI回复服务，保存后立即应用于下一次请求。</p></div>
+    <button class="icon-btn" id="closeSettings" type="button" aria-label="关闭设置">×</button>
+  </div>
+  <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+    <button class="settings-tab active" id="modelSettingsTab" type="button" role="tab" aria-selected="true" aria-controls="modelSettingsPanel">模型与接口</button>
+    <button class="settings-tab" id="operationsSettingsTab" type="button" role="tab" aria-selected="false" aria-controls="operationsSettingsPanel">运营与报价</button>
+  </nav>
+  <div class="settings-body">
+    <section class="settings-panel" id="modelSettingsPanel" role="tabpanel" aria-labelledby="modelSettingsTab">
+    <section class="model-connection-card"><header><div><span class="eyebrow">ACTIVE MODEL CONFIG</span><h3>当前模型连接</h3></div><span class="status-badge" id="modelConnectionStatus">检查中</span></header><dl><div><dt>Provider</dt><dd id="modelProviderValue">—</dd></div><div><dt>Base URL</dt><dd id="modelBaseUrlValue">—</dd></div><div><dt>Model</dt><dd id="modelNameValue">—</dd></div><div><dt>API Key</dt><dd id="modelKeyValue">未配置</dd></div><div><dt>Config ID</dt><dd id="modelConfigIdValue">—</dd></div><div><dt>Revision</dt><dd id="modelRevisionValue">—</dd></div></dl></section>
+    <div class="model-editor-card"><h3>模型配置</h3>
+    <div class="setting-group">
+      <label for="modelConfigScope">模型配置作用域</label>
+      <select id="modelConfigScope"><option value="global">系统默认（全局）</option><option value="tenant">当前租户</option></select>
+      <div class="setting-help">Canonical Agent 按店铺 → 租户 → 全局默认解析；密钥仍由同一模型配置中心加密保存。</div>
+    </div>
+    <div class="setting-group">
+      <label for="apiKey">识图接口 API Key <span class="key-state" id="keyState">未配置</span></label>
+      <div class="key-line"><input id="apiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></div>
+      <div class="setting-help">密钥加密保存。留空可保留现有配置。</div>
+      <label class="clear-key-row"><input class="compact-checkbox" id="clearApiKey" type="checkbox"> 清除已经保存的密钥</label>
+    </div>
+    <div class="setting-group">
+      <label for="baseUrl">识图接口地址 <button class="text-button" id="useAirelvo" type="button">使用 Airelvo 中转站</button></label>
+      <input id="baseUrl" type="url" value="https://dashscope.aliyuncs.com/compatible-mode/v1">
+    </div>
+    <div class="setting-group">
+      <label for="modelSelect">视觉模型</label>
+      <div class="key-line"><input id="modelSelect" list="visionModelOptions" value="qwen3.5-flash-2026-02-23" autocomplete="off"><button class="inline-setting-button" id="fetchModels" type="button">获取模型</button></div>
+      <datalist id="visionModelOptions">
+        <option value="qwen3.5-flash-2026-02-23"></option>
+        <option value="qwen3-vl-flash"></option>
+        <option value="qwen3-vl-plus"></option>
+        <option value="qwen-vl-max-latest"></option>
+      </datalist>
+      <div class="setting-help">优先直接输出结构化结果；合法且置信度足够时立即返回，不再调用 GPT。</div><div class="model-fetch-message" id="modelFetchMessage"></div>
+    </div>
+    <div class="setting-group">
+      <label for="chatApiKey">AI 回复接口 API Key <span class="key-state" id="chatKeyState">未配置</span></label>
+      <div class="key-line"><input id="chatApiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></div>
+      <div class="setting-help">与识图接口密钥独立保存。留空可保留现有配置。</div>
+      <label class="clear-key-row"><input class="compact-checkbox" id="clearChatApiKey" type="checkbox"> 清除已经保存的 AI 回复密钥</label>
+    </div>
+    <div class="setting-group">
+      <label for="chatBaseUrl">AI 回复接口地址 <button class="text-button" id="useChatAirelvo" type="button">使用 Airelvo 中转站</button></label>
+      <input id="chatBaseUrl" type="url" value="https://dashscope.aliyuncs.com/compatible-mode/v1">
+    </div>
+    <div class="setting-group">
+      <label for="chatModelSelect">AI 判断与回复模型</label>
+      <div class="key-line"><input id="chatModelSelect" list="chatModelOptions" value="qwen3.5-flash-2026-02-23" autocomplete="off"><button class="inline-setting-button" id="fetchChatModels" type="button">获取模型</button></div>
+      <datalist id="chatModelOptions"></datalist>
+      <div class="setting-help">仅在千问格式异常、置信度过低或缺少关键字段时兜底；纯文字消息始终使用此模型。</div><div class="model-fetch-message" id="chatModelFetchMessage"></div>
+    </div>
+    <div class="setting-group">
+      <label>万达官方直连 <span class="key-state key-state-enabled">已启用</span></label>
+      <div class="setting-help">本机后端读取票务系统中已登录的固定万达账号，直接查询官方场次区域价和实时座位；不需要报价 Key 或租户 ID，也不会把账号凭据发送给模型。</div>
+    </div>
+    <div class="setting-group" id="qwenThinkingGroup">
+      <div class="toggle-row">
+        <div class="toggle-copy"><strong>思考模式</strong><span id="thinkingHint">开启后可能提高复杂图片理解，但响应会更慢。</span></div>
+        <label class="switch"><input id="thinkingToggle" type="checkbox"><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="setting-group" id="gptReasoningGroup" hidden>
+      <label for="reasoningEffort">GPT 推理强度 <span>默认最轻</span></label>
+      <select id="reasoningEffort">
+        <option value="none">none — 关闭 / 最轻</option>
+        <option value="minimal">minimal — 最低</option>
+        <option value="low">low — 轻量</option>
+        <option value="medium">medium — 中等</option>
+        <option value="high">high — 高</option>
+      </select>
+      <div class="setting-help">GPT-5.1/5.5 默认使用 none；旧 GPT-5 不支持 none 时自动降级到 minimal。</div>
+    </div>
+    <div class="setting-group">
+      <div class="setting-title"><span>文字客服提示词</span><span>文本消息自动回复</span></div>
+      <textarea class="chat-prompt" id="chatPrompt" maxlength="20000" spellcheck="false"></textarea>
+      <div class="setting-help">买家发送纯文字时使用。未配置 Key 时仍返回安全的上传截图引导。</div>
+    </div>
+    <div class="setting-group">
+      <div class="setting-title"><span>识图与兜底判断提示词</span><span id="promptLength">0 / 20000</span></div>
+      <div class="prompt-actions"><button class="text-button" id="resetPrompt" type="button">恢复本次加载内容</button></div>
+      <textarea id="visionPrompt" maxlength="20000" spellcheck="false"></textarea>
+      <div class="setting-help">千问快速直出与 GPT 兜底共用。系统仍会附加不可覆盖的 JSON、安全和禁止猜价约束。</div>
+    </div>
+    </div>
+    </section>
+
+    <section class="settings-panel" id="operationsSettingsPanel" role="tabpanel" aria-labelledby="operationsSettingsTab" hidden>
+      <div class="operation-section" data-operation-view="shops">
+        <div class="shop-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="shopSearch" type="search" autocomplete="off" placeholder="搜索店铺名称或 ID"></label><select id="shopStatusFilter"><option value="">全部状态</option><option value="enabled">已开启</option><option value="disabled">已关闭</option></select><button class="outline-button" id="resetShopFilters" type="button">重置</button><button class="outline-button" id="refreshShops" type="button">↻ 刷新</button></div>
+        <div class="shop-list-header"><div><h3>店铺列表</h3><p>管理各店铺的自动化服务与报价开关。</p></div><span id="shopCount">—</span></div>
+        <div class="shop-column-head"><span>店铺信息</span><span>自动化服务</span><span>Canonical 报价</span></div>
+        <div class="shop-list" id="shopList"><div class="diagnostic-empty">正在读取店铺…</div></div>
+        <div class="list-footer"><span id="shopFooterCount">—</span><span>已展示全部筛选结果</span></div>
+      </div>
+      <div class="records-console" data-operation-view="quote-records">
+        <header class="records-head"><div><h3>报价记录</h3><p>展示当前租户的万达官方核价结果；失败原因仅供后台排查，不发送给买家。</p></div><button class="text-button" id="refreshQuoteRecords" type="button">刷新记录</button></header>
+        <div class="record-toolbar"><label class="order-search"><span aria-hidden="true">⌕</span><input id="quoteRecordSearch" type="search" autocomplete="off" placeholder="搜索影院、影片、买家、会话或报价单号"></label><select id="quoteRecordStatus"><option value="">全部状态</option><option value="success">成功</option><option value="pending">待完成</option><option value="superseded">已替代</option><option value="failed">失败</option></select><input id="quoteRecordDate" type="date" aria-label="报价日期"><button class="outline-button" id="resetQuoteFilters" type="button">重置</button></div>
+        <div class="record-metrics">
+          <article class="record-metric record-metric-total"><span class="record-metric-icon">▤</span><div><small>总报价</small><strong id="quoteRecordTotal">—</strong></div></article>
+          <article class="record-metric record-metric-success"><span class="record-metric-icon">✓</span><div><small>成功</small><strong id="quoteRecordSuccess">—</strong></div></article>
+          <article class="record-metric record-metric-failed"><span class="record-metric-icon">×</span><div><small>失败</small><strong id="quoteRecordFailed">—</strong></div></article>
+          <div class="record-summary" id="quoteRecordSummary">正在读取报价记录…</div>
+        </div>
+        <div class="split-record-workspace"><div class="record-list" id="quoteRecordList"><div class="diagnostic-empty">正在读取报价记录…</div></div><aside class="detail-panel" id="quoteRecordDetail"><div class="detail-panel-empty">选择一条报价记录查看详情</div></aside></div>
+      </div>
+      <div class="records-console order-console" data-operation-view="orders">
+        <header class="records-head"><div><h3>订单管理</h3><p>统一展示良票订单和鱼麦多万达手动出票订单；价格与状态只读取对应平台的权威结果。</p></div><button class="text-button" id="refreshOrders" type="button">刷新订单</button></header>
+        <div class="order-toolbar">
+          <label class="order-search"><span aria-hidden="true">⌕</span><input id="orderSearch" type="search" autocomplete="off" placeholder="搜索影院、影片、订单号或买家"></label>
+          <div class="order-filters" role="group" aria-label="订单状态筛选"><button class="active" type="button" data-order-filter="all">全部</button><button type="button" data-order-filter="unpaid">待付款</button><button type="button" data-order-filter="paid">已付款</button><button type="button" data-order-filter="shipped">已发货</button><button type="button" data-order-filter="closed">已关闭</button></div>
+        </div>
+        <div class="record-summary" id="orderSummary">正在读取订单…</div>
+        <div class="split-record-workspace order-split-workspace"><div class="record-list order-list" id="orderList"><div class="diagnostic-empty">正在读取订单…</div></div><aside class="detail-panel" id="orderRecordDetail"><div class="detail-panel-empty">选择一笔订单查看详情</div></aside></div>
+      </div>
+      <div class="template-console" data-operation-view="templates">
+        <header class="template-console-head"><div><h3>自动回复文案</h3><p>配置识图、报价与改价过程中的自动回复；AI 不参与生成价格。</p></div><button class="template-save" id="saveTemplates" type="button">▣&nbsp; 保存文案</button></header>
+        <section class="order-reminder-settings">
+          <header><div><strong>观影提醒</strong><p>提醒设置归入回复话术；订单发货后，根据已绑定的权威影片、影院及场次创建幂等提醒任务。</p></div><label class="switch-line"><span id="reminderEnabledText">已关闭</span><span class="switch"><input id="reminderEnabled" type="checkbox"><span class="slider"></span></span></label></header>
+          <div class="reminder-grid"><label><span>开场前文字提醒（分钟）</span><input id="preShowMinutes" type="number" min="1" max="180"><small>通过会话向买家发送提醒。</small></label><label><span>散场后提醒收货（分钟）</span><input id="postShowMinutes" type="number" min="0" max="180"><small>调用鱼麦多官方提醒收货接口。</small></label></div>
+          <label class="reminder-template"><span>开场前文字提醒文案</span><textarea id="preShowTemplate" maxlength="1000"></textarea><small>可用变量：{movie} {showtime} {cinema} {date} {hall} {seats}</small></label>
+          <footer><span id="reminderMeta">正在读取提醒设置…</span><button class="text-button" id="saveReminders" type="button">保存观影提醒</button></footer>
+          <div class="reminder-task-summary" id="reminderTaskSummary">正在读取提醒任务…</div>
+        </section>
+        <div class="template-variable-bar"><div><b>ⓘ</b><span><strong>变量说明：</strong>影片、城市、影院、日期、场次、影厅、座位及安全报价变量为全局事实变量，可用于任意文案；当前没有权威值时整行自动隐藏。失败原因、订单金额等仍只限对应流程使用。</span></div><div class="template-variable-chips" id="templateVariableChips">
+          <button type="button" data-template-variable="{影片}">{影片}</button><button type="button" data-template-variable="{城市}">{城市}</button><button type="button" data-template-variable="{影院}">{影院}</button><button type="button" data-template-variable="{日期}">{日期}</button><button type="button" data-template-variable="{场次}">{场次}</button><button type="button" data-template-variable="{影厅}">{影厅}</button><button type="button" data-template-variable="{座位}">{座位}</button><button type="button" data-template-variable="{报价内容}">{报价内容}</button><button type="button" data-template-variable="{报价名称}">{报价名称}</button><button type="button" data-template-variable="{逐座报价}">{逐座报价}</button><button type="button" data-template-variable="{报价合计}">{报价合计}</button><button type="button" data-template-variable="{报价单价}">{报价单价}</button><button type="button" data-template-variable="{报价金额}">{报价金额}</button><button type="button" data-template-variable="{粉丝自购价}">{粉丝自购价}</button><button type="button" data-template-variable="{失败原因}">{失败原因}</button><button type="button" data-template-variable="{订单金额}">{订单金额}</button>
+        </div></div>
+        <div class="template-save-message" id="templateSaveMessage"></div>
+        <div class="template-workspace">
+          <aside class="template-groups"><strong>完整业务流程</strong><button class="active" type="button" data-template-filter="recognition-quote-flow"><span>识</span><div><b>识别报价文案</b><small>识图、补充信息、报价成功与失败</small></div><i>10</i></button><button type="button" data-template-filter="order-payment-flow"><span>拍</span><div><b>拍下付款文案</b><small>确认张数、下单、改价与付款核验</small></div><i>10</i></button><button type="button" data-template-filter="fulfillment-flow"><span>票</span><div><b>出票结果文案</b><small>支付成功待出票与出票完成</small></div><i>2</i></button><button type="button" data-template-filter="other-flow"><span>其</span><div><b>其他文案</b><small>关键词及其他确定性回复</small></div><i id="keywordRuleCount">0</i></button></aside>
+          <main class="template-editor">
+            <div class="template-section" data-template-section="recognition-quote-flow"><article class="template-card"><div><b>识别失败文案－其它</b><small>图片不可读、识别服务异常等非业务失败时使用。</small></div><label><span>{失败原因}</span><textarea id="recognitionFailureOtherTemplate"></textarea></label></article><article class="template-card"><div><b>识图主体</b><small>展示影院、影片、场次和座位，再插入报价结果。</small></div><label><span>{影片} {城市} {影院} {日期} {场次} {影厅} {座位} {报价内容} {报价单价}</span><textarea id="recognitionTemplate"></textarea></label></article><article class="template-card"><div><b>上传引导</b><small>买家信息不足时，引导发送当前场次与选座截图。</small></div><label><span>无变量</span><textarea id="guidanceTemplate"></textarea></label></article></div>
+            <div class="template-section" data-template-section="recognition-quote-flow" hidden><article class="template-card"><div><b>精确座位报价</b><small>已取得明确座位和完整订单总价时使用。</small></div><label><span>{影片} {城市} {影院} {日期} {场次} {影厅} {座位} {报价名称} {逐座报价} {报价合计} {报价说明} {规则版本}</span><textarea id="exactQuoteTemplate"></textarea></label></article><article class="template-card"><div><b>区域单价报价</b><small>只有W+区域单价、仍需确认张数时使用。</small></div><label><span>{影片} {城市} {影院} {日期} {场次} {影厅} {座位} {报价名称} {报价单价} {张数提示} {报价说明} {规则版本}</span><textarea id="areaQuoteTemplate"></textarea></label></article><article class="template-card"><div><b>无法取得报价</b><small>官方影院、场次或座位无法确认时使用。</small></div><label><span>{失败原因}</span><textarea id="quoteUnavailableTemplate"></textarea></label></article><article class="template-card"><div><b>未执行报价</b><small>只有识图结果、尚未进行官方核价时使用。</small></div><label><span>无变量</span><textarea id="noQuoteTemplate"></textarea></label></article><article class="template-card"><div><b>报价过期文案</b><small>买家在15分钟有效期后才确认旧报价时发送，不再重复询问张数。</small></div><label><span>无变量</span><textarea id="quoteExpiredTemplate"></textarea></label></article></div>
+            <div class="template-section" data-template-section="recognition-quote-flow" hidden><article class="template-card"><div><b>影院匹配失败补问</b><small>截图识别成功，但无法唯一匹配万达官方门店时发送。</small></div><label><span>{影院}</span><textarea id="cinemaMatchFailureTemplate"></textarea></label></article><article class="template-card"><div><b>非万达影院文案</b><small>明确识别到不支持的影院品牌时发送。</small></div><label><span>无变量</span><textarea id="unsupportedCinemaTemplate"></textarea></label></article><article class="template-card"><div><b>截图缺项补问</b><small>缺少影院、影片、日期或场次等必要信息时发送。</small></div><label><span>{缺失信息}</span><textarea id="missingFieldsTemplate"></textarea></label></article><article class="template-card"><div><b>场次信息变化</b><small>历史场次与最新截图或官方场次不一致时发送。</small></div><label><span>无变量</span><textarea id="showtimeChangedTemplate"></textarea></label></article></div>
+            <div class="template-section" data-template-section="other-flow" hidden><div class="keyword-console"><div class="keyword-head"><div><b>自定义关键词回复</b><small>权威订单状态和报价确认优先；命中后绕过GPT。最多30条规则，不得填写价格、库存、票码或交易状态。</small></div><button class="inline-setting-button" id="addKeywordRule" type="button">＋ 添加规则</button></div><div class="keyword-rule-list" id="keywordRuleList"></div></div><article class="template-card"><div><b>通用人工核验</b><small>交易资料无法安全自动处理时使用。</small></div><label><span>无变量</span><textarea id="manualReviewTemplate"></textarea></label></article><article class="template-card"><div><b>识图关闭结构化引导</b><small>AI识图关闭时引导买家按字段提供资料。</small></div><label><span>无变量</span><textarea id="aiDisabledStructuredIntakeTemplate"></textarea></label></article></div>
+            <div class="template-section" data-template-section="order-payment-flow" hidden><article class="template-card"><div><b>拍下后无有效报价</b><small>订单已创建，但没有可确认的有效报价；普通订单和待付款订单截图统一使用这里。</small></div><label><span>无变量</span><textarea id="orderPendingWithoutQuoteTemplate"></textarea></label></article></div>
+            <div class="template-section" data-template-section="fulfillment-flow" hidden><article class="template-card"><div><b>支付成功待出票文案</b><small>仅在平台权威订单状态确认支付成功后使用。</small></div><label><span>无变量</span><textarea id="paymentSuccessPendingTicketTemplate"></textarea></label></article><article class="template-card"><div><b>已发货订单文案</b><small>平台权威订单状态为已发货或已完成时使用，禁止再提示待付款。</small></div><label><span>无变量</span><textarea id="orderShippedTemplate"></textarea></label></article><article class="template-card"><div><b>观影提醒</b><small>订单发货且权威观影信息完整后，由幂等提醒任务发送。</small></div><label><span>{movie} {showtime} {cinema} {date} {hall} {seats}</span><textarea id="movieReminderTemplate"></textarea></label></article></div><div class="template-section" data-template-section="order-payment-flow" hidden><article class="template-card"><div><b>改价完成文案</b><small>平台回读订单并确认金额一致后才发送。</small></div><label><span>{订单金额}</span><textarea id="priceChangeConfirmationTemplate"></textarea></label></article><article class="template-card"><div><b>改价失败/未知文案</b><small>改价失败或结果尚未完成官方核验时使用。</small></div><label><span>{失败原因}</span><textarea id="priceChangeFailureTemplate"></textarea></label></article><article class="template-card"><div><b>报价确认补问</b><small>买家没有按严格确认格式回复时使用。</small></div><label><span>无变量</span><textarea id="quoteConfirmationClarifyTemplate"></textarea></label></article><article class="template-card"><div><b>报价缺少张数补问</b><small>已有有效单价，但买家尚未提供购票张数时使用。</small></div><label><span>无变量</span><textarea id="quoteTicketCountRequestTemplate"></textarea></label></article><article class="template-card"><div><b>张数确认完整回复</b><small>买家确认张数后的完整文字结构；所有文字均可修改。</small></div><label><span>{张数} {报价单价} {报价合计} {座位说明} {下单引导}</span><textarea id="quoteQuantityOrderGuidanceTemplate"></textarea></label></article><article class="template-card"><div><b>图片标记座位说明</b><small>买家确认按图片标记位置出票时使用。</small></div><label><span>无变量</span><textarea id="quoteQuantityMarkedSeatTemplate"></textarea></label></article><article class="template-card"><div><b>实时可售安排说明</b><small>买家接受根据实时可售情况安排座位时使用。</small></div><label><span>无变量</span><textarea id="quoteQuantityFlexibleSeatTemplate"></textarea></label></article><article class="template-card"><div><b>通用座位说明</b><small>其他明确张数回复使用。</small></div><label><span>无变量</span><textarea id="quoteQuantityDefaultSeatTemplate"></textarea></label></article><article class="template-card"><div><b>提前付款人工核验</b><small>免密或提前付款、金额未核验时暂停出票。</small></div><label><span>无变量</span><textarea id="paymentManualReviewTemplate"></textarea></label></article><article class="template-card"><div><b>订单早于报价确认</b><small>订单创建时间早于报价时要求买家重新明确确认。</small></div><label><span>{报价金额}</span><textarea id="orderBeforeQuoteConfirmationTemplate"></textarea></label></article><article class="template-card"><div><b>付款金额不符且已关闭</b><small>仅在平台确认订单关闭后使用。</small></div><label><span>无变量</span><textarea id="paidMismatchClosedTemplate"></textarea></label></article><article class="template-card"><div><b>付款金额不符退款引导</b><small>订单尚未确认关闭时使用。</small></div><label><span>无变量</span><textarea id="paidMismatchRefundTemplate"></textarea></label></article></div>
+          </main>
+        </div>
+        <footer class="template-console-foot"><span id="templateRevision">正在读取话术版本…</span></footer>
+      </div>
+      <div class="operations-hero" data-operation-view="settings">
+        <strong>通用配置</strong><p>保留现有会话策略与人工接管配置，修改后由后端按原有语义生效。</p>
+      </div>
+      <div class="operation-section" data-operation-view="settings">
+        <div class="money-grid"><div class="setting-group"><label class="switch-line"><span>AI 自动回复</span><span class="switch"><input id="aiReplyEnabled" type="checkbox"><span class="slider"></span></span></label><div class="setting-help">关闭后停止大模型自由文本回复；识图、实时核价、固定流程话术、订单绑定与改价继续运行。</div></div><div class="setting-group"><label for="memoryHours">记忆时长（小时）</label><input id="memoryHours" type="number" min="1" max="24"><div class="setting-help">同一买家会话在此时间内延续上下文，范围1–24小时。</div></div><div class="setting-group"><label for="memoryDepth">记忆深度（条消息）</label><input id="memoryDepth" type="number" min="5" max="50"><div class="setting-help">只保留最近消息，范围5–50条；图片原文件不会进入记忆。</div></div><div class="setting-group"><label for="humanTakeoverDelay">人工回复后等待接管（秒）</label><input id="humanTakeoverDelay" type="number" min="5" max="300"><div class="setting-help">识别为人工发送的消息后，AI等待该时长再处理买家新消息。</div></div><div class="setting-group"><label class="switch-line"><span>业务区间开关</span><span class="switch"><input id="stageGateEnabled" type="checkbox"><span class="slider"></span></span></label><div class="setting-help">开启后仅在选定权威订单阶段介入；无法确认订单阶段时仍失败关闭。</div></div><div class="setting-group"><label for="interventionStart">介入起点</label><select id="interventionStart"><option value="consultation">咨询</option><option value="order_pending">拍下</option><option value="payment">付款</option><option value="shipping_refund">发货/退款</option></select></div><div class="setting-group"><label for="interventionEnd">介入终点</label><select id="interventionEnd"><option value="consultation">咨询</option><option value="order_pending">拍下</option><option value="payment">付款</option><option value="shipping_refund">发货/退款</option></select></div></div>
+        <div class="setting-group"><label for="personaBackground">客服人设及业务背景</label><textarea id="personaBackground" maxlength="2500" placeholder="例如：热情、专业、简洁的电影票在线客服；提供万达官方影院电影票代订服务，价格、库存、座位和出票状态以实时权威结果为准。"></textarea><div class="setting-help">将客服人设和店铺业务边界统一填写在这里。</div></div>
+        <div class="setting-group"><label for="customerServiceKnowledge">客服知识与常见问题补充</label><textarea id="customerServiceKnowledge" maxlength="3000" placeholder="填写不适合拆成知识条目的总则；具体问答请在知识库维护"></textarea></div>
+        <div class="setting-group"><label for="replyStyle">回复风格</label><textarea id="replyStyle" maxlength="1000" placeholder="例如：自然、简短、礼貌，先回答问题再给下一步"></textarea></div>
+        <div class="setting-group"><label for="humanServiceHours">人工客服时间</label><input id="humanServiceHours" maxlength="500" placeholder="例如：每日 09:00-24:00"></div>
+        <div class="pricing-preview"><span id="conversationPolicyMeta">正在读取会话策略…</span><button class="template-save" id="saveConversationPolicy" type="button">保存会话策略</button></div>
+      </div>
+      <div class="pricing-console" data-operation-view="pricing">
+        <header class="pricing-console-head">
+          <div><h2><span class="section-icon">⌘</span>报价策略</h2><p>良票报价和万达报价分开配置，修改后仅影响新报价。</p></div>
+        </header>
+        <div class="pricing-rule-grid">
+          <section class="pricing-rule-card liangpiao-pricing-card">
+            <header class="pricing-card-head"><span class="pricing-card-icon">良票</span><div><h3>良票报价（动态折扣）</h3><p>按预估价格与原价的折扣率匹配加价区间。</p></div></header>
+            <p class="liangpiao-formula">折扣率 = 预估价格 ÷ 原价 × 100%。匹配区间后，买家报价 = 预估价格 ×（1 + 调整比例）。</p>
+            <div class="liangpiao-rule-list" id="liangpiaoRuleList"></div>
+            <button class="liangpiao-add" id="addLiangpiaoRule" type="button">＋ 添加区间</button>
+          </section>
+          <section class="pricing-rule-card pricing-rule-wplus">
+            <header class="pricing-card-head"><span class="pricing-card-icon">W+</span><div><h3>万达报价规则</h3><p>按折扣率匹配区间，使用已保存的加价比例。历史固定调整保留原值。</p></div></header>
+            <p class="wanda-pricing-description">折扣率 = W+优惠价 ÷ 原价。比例规则以官方 W+ 优惠价为基准计算，最终售价由后台核价。</p>
+            <div class="wanda-rule-list" id="wandaRuleList"></div>
+            <button class="wanda-add" id="addWandaRule" type="button">＋ 添加区间</button>
+            <div class="pricing-fields wanda-compat-fields">
+              <input id="wplusDiscount" type="hidden" value="2.9"><input id="wplusThreshold" type="hidden" value="60">
+              <div class="money-field"><label for="roundingIncrement">最终报价取整</label><select id="roundingIncrement"><option value="1">精确到分</option><option value="10" selected>四舍五入到0.1元</option><option value="100">四舍五入到1元</option></select></div>
+            </div>
+            <div class="pricing-option-row"><div><strong>启用后台报价规则</strong><small>关闭时最终报价等于官方实时区域参考价。</small></div><label class="switch"><input id="pricingEnabled" type="checkbox"><span class="slider"></span></label></div>
+            <div class="pricing-preview wanda-pricing-formula">示例：W+优惠价 58 ÷ 原价 70 = 82.857%；匹配对应区间后，报价 = 58 + 固定加价 X 元，再按设置四舍五入。填负数表示固定减价。</div>
+            <div class="pricing-rule-meta" id="pricingRuleMeta">正在读取后台规则…</div>
+            <button class="template-save pricing-save" id="saveOperations" type="button" disabled>保存运营报价规则</button>
+            <div id="pricingSaveMessage" class="settings-message" role="status" aria-live="polite"></div>
+          </section>
+        </div>
+        <div class="pricing-bottom-grid">
+          <section class="pricing-preview-panel"><header><div><span class="eyebrow">PREVIEW</span><h3>报价预览</h3><p>仅展示规则配置结构，不替代后端真实核价。</p></div><span class="status-badge neutral">只读</span></header><div class="preview-quote"><span>权威报价</span><strong>后端核价</strong><div><span>报价来源</span><b>Provider 成本与当前规则</b></div><div><span>最终报价</span><b id="pricingPreviewValue">由后端规则计算</b></div></div></section>
+          <section class="pricing-history-panel"><header><div><span class="eyebrow">HISTORY</span><h3>当前规则版本</h3></div></header><div class="history-item"><span class="history-dot"></span><div><strong id="pricingHistoryVersion">当前版本</strong><small id="pricingHistoryMeta">保存后显示真实修订号</small></div><span class="status-badge neutral">后台记录</span></div></section>
+        </div>
+      </div>
+      <div class="operation-section" data-operation-view="safety">
+        <h3>强制安全门禁</h3><p>以下规则属于交易安全边界，运营人员不可关闭。</p>
+        <div class="gate-list">
+          <div class="gate"><b>价格只来自官方实时区域价格与后台规则</b><span>强制开启</span></div>
+          <div class="gate"><b>截图金额不得进入计算</b><span>强制开启</span></div>
+          <div class="gate"><b>报价仅调用场次与实时座位只读接口</b><span>强制开启</span></div>
+          <div class="gate"><b>不创建、不锁定具体座位</b><span>强制开启</span></div>
+          <div class="gate"><b>模型不能生成交易金额</b><span>强制开启</span></div>
+          <div class="gate"><b>票码只能来自权威履约</b><span>强制开启</span></div>
+        </div>
+      </div>
+      <div class="operation-section" data-operation-view="knowledge">
+        <h3>客服知识库</h3><p>常见问题拆分为可编辑、可启停、可分类的知识条目；只有启用条目会注入 AI 回复。</p>
+        <div class="knowledge-toolbar"><label class="audit-search"><span aria-hidden="true">⌕</span><input id="knowledgeSearch" type="search" autocomplete="off" placeholder="搜索知识库内容"></label><button class="inline-setting-button" id="addKnowledge" type="button">＋ 新建文档</button><select id="knowledgeCategoryFilter"><option value="">全部分类</option><option>售后人工</option><option>下单确认</option><option>订单出票</option><option>报价规则</option><option>截图识别</option><option>异常处理</option><option>购票流程</option><option>常见问题</option></select></div>
+        <div class="knowledge-stats"><div class="knowledge-stat"><b id="knowledgeTotal">0</b><span>全部条目</span></div><div class="knowledge-stat"><b id="knowledgeEnabled">0</b><span>已启用</span></div><div class="knowledge-stat"><b id="knowledgeCategories">0</b><span>分类</span></div></div>
+        <div class="knowledge-notice"><strong>安全提示</strong><span>知识库只影响常见问题的识别和表达；价格、库存、订单、付款、出票、退款和人工接管仍由确定性规则掌管。W+代订与纯文字咨询仍须经过实时核验。</span></div>
+        <div class="knowledge-list" id="knowledgeList"></div>
+        <div class="setting-help knowledge-source">每条知识包含买家常见问法、回复口径和处理规则；保存后仅启用条目进入下一次 AI 回复。</div>
+      </div>
+    </section>
+  </div>
+  <div class="settings-footer" id="settingsFooter"><div class="settings-message" id="settingsMessage"></div><button class="save-settings" id="saveSettings" type="button">保存模型设置并立即应用</button></div>
+</aside>
+<dialog class="order-detail-dialog" id="orderDetailDialog" aria-labelledby="orderDetailTitle">
+  <header><div><strong id="orderDetailTitle">订单详情</strong><small>仅展示当前租户已授权订单的最新权威信息</small></div><button class="icon-btn" id="closeOrderDetail" type="button" aria-label="关闭订单详情">×</button></header>
+  <div class="order-detail-content" id="orderDetailContent"></div>
+</dialog>
+<footer class="plugin-status-bar" hidden><span id="footerHealth">正在检查连接</span><span class="status-spacer"></span><span>万达票务助手 · 运营工作台</span></footer>
+<script type="module" src="./ui/app.js?v=cockpit-4925798-r3"></script>
+</body>
+</html>

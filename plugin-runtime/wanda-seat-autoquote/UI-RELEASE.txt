@@ -1,0 +1,3 @@
+previous=/opt/wanda-seat-autoquote/releases/v4-ratio-percent-20260909T025005
+source=output/ui-release-4925798
+build=cockpit-4925798-r1

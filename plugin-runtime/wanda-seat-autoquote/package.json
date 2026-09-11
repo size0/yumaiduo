@@ -1,0 +1,33 @@
+{
+  "name": "@xdl/wanda-seat-autoquote",
+  "version": "2.2.50",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "verify:runtime-deps": "node scripts/verify-runtime-deps.mjs",
+    "check": "npm run test && npm run verify:runtime-deps && npm pack --dry-run --json"
+  },
+  "files": [
+    "index.mjs",
+    "src/",
+    "ui/index.html",
+    "ui/styles.css",
+    "ui/app.js",
+    "ui/sdk.js",
+    "package-lock.json",
+    "vendor/plugin-sdk-server/package.json",
+    "vendor/plugin-sdk-server/dist/*.js",
+    "yumaiduo.plugin.json",
+    "Dockerfile",
+    "README.md",
+    "docs/V2_ARCHITECTURE.md"
+  ],
+  "dependencies": {
+    "@yumaiduo/plugin-sdk-server": "file:vendor/plugin-sdk-server"
+  }
+}
