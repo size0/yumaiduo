@@ -34,7 +34,8 @@ class ShowResolveV2Service:
         start_time = _time_key(request.get("start_time"))
         ordinal = request.get("showtime_ordinal")
         candidate_hint = request.get("candidate_shows")
-        if not store_id or not movie or not show_date or (not start_time and not ordinal and not candidate_hint):
+        dimension_hint = _simple_key(request.get("dimension"))
+        if not store_id or not movie or not show_date or (not start_time and not ordinal and not candidate_hint and not dimension_hint):
             return ShowResolutionResult(
                 status="INPUT_INCOMPLETE",
                 wanda_store_id=store_id,

@@ -99,6 +99,14 @@ class _MultiShowSource(_WandaReadSource):
         return response
 
 
+class _DimensionShowSource(_MultiShowSource):
+    async def get_showtimes(self, *args):
+        response = await super().get_showtimes(*args)
+        shows = response["data"]["showtimeFilmInf"][0]["showtimeFilmDateInf"][0]["showtimesInf"]["showtimeList"]
+        shows[1]["dimension"] = "IMAX"
+        return response
+
+
 class _ChangedShowTransport(_RecognitionTransport):
     def __init__(self):
         super().__init__(seats=True)
@@ -314,6 +322,19 @@ async def test_real_show_ordinal_selects_provider_verified_second_show(tmp_path:
     first = await runtime.process_image_event(_event("ordinal-context"))
     assert first["status"] == "QUOTED"
     followup = {"envelope": {"id": "ordinal-followup", "tenantId": "tenant-1", "payload": {"itemId": "purchase-1", "text": "\u7b2c\u4e8c\u573a"}},
+                "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
+    result = await runtime.process_text_event(followup)
+    assert result["status"] == "QUOTED"
+    assert result["quote"]["wanda_show_id"] == "show-2"
+
+
+@pytest.mark.asyncio
+async def test_real_show_dimension_selects_provider_verified_imax_show(tmp_path: Path):
+    from app.conversation_fact_store import ConversationFactStore
+    runtime = _wanda_runtime(tmp_path, _DimensionShowSource())
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    assert (await runtime.process_image_event(_event("dimension-context")))["status"] == "QUOTED"
+    followup = {"envelope": {"id": "dimension-followup", "tenantId": "tenant-1", "payload": {"itemId": "purchase-1", "text": "IMAX\u90a3\u573a"}},
                 "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
     result = await runtime.process_text_event(followup)
     assert result["status"] == "QUOTED"
