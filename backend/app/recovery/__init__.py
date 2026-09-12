@@ -9,5 +9,6 @@ from .service_contracts import (
 )
 from .reply_gate import ReplyEligibilityService, reply_eligibility_gate
 from .runtime import RecoveryQuoteRuntime
+from .routing import select_runtime
 
-__all__ = ["GateResult", "RecoveryAction", "RecoveryDecision", "RecoveryPolicy", "SafetyClass", "QuoteRecoveryOrchestrator", "RecoveryQuoteRuntime", "RecognitionGateMixin", "CinemaRouteGateMixin", "ShowResolveGateMixin", "SeatFactsGateMixin", "CostResolutionGateMixin", "PricingGateMixin", "ReplyEligibilityService", "reply_eligibility_gate"]
+__all__ = ["GateResult", "RecoveryAction", "RecoveryDecision", "RecoveryPolicy", "SafetyClass", "QuoteRecoveryOrchestrator", "RecoveryQuoteRuntime", "select_runtime", "RecognitionGateMixin", "CinemaRouteGateMixin", "ShowResolveGateMixin", "SeatFactsGateMixin", "CostResolutionGateMixin", "PricingGateMixin", "ReplyEligibilityService", "reply_eligibility_gate"]

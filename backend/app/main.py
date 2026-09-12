@@ -69,6 +69,7 @@ from .payment_validation import AuthoritativePaymentValidationService
 from .quote_record_store import QuoteRecordStore
 from .quote_v2.service import CanonicalQuoteRuntime, QuoteV2Service
 from .recovery.runtime import RecoveryQuoteRuntime
+from .recovery.routing import select_runtime
 from .quote_v2.wanda_source import WandaDirectQuoteV2ReadSource
 from .reminder_service import plan_shipped_order_reminders
 from .reminder_store import ReminderStore
@@ -1128,11 +1129,15 @@ def create_app(
                 "duplicate": False, "fulfillment_mark_routed": True,
                 "fulfillment_mark_status": result.get("status") if result else None,
             }
-        if (
-            ((canonical_image_event and (canonical_quote_runtime_enabled or recovery_gate_pipeline_enabled))
-             or (canonical_text_event and recovery_gate_pipeline_enabled))
-            and canonical_shop_canary_enabled(body)
-        ):
+        selected_quote_runtime = select_runtime(
+            recovery_enabled=recovery_gate_pipeline_enabled,
+            legacy_enabled=canonical_quote_runtime_enabled,
+            image_event=canonical_image_event and canonical_shop_canary_enabled(body),
+            text_event=canonical_text_event and canonical_shop_canary_enabled(body),
+            recovery_runtime=configured_recovery_quote_runtime,
+            legacy_runtime=configured_canonical_quote_runtime,
+        )
+        if selected_quote_runtime is not None:
             # This is deliberately terminal for the event: canonical quote
             # processing is read-only and must not fall through to Legacy NLP.
             if recovery_gate_pipeline_enabled:

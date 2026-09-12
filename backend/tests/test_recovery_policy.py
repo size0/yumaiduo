@@ -4,6 +4,7 @@ from app.recovery import GateResult, QuoteRecoveryOrchestrator, RecoveryAction, 
 from app.recovery.adapters import from_legacy
 from app.recovery.context import QuotePipelineContext
 from app.recovery.invalidation import invalidated_fields
+from app.recovery.routing import select_runtime
 from app.conversation_fact_store import ConversationFactStore
 from datetime import datetime, timedelta, timezone
 
@@ -87,6 +88,18 @@ def test_facts_are_isolated_and_expire(tmp_path):
     expired = store.load_context(**base, buyer_id="buyer-a", now=datetime.now(timezone.utc) + timedelta(seconds=120))
     assert expired["available"] is False
     assert expired["expired"] is True
+
+
+def test_runtime_routing_selects_one_path():
+    legacy, recovery = object(), object()
+    assert select_runtime(recovery_enabled=False, legacy_enabled=True, image_event=True, text_event=False,
+                          recovery_runtime=recovery, legacy_runtime=legacy) is legacy
+    assert select_runtime(recovery_enabled=True, legacy_enabled=True, image_event=True, text_event=False,
+                          recovery_runtime=recovery, legacy_runtime=legacy) is recovery
+    assert select_runtime(recovery_enabled=True, legacy_enabled=True, image_event=False, text_event=True,
+                          recovery_runtime=recovery, legacy_runtime=legacy) is recovery
+    assert select_runtime(recovery_enabled=False, legacy_enabled=False, image_event=True, text_event=False,
+                          recovery_runtime=recovery, legacy_runtime=legacy) is None
 
 
 @pytest.mark.asyncio
