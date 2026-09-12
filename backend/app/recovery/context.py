@@ -32,6 +32,9 @@ class QuotePipelineContext(BaseModel):
         merged.update(candidates or {})
         merged.update(current)
         changed = {key for key, value in merged.items() if before.get(key) != value}
+        aliases = {"city": "city", "cinema": "cinema", "quote_date": "date", "showtime_start": "show",
+                   "show_id": "show", "selected_seats": "seat", "ticket_count": "ticket_count"}
+        changed.update(aliases[key] for key in tuple(changed) if key in aliases)
         self.conversation_facts = merged
         for field in changed:
             for dependent in invalidated_fields(field):

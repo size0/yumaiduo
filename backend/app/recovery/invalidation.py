@@ -5,6 +5,7 @@ DEPENDENCY_GRAPH: dict[str, tuple[str, ...]] = {
     "movie": ("movie_id", "show", "seat_facts", "cost", "pricing", "quote_record"),
     "date": ("show", "seat_facts", "cost", "pricing", "quote_record"),
     "show": ("show_id", "seat_facts", "cost", "pricing", "quote_record"),
+    "seat": ("cost", "pricing", "quote_record"),
     "ticket_count": ("pricing", "quote_record"),
 }
 

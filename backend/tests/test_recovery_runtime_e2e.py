@@ -121,3 +121,20 @@ async def test_text_followup_uses_same_conversation_facts(tmp_path: Path):
         "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
     })
     assert result["status"] == "QUOTED"
+
+
+@pytest.mark.asyncio
+async def test_text_cancel_does_not_requote(tmp_path: Path):
+    facts_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    facts_store.save(tenant_id="tenant", shop_id="shop", buyer_id="buyer", chat_id="chat",
+                     purchase_context_id="item", facts={"movie": "奥德赛"}, source="test", fact_tier="verified")
+    runtime = RecoveryQuoteRuntime(
+        recognition_service=FakeRecognition(), route_service=FakeRoute(), show_service=FakeShow(),
+        seat_service=FakeSeat(), cost_service=FakeCost(), pricing_service=FakePricing(),
+        quote_service=FakeQuotes(), rules_provider=lambda: object(), fact_store=facts_store,
+    )
+    result = await runtime.process_text_event({
+        "text": "不要了", "envelope": {"id": "event-cancel", "tenantId": "tenant", "payload": {"itemId": "item", "text": "不要了"}},
+        "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
+    })
+    assert result["status"] == "NON_AMOUNT_REPLY_ALLOWED"

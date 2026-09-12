@@ -30,6 +30,7 @@ class QuoteRecoveryOrchestrator:
     async def run(self, context: QuotePipelineContext) -> tuple[QuotePipelineContext, GateResult, RecoveryDecision]:
         last_result = GateResult(gate="PIPELINE", status="EMPTY", success=False, safety_class="RECOVERABLE")
         last_decision = self._policy.evaluate(last_result)
+        recovery_attempts = self._max_recovery_attempts
         step = 0
         while step < len(self._stages):
             if step >= self._max_steps:
@@ -49,8 +50,8 @@ class QuoteRecoveryOrchestrator:
             last_decision = self._policy.evaluate(result)
             if last_decision.action is RecoveryAction.RETRY:
                 handler = self._retry_handlers.get(result.gate)
-                if handler is not None and self._max_recovery_attempts > 0:
-                    self._max_recovery_attempts -= 1
+                if handler is not None and recovery_attempts > 0:
+                    recovery_attempts -= 1
                     retry_result = handler(context, result)
                     if hasattr(retry_result, "__await__"):
                         retry_result = await retry_result

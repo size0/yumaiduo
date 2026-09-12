@@ -4,6 +4,8 @@ from app.recovery import GateResult, QuoteRecoveryOrchestrator, RecoveryAction, 
 from app.recovery.adapters import from_legacy
 from app.recovery.context import QuotePipelineContext
 from app.recovery.invalidation import invalidated_fields
+from app.conversation_fact_store import ConversationFactStore
+from datetime import datetime, timedelta, timezone
 
 
 def test_success_continues():
@@ -69,6 +71,24 @@ def test_context_merge_prioritizes_current_and_invalidates_quote_chain():
     assert context.quote_record is None
 
 
+def test_context_merge_aliases_invalidate_show_and_seat():
+    context = QuotePipelineContext(conversation_facts={"showtime_start": "14:00"}, show="old", cost="old", quote_record="old")
+    context.merge_facts({"showtime_start": "15:00", "selected_seats": ["3排4座"]})
+    assert context.show is None
+    assert context.cost is None
+    assert context.quote_record is None
+
+
+def test_facts_are_isolated_and_expire(tmp_path):
+    store = ConversationFactStore(tmp_path / "facts.sqlite", ttl_seconds=60)
+    base = dict(tenant_id="t", shop_id="s", chat_id="c", purchase_context_id="p")
+    store.save(**base, buyer_id="buyer-a", facts={"city": "合肥"}, source="test", observed_at=datetime.now(timezone.utc))
+    assert store.load_context(**base, buyer_id="buyer-b")["available"] is False
+    expired = store.load_context(**base, buyer_id="buyer-a", now=datetime.now(timezone.utc) + timedelta(seconds=120))
+    assert expired["available"] is False
+    assert expired["expired"] is True
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_stops_at_first_non_continuation():
     async def route(context):
@@ -105,3 +125,18 @@ async def test_orchestrator_executes_retry_handler():
     assert attempts["count"] == 1
     assert result.status == "COST_READY"
     assert decision.action is RecoveryAction.CONTINUE
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_retry_budget_is_per_run():
+    orchestrator = QuoteRecoveryOrchestrator(
+        [lambda context: GateResult(gate="COST", status="PROVIDER_UNAVAILABLE", success=False,
+                                    safety_class=SafetyClass.RECOVERABLE, retryable=True)],
+        retry_handlers={"COST": lambda context, result: GateResult(
+            gate="COST", status="COST_READY", success=True, safety_class=SafetyClass.RECOVERABLE)},
+        max_recovery_attempts=1,
+    )
+    first = await orchestrator.run(QuotePipelineContext())
+    second = await orchestrator.run(QuotePipelineContext())
+    assert first[1].status == "COST_READY"
+    assert second[1].status == "COST_READY"

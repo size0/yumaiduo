@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 import re
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..recognition_v2.models import RecognitionResult
@@ -150,13 +151,34 @@ class RecoveryQuoteRuntime:
         facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
         payload = body.get("envelope", {}).get("payload", {}) if isinstance(body.get("envelope"), Mapping) else {}
         text = str(payload.get("text") or payload.get("content") or body.get("text") or "").strip()
+        if any(token in text for token in ("不要了", "不用了", "取消", "算了")):
+            return {"status": "NON_AMOUNT_REPLY_ALLOWED", "reason": "BUYER_CANCELLED"}
         if not facts:
             return {"status": "NEED_CLARIFICATION", "missing_fields": ["cinema", "movie", "date", "showtime"]}
         time_match = re.search(r"(?<!\d)(\d{1,2})\s*(?:点|时|:)[ ]*(\d{1,2})?", text)
+        if time_match is None:
+            chinese_time = re.search(r"([一二两三四五六七八九十\d]+)点(半|[一二三四五六七八九十\d]+)?", text)
+            if chinese_time:
+                digits = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+                hour = digits.get(chinese_time.group(1), int(chinese_time.group(1)) if chinese_time.group(1).isdigit() else 0)
+                minute = 30 if chinese_time.group(2) == "半" else digits.get(chinese_time.group(2), 0) if chinese_time.group(2) else 0
+                time_match = (hour, minute)
         count_match = re.search(r"([一二两三四五六七八九十]|\d+)\s*(?:张|票|人)", text)
         count_words = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        if isinstance(time_match, tuple):
+            start_time = f"{time_match[0]:02d}:{time_match[1]:02d}"
+        else:
+            start_time = f"{int(time_match.group(1)):02d}:{int(time_match.group(2) or 0):02d}" if time_match else facts.get("showtime_start")
+        quote_date = facts.get("quote_date") or facts.get("date")
+        if "明天" in text:
+            quote_date = (datetime.now().date() + timedelta(days=1)).isoformat()
+        elif "后天" in text:
+            quote_date = (datetime.now().date() + timedelta(days=2)).isoformat()
+        patch_signals = time_match or count_match or any(token in text for token in ("第二场", "那场", "IMAX", "场次", "多少钱", "价格", "明天", "后天"))
+        if not patch_signals:
+            return {"status": "NON_AMOUNT_REPLY_ALLOWED", "reason": "TEXT_NOT_QUOTE_PATCH"}
         recognition = RecognitionResult(city_text=facts.get("city"), cinema_text=facts.get("cinema"), movie=facts.get("movie"),
-            show_date=facts.get("quote_date") or facts.get("date"), start_time=(f"{int(time_match.group(1)):02d}:{int(time_match.group(2) or 0):02d}" if time_match else facts.get("showtime_start")),
+            show_date=quote_date, start_time=start_time,
             hall=facts.get("hall"), dimension=facts.get("dimension"), selected_seats=list(facts.get("selected_seats") or []),
             has_selected_seats=bool(facts.get("selected_seats")))
         synthetic = {"envelope": {"id": identity["event_id"], "tenantId": identity["tenant_id"], "payload": {"imageUrls": ["about:blank"]}},
