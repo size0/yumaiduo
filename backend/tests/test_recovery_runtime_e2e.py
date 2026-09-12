@@ -68,7 +68,12 @@ class FakePricing:
 
 class FakeQuotes:
     def persist_gate(self, *args, **kwargs):
-        return gate("QUOTE", "QUOTE_PERSISTED", {"quote_record": {"record_id": "record-1", "total": 4500}})
+        return gate("QUOTE", "QUOTE_PERSISTED", {"quote_record": {
+            "record_id": "record-1", "total": 4500,
+            "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
+            "buyer_id": kwargs["buyer_id"], "chat_id": kwargs["chat_id"],
+            "purchase_context_id": kwargs["purchase_context_id"], "wanda_show_id": "show-1",
+        }})
 
 
 @pytest.mark.asyncio
