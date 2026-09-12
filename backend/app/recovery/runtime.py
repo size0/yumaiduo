@@ -46,7 +46,8 @@ class RecoveryQuoteRuntime:
         if not identity["event_id"] or not identity["shop_id"] or not identity["buyer_id"]:
             return {"status": "IDENTITY_INCOMPLETE"}
         context = QuotePipelineContext(identity=identity)
-        stored = self.fact_store.load_context(**identity) if self.fact_store is not None else None
+        fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")}
+        stored = self.fact_store.load_context(**fact_identity) if self.fact_store is not None else None
         stored_facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
         recognition_gate = await self.recognition.recognize_gate(urls[0].strip(), trace_id=identity["event_id"], idempotency_key=identity["event_id"])
         recognition = RecognitionResult.model_validate(recognition_gate.facts)
