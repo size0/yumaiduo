@@ -237,6 +237,12 @@ class LiangpiaoQuote:
         )
 
 
+class UnavailableLiangpiaoQuote:
+    async def quote(self, request):
+        from app.selected_seat_quote_service import QuoteServiceError
+        raise QuoteServiceError("PROVIDER_UNAVAILABLE", "provider unavailable")
+
+
 class LiangpiaoFacts:
     def from_preflight(self, payload, *, request):
         return SimpleNamespace(provider="LIANGPIAO", payload=payload)
@@ -282,3 +288,15 @@ async def test_liangpiao_runtime_branch_requests_exact_seats(tmp_path: Path):
     result = await runtime.process_image_event(_event("lp-2"))
     assert result["status"] == "NEED_CLARIFICATION"
     assert result["reason"] == "SELECTED_SEATS_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_provider_failure_has_no_amount_reply(tmp_path: Path):
+    runtime, _ = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
+    runtime.route = LiangpiaoRoute()
+    runtime.liangpiao_quote = UnavailableLiangpiaoQuote()
+    runtime.liangpiao_facts = LiangpiaoFacts()
+    runtime.pricing_engine = LiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-provider-failure"))
+    assert result["status"] == "PROVIDER_UNAVAILABLE"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
