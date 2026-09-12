@@ -386,6 +386,42 @@ async def test_real_runtime_ticket_count_reprices_and_replaces_quote(tmp_path: P
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["buyer", "show", "expired"])
+async def test_real_persisted_quote_authority_rejects_mutations(tmp_path: Path, mutation: str):
+    from datetime import datetime, timedelta, timezone
+    from app.recovery.reply_gate import reply_eligibility_gate
+    runtime = _wanda_runtime(tmp_path, _WandaReadSource())
+    result = await runtime.process_image_event(_event(f"authority-{mutation}"))
+    assert result["status"] == "QUOTED"
+    quote = dict(result["quote"])
+    if mutation == "buyer":
+        quote["buyer_id"] = "other-buyer"
+    elif mutation == "show":
+        quote["wanda_show_id"] = "other-show"
+    else:
+        quote["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    checked = reply_eligibility_gate({
+        "status": "QUOTED", "quote": quote, "quote_persist_status": "QUOTE_PERSISTED",
+        "identity": {"tenant_id": "tenant-1", "shop_id": "shop-1", "buyer_id": "buyer-1",
+                     "chat_id": "chat-1", "purchase_context_id": "purchase-1"},
+        "verified_show_id": "show-1", "pipeline_generation": quote.get("generation"),
+    })
+    assert checked.status != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_real_facts_do_not_cross_buyer_identity(tmp_path: Path):
+    from app.conversation_fact_store import ConversationFactStore
+    runtime = _wanda_runtime(tmp_path, _WandaReadSource())
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    assert (await runtime.process_image_event(_event("buyer-a")))["status"] == "QUOTED"
+    buyer_b = {"envelope": {"id": "buyer-b", "tenantId": "tenant-1", "payload": {"itemId": "purchase-1", "text": "\u4e24\u5f20"}},
+               "session": {"accountUnb": "shop-1", "peerUnb": "buyer-b", "chatId": "chat-b"}}
+    result = await runtime.process_text_event(buyer_b)
+    assert result["status"] == "NEED_CLARIFICATION"
+
+
+@pytest.mark.asyncio
 async def test_real_show_service_uses_candidate_time_but_provider_verifies_id():
     source = _WandaReadSource()
     service = ShowResolveV2Service(source)
