@@ -99,6 +99,29 @@ UPLOAD_READ_LIMIT = 20 * 1024 * 1024
 INDEX_PATH = Path(__file__).resolve().parents[2] / "frontend" / "v4" / "index.html"
 
 
+_GATE_TRACE_LOG_FIELDS = (
+    "gate", "status", "success", "reason_code", "missing_fields_count",
+    "retryable", "provider_verified", "amount_safe", "quote_record_created",
+    "duration_ms",
+)
+
+
+def _sanitize_gate_trace_for_log(value: Any) -> list[dict[str, Any]]:
+    """Keep summary logs to the non-sensitive, scalar gate diagnostics."""
+    if not isinstance(value, list):
+        return []
+    sanitized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        safe_item = {}
+        for field in _GATE_TRACE_LOG_FIELDS:
+            value = item.get(field)
+            safe_item[field] = value if value is None or isinstance(value, (str, int, float, bool)) else None
+        sanitized.append(safe_item)
+    return sanitized
+
+
 def _liangpiao_order_no(value: Mapping[str, object]) -> str:
     for key in ("orderNo", "order_no", "providerOrderNo", "provider_order_no"):
         order_no = str(value.get(key) or "").strip()
@@ -1185,10 +1208,16 @@ def create_app(
                     "canonical_runtime_reply": result.get("current_runtime_reply"),
                     "durable_reply_command_count": 0,
                 }
-            LOGGER.info(
-                "event=canonical_quote_event_processed event_id=%s status=%s reply_command_count=%s",
-                accepted["event_id"], result.get("status"), accepted.get("durable_reply_command_count"),
-            )
+            try:
+                LOGGER.info(
+                    "event=canonical_quote_event_processed event_id=%s status=%s reply_command_count=%s first_failed_gate=%s first_failed_status=%s first_failed_reason_code=%s gate_trace=%s",
+                    accepted["event_id"], result.get("status"), accepted.get("durable_reply_command_count"),
+                    result.get("first_failed_gate"), result.get("first_failed_status"),
+                    result.get("first_failed_reason_code"),
+                    _sanitize_gate_trace_for_log(result.get("gate_trace")),
+                )
+            except Exception:
+                pass
             return accepted
         new_flow_authorization = None
         binding_result = None
