@@ -8,6 +8,7 @@ from app.recovery.routing import select_runtime
 from app.recovery.reply_gate import reply_eligibility_gate
 from app.conversation_fact_store import ConversationFactStore
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 
 def test_success_continues():
@@ -69,6 +70,19 @@ def test_reply_gate_rejects_missing_quote_without_throwing():
     result = reply_eligibility_gate({"status": "QUOTED", "quote": None, "identity": {"buyer_id": "b"}})
     assert result.status == "NO_SAFE_REPLY"
     assert result.success is False
+
+
+def test_recovery_pipeline_has_no_legacy_gate_adapter_dependency():
+    root = Path(__file__).parents[1] / "app"
+    runtime_source = (root / "recovery" / "runtime.py").read_text(encoding="utf-8")
+    assert "service_contracts" not in runtime_source
+    assert not (root / "recovery" / "service_contracts.py").exists()
+    for path in (
+        root / "recognition_v2" / "service.py", root / "cinema_route_v2" / "service.py",
+        root / "show_resolve_v2" / "service.py", root / "seat_facts_v2" / "service.py",
+        root / "wanda_cost_v2" / "service.py", root / "wanda_pricing_v2" / "service.py",
+    ):
+        assert "service_contracts" not in path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
