@@ -475,6 +475,61 @@ async def test_real_facts_do_not_cross_buyer_identity(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_real_recognition_gate_loop_is_stopped_by_orchestrator():
+    from app.recovery.context import QuotePipelineContext
+    from app.recovery.models import RecoveryAction
+    from app.recovery.orchestrator import QuoteRecoveryOrchestrator
+    recognition = RecognitionV2Service(_RecognitionTransport())
+    calls = 0
+
+    async def repeated_stage(context):
+        nonlocal calls
+        calls += 1
+        return await recognition.recognize_gate("https://example.test/image")
+
+    context, result, decision = await QuoteRecoveryOrchestrator(
+        [repeated_stage, repeated_stage], max_steps=4,
+    ).run(QuotePipelineContext(identity={"event_id": "loop"}))
+    assert calls == 2
+    assert result.status == "RECOVERY_LOOP_DETECTED"
+    assert decision.action is RecoveryAction.STOP
+
+
+@pytest.mark.asyncio
+async def test_real_expired_facts_do_not_drive_text_quote(tmp_path: Path):
+    from datetime import datetime, timedelta, timezone
+    from app.conversation_fact_store import ConversationFactStore
+    store = ConversationFactStore(tmp_path / "facts.sqlite")
+    old = datetime.now(timezone.utc) - timedelta(hours=1)
+    store.save(tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+               purchase_context_id="purchase-1", facts={"city": "\u5408\u80a5", "cinema": "\u4e07\u8fbe\u5f71\u57ce",
+               "movie": "\u5965\u5fb7\u8d5b", "quote_date": "2026-09-13", "showtime_start": "14:30"},
+               source="test", fact_tier="verified", observed_at=old, ttl_seconds=60)
+    runtime = _wanda_runtime(tmp_path, _WandaReadSource())
+    runtime.fact_store = store
+    result = await runtime.process_text_event({"envelope": {"id": "expired", "tenantId": "tenant-1",
+        "payload": {"itemId": "purchase-1", "text": "\u4e24\u5f20"}},
+        "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}})
+    assert result["status"] == "NEED_CLARIFICATION"
+
+
+@pytest.mark.asyncio
+async def test_real_invalidated_fact_cannot_revive_old_show(tmp_path: Path):
+    from app.conversation_fact_store import ConversationFactStore
+    store = ConversationFactStore(tmp_path / "facts.sqlite")
+    store.save(tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+               purchase_context_id="purchase-1", facts={"show_id": "old-show", "cost": "old-cost"},
+               source="test", fact_tier="verified")
+    store.save(tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+               purchase_context_id="purchase-1", facts={"showtime_start": "16:30"},
+               invalidated_fields={"show_id", "cost"}, source="recovery_runtime", fact_tier="candidate")
+    loaded = store.load_context(tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+                                purchase_context_id="purchase-1")
+    assert "show_id" not in loaded["facts"]
+    assert "cost" not in loaded["facts"]
+
+
+@pytest.mark.asyncio
 async def test_real_show_service_uses_candidate_time_but_provider_verifies_id():
     source = _WandaReadSource()
     service = ShowResolveV2Service(source)
