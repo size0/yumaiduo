@@ -20,6 +20,8 @@ class QuotePipelineContext(BaseModel):
     quote_record: Any | None = None
     current_gate: str | None = None
     generation: int = 0
+    invalidated_fields: set[str] = Field(default_factory=set)
+    stale_fields: set[str] = Field(default_factory=set)
 
     def merge_facts(self, current: dict[str, Any], *, stored: dict[str, Any] | None = None,
                     candidates: dict[str, Any] | None = None) -> None:
@@ -42,7 +44,9 @@ class QuotePipelineContext(BaseModel):
                 if stale not in current and stale in merged:
                     merged.pop(stale, None)
                     changed.add(stale)
+                    self.stale_fields.add(stale)
         self.conversation_facts = merged
+        self.invalidated_fields.update(changed)
         for field in changed:
             for dependent in invalidated_fields(field):
                 if dependent in {"show", "show_id"}:

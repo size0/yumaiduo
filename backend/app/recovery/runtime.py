@@ -158,14 +158,17 @@ class RecoveryQuoteRuntime:
             retry_handlers={"COST": lambda ctx, result: cost_stage(ctx), "PRICING": lambda ctx, result: pricing_stage(ctx)},
         ).run(context)
         if final_gate.gate == "REPLY" and final_gate.success:
-            result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json")}
+            result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json"),
+                      "recognition": state.get("recognition").model_dump(mode="json"),
+                      "conversation_facts": dict(context.conversation_facts),
+                      "invalidated_fields": sorted(context.stale_fields), "generation": context.generation}
             if self.reply_renderer is not None:
                 rendered = self.reply_renderer.render(result)
                 result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
             return result
         if final_gate.gate == "REPLY":
-            return self._safe(final_gate)
-        return self._safe(final_gate)
+            return self._safe(final_gate, context)
+        return self._safe(final_gate, context)
 
     async def process_text_event(self, body: dict[str, Any]) -> dict[str, Any]:
         identity = self._identity(body)
@@ -225,11 +228,15 @@ class RecoveryQuoteRuntime:
         ), ticket_count=(count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count")),
             showtime_ordinal=showtime_ordinal, candidate_shows=facts.get("candidate_shows") or [])
 
-    def _safe(self, gate: GateResult) -> dict[str, Any]:
+    def _safe(self, gate: GateResult, context: QuotePipelineContext | None = None) -> dict[str, Any]:
         result = {"status": gate.status, "reason": gate.reason_code, "gate": gate.gate,
                   "missing_fields": gate.missing_fields, "candidates": gate.candidates}
         reply_gate = reply_eligibility_gate(result)
         result["reply_gate"] = reply_gate.model_dump(mode="json")
+        if context is not None:
+            result.update({"conversation_facts": dict(context.conversation_facts),
+                           "invalidated_fields": sorted(context.stale_fields),
+                           "generation": context.generation})
         if self.reply_renderer is not None:
             rendered = self.reply_renderer.render(result)
             result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
