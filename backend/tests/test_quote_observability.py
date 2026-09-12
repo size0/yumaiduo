@@ -234,3 +234,28 @@ async def test_real_orchestration_provider_call_equivalence_trace_toggle(monkeyp
     on = await run(True)
     assert off == on
 
+
+def test_gate_trace_summary_is_sanitized():
+    from app.main import _sanitize_gate_trace_for_log
+    trace = [{"gate": "COST", "status": "PROBE_REQUIRED", "success": False,
+              "reason_code": "COST_NEEDS_PROBE", "missing_fields_count": 1,
+              "retryable": True, "provider_verified": False, "amount_safe": False,
+              "quote_record_created": False, "duration_ms": 1.2,
+              "url": "https://secret.invalid/x", "chat": "private",
+              "cinema": "敏感影院", "movie": "敏感电影", "seat": "9排9座",
+              "token": "secret-token", "cookie": "secret-cookie",
+              "authorization": "Bearer secret", "metadata": {"raw": "payload"}}]
+    result = _sanitize_gate_trace_for_log(trace)
+    assert result == [{"gate": "COST", "status": "PROBE_REQUIRED", "success": False,
+                       "reason_code": "COST_NEEDS_PROBE", "missing_fields_count": 1,
+                       "retryable": True, "provider_verified": False, "amount_safe": False,
+                       "quote_record_created": False, "duration_ms": 1.2}]
+    assert all(secret not in str(result) for secret in
+               ("secret.invalid", "敏感影院", "敏感电影", "9排9座", "secret-token", "secret-cookie", "Bearer"))
+
+
+def test_gate_trace_summary_missing_or_malformed_is_empty():
+    from app.main import _sanitize_gate_trace_for_log
+    assert _sanitize_gate_trace_for_log(None) == []
+    assert _sanitize_gate_trace_for_log(["raw", {"gate": "COST", "metadata": {"x": 1}}])[0]["gate"] == "COST"
+    assert _sanitize_gate_trace_for_log({"gate": "COST"}) == []
