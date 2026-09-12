@@ -57,7 +57,9 @@ class RecoveryQuoteRuntime:
         stored_facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
         state: dict[str, Any] = {"identity": identity, "url": urls[0].strip(), "stored": stored_facts,
                                  "recognition_gate": body.get("_recovery_recognition_gate"),
-                                 "ticket_count": body.get("_recovery_ticket_count")}
+                                 "ticket_count": body.get("_recovery_ticket_count"),
+                                 "showtime_ordinal": body.get("_recovery_showtime_ordinal"),
+                                 "candidate_shows": body.get("_recovery_candidate_shows") or []}
 
         async def recognition_stage(context: QuotePipelineContext) -> GateResult:
             gate = state["recognition_gate"] or await self.recognition.recognize_gate(
@@ -87,7 +89,8 @@ class RecoveryQuoteRuntime:
             recognition, route = state["recognition"], state["route"]
             gate = await self.show.resolve_gate({"route": route.route, "wanda_store_id": route.wanda_store_id,
                 "movie": recognition.movie, "show_date": recognition.show_date, "start_time": recognition.start_time,
-                "hall": recognition.hall, "language": recognition.language, "dimension": recognition.dimension})
+                "hall": recognition.hall, "language": recognition.language, "dimension": recognition.dimension,
+                "showtime_ordinal": state.get("showtime_ordinal"), "candidate_shows": state.get("candidate_shows", [])})
             if gate.success:
                 state["show"] = ShowResolutionResult.model_validate(gate.facts)
             return gate
@@ -170,6 +173,10 @@ class RecoveryQuoteRuntime:
         else:
             start_time = f"{int(time_match.group(1)):02d}:{int(time_match.group(2) or 0):02d}" if time_match else facts.get("showtime_start")
         quote_date = facts.get("quote_date") or facts.get("date")
+        ordinal_match = re.search(r"第\s*([一二三四五六七八九十\d]+)\s*场", text)
+        ordinal_words = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        showtime_ordinal = (ordinal_words.get(ordinal_match.group(1), int(ordinal_match.group(1)) if ordinal_match.group(1).isdigit() else None)
+                            if ordinal_match else facts.get("showtime_ordinal"))
         if "明天" in text:
             quote_date = (datetime.now().date() + timedelta(days=1)).isoformat()
         elif "后天" in text:
@@ -177,15 +184,18 @@ class RecoveryQuoteRuntime:
         patch_signals = time_match or count_match or any(token in text for token in ("第二场", "那场", "IMAX", "场次", "多少钱", "价格", "明天", "后天"))
         if not patch_signals:
             return {"status": "NON_AMOUNT_REPLY_ALLOWED", "reason": "TEXT_NOT_QUOTE_PATCH"}
+        dimension = "IMAX" if "imax" in text.lower() else facts.get("dimension")
         recognition = RecognitionResult(city_text=facts.get("city"), cinema_text=facts.get("cinema"), movie=facts.get("movie"),
             show_date=quote_date, start_time=start_time,
-            hall=facts.get("hall"), dimension=facts.get("dimension"), selected_seats=list(facts.get("selected_seats") or []),
+            hall=facts.get("hall"), dimension=dimension, selected_seats=list(facts.get("selected_seats") or []),
             has_selected_seats=bool(facts.get("selected_seats")))
         synthetic = {"envelope": {"id": identity["event_id"], "tenantId": identity["tenant_id"], "payload": {"imageUrls": ["about:blank"]}},
                      "session": {"accountUnb": identity["shop_id"], "peerUnb": identity["buyer_id"], "chatId": identity["chat_id"]},
                      "_recovery_recognition_gate": GateResult(gate="RECOGNITION", status="PARTIAL", success=True,
                          safety_class="RECOVERABLE", facts=recognition.model_dump(mode="json")),
-                     "_recovery_ticket_count": (count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count"))}
+                     "_recovery_ticket_count": (count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count")),
+                     "_recovery_showtime_ordinal": showtime_ordinal,
+                     "_recovery_candidate_shows": facts.get("candidate_shows") or []}
         return await self.process_image_event(synthetic)
 
     def _safe(self, gate: GateResult) -> dict[str, Any]:
