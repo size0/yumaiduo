@@ -313,8 +313,10 @@ class RecoveryQuoteRuntime:
 
         def reply_stage(context: QuotePipelineContext) -> GateResult:
             if state["route"].route == "LIANGPIAO":
+                preflight = state.get("liangpiao_preflight")
                 return reply_eligibility_gate({"status": "QUOTED", "quote": state.get("quote"),
                     "quote_persist_status": state.get("quote_persist_status"), "identity": identity,
+                    "verified_show_id": getattr(preflight, "show_id", ""),
                     "pipeline_generation": context.quote_generation})
             show = state.get("show")
             return reply_eligibility_gate({

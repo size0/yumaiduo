@@ -20,7 +20,8 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
         expected = str(identity.get(key) or "").strip()
         if expected and str(quote_values.get(key) or "").strip() != expected:
             authority_ok = False
-    if verified_show_id and str(quote_values.get("wanda_show_id") or quote_values.get("show_id") or "").strip() != verified_show_id:
+    if verified_show_id and str(quote_values.get("wanda_show_id") or quote_values.get("liangpiao_show_id")
+                                or quote_values.get("show_id") or "").strip() != verified_show_id:
         authority_ok = False
     if pipeline_generation is not None and "generation" in quote_values:
         authority_ok = authority_ok and quote_values.get("generation") == pipeline_generation

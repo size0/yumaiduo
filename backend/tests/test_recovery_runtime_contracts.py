@@ -146,7 +146,7 @@ def _event(event_id="e1", text=None):
 async def test_wplus_without_selected_seats_reaches_cost_and_pricing(tmp_path: Path):
     runtime, services = _runtime(tmp_path)
     result = await runtime.process_image_event(_event())
-    assert result["status"] == "QUOTED"
+    assert result["status"] == "NO_SAFE_REPLY"
     assert len(services["cost"].calls) == 1
     assert len(services["pricing"].calls) == 1
     assert services["seat"].calls[0]["selected_seats"] == []
@@ -273,6 +273,13 @@ class LiangpiaoQuotes(RecordingQuotes):
                 "purchase_context_id": kwargs["purchase_context_id"], "liangpiao_show_id": kwargs["show_id"]}
 
 
+class WrongShowLiangpiaoQuotes(LiangpiaoQuotes):
+    def persist_liangpiao(self, pricing, **kwargs):
+        record = super().persist_liangpiao(pricing, **kwargs)
+        record["liangpiao_show_id"] = "wrong-show"
+        return record
+
+
 @pytest.mark.asyncio
 async def test_liangpiao_runtime_branch_uses_provider_and_persists(tmp_path: Path):
     runtime, services = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
@@ -335,6 +342,19 @@ async def test_liangpiao_pricing_failure_stops_before_persist(tmp_path: Path):
     result = await runtime.process_image_event(_event("lp-pricing-failure"))
     assert result["status"] == "PRICING_FAILED"
     assert services["quotes"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_wrong_quote_show_cannot_get_amount_reply(tmp_path: Path):
+    runtime, _ = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
+    runtime.route = LiangpiaoRoute()
+    runtime.quotes = WrongShowLiangpiaoQuotes()
+    runtime.liangpiao_quote = LiangpiaoQuote()
+    runtime.liangpiao_facts = LiangpiaoFacts()
+    runtime.pricing_engine = LiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-wrong-show"))
+    assert result["status"] == "NO_SAFE_REPLY"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
 
 
 def test_liangpiao_stage_service_exposes_independent_boundaries():
