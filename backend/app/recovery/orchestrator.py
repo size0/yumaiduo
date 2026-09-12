@@ -41,9 +41,14 @@ class QuoteRecoveryOrchestrator:
                     action=RecoveryAction.STOP, reason="MAX_RECOVERY_STEPS", stop_scope="STOP_QUOTE_PIPELINE",
                 )
             stage = self._stages[step]
-            result = stage(context)
-            if hasattr(result, "__await__"):
-                result = await result
+            try:
+                result = stage(context)
+                if hasattr(result, "__await__"):
+                    result = await result
+            except Exception as error:
+                result = GateResult(gate="PIPELINE", status="STAGE_EXCEPTION", success=False,
+                                    safety_class="HARD_SAFETY", reason_code=type(error).__name__,
+                                    metadata={"stage": step})
             if not isinstance(result, GateResult):
                 raise TypeError(f"stage returned {type(result).__name__}, expected GateResult")
             context.current_gate = result.gate

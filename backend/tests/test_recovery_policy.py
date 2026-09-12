@@ -153,3 +153,18 @@ async def test_orchestrator_retry_budget_is_per_run():
     second = await orchestrator.run(QuotePipelineContext())
     assert first[1].status == "COST_READY"
     assert second[1].status == "COST_READY"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_isolates_stage_exception():
+    async def broken_stage(context):
+        raise RuntimeError("provider adapter exploded")
+
+    context, result, decision = await QuoteRecoveryOrchestrator([broken_stage]).run(QuotePipelineContext())
+
+    assert context.current_gate == "PIPELINE"
+    assert result.status == "STAGE_EXCEPTION"
+    assert result.reason_code == "RuntimeError"
+    assert result.metadata == {"stage": "broken_stage"}
+    assert decision.action is RecoveryAction.STOP
+    assert decision.stop_scope == "STOP_QUOTE_PIPELINE"
