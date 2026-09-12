@@ -131,6 +131,11 @@ class ReplyTemplates(BaseModel):
         min_length=1,
         max_length=3_000,
     )
+    exact_seat_quote_template: str = Field(
+        default="{城市}{影院}《{影片}》{日期} {场次}，{座位}，{逐座报价}/张，共{报价合计}",
+        min_length=1,
+        max_length=3_000,
+    )
     area_quote_template: str = Field(
         default="{报价名称}：{报价单价}\n{张数提示}\n{报价说明}\n最终支付金额仍以正式下单和支付结果为准。",
         min_length=1,
@@ -313,6 +318,7 @@ _TEMPLATE_LABELS = {
     "wplus_marker_confirmed_template": "W+已标记下单引导文案",
     "showtime_changed_template": "场次信息变化文案",
     "exact_quote_template": "精确座位报价",
+    "exact_seat_quote_template": "精确座位报价回复",
     "area_quote_template": "区域单价报价",
     "quote_unavailable_template": "无法取得报价",
     "quote_expired_template": "报价过期文案",
@@ -374,6 +380,7 @@ _ALLOWED_VARIABLES = {
     "wplus_marker_confirmed_template": set(),
     "showtime_changed_template": set(),
     "exact_quote_template": {"影片", "城市", "影院", "日期", "场次", "影厅", "座位", "报价名称", "逐座报价", "报价合计", "报价说明", "规则版本"},
+    "exact_seat_quote_template": {"影片", "城市", "影院", "日期", "场次", "影厅", "座位", "逐座报价", "报价合计"},
     "area_quote_template": {"影片", "城市", "影院", "日期", "场次", "影厅", "座位", "报价名称", "报价单价", "张数提示", "报价说明", "规则版本"},
     "quote_unavailable_template": {"失败原因"},
     "quote_expired_template": set(),

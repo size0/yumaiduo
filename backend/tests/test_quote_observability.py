@@ -259,3 +259,26 @@ def test_gate_trace_summary_missing_or_malformed_is_empty():
     assert _sanitize_gate_trace_for_log(None) == []
     assert _sanitize_gate_trace_for_log(["raw", {"gate": "COST", "metadata": {"x": 1}}])[0]["gate"] == "COST"
     assert _sanitize_gate_trace_for_log({"gate": "COST"}) == []
+
+
+def test_exact_and_wplus_quote_templates_are_configurable():
+    from app.canonical_buyer_reply import CanonicalBuyerReplyRenderer
+    from app.reply_template_store import ReplyTemplates
+    templates = ReplyTemplates(
+        exact_seat_quote_template="{影院}|{影片}|{日期}|{场次}|{座位}|{逐座报价}|{报价合计}",
+        area_quote_template="{影院}|{影片}|{日期}|{场次}|{报价单价}|{报价合计}",
+    )
+    renderer = CanonicalBuyerReplyRenderer(lambda: templates)
+    exact = renderer.render({"status": "QUOTED", "quote": {
+        "request_type": "EXACT_SEATS", "cinema": "C", "movie": "M", "quote_date": "2026-09-12",
+        "showtime_start": "20:00", "selected_seats": [{"seat_label": "9排12座"}],
+        "unit_sell_price_fen": 4370, "total_sell_price_fen": 4370,
+    }})
+    assert exact["text"] == "C|M|2026-09-12|20:00|9排12座|43.7|43.7"
+    assert "直接拍就行哈" not in exact["text"]
+    area = renderer.render({"status": "QUOTED", "quote": {
+        "request_type": "WPLUS_AREA", "cinema": "C", "movie": "M", "quote_date": "2026-09-12",
+        "showtime_start": "20:00", "ticket_count": 1, "unit_sell_price_fen": 4370,
+        "total_sell_price_fen": 4370,
+    }})
+    assert "43.7" in " ".join(item["text"] for item in area["messages"])

@@ -319,3 +319,17 @@ async def test_first_failed_gate_is_preserved_and_trace_is_safe():
     assert context.gate_trace[0]["missing_fields_count"] == 0
     assert "url" not in context.gate_trace[0]
     assert "raw_provider_payload" not in context.gate_trace[0]
+
+
+def test_reply_gate_allows_persisted_wplus_amount_from_authoritative_components():
+    payload = _authorized_reply_input()
+    payload["quote"].update({"request_type": "WPLUS_AREA", "unit_sell_price_fen": 2300, "ticket_count": 2})
+    payload["quote"].pop("total_sell_price_fen")
+    assert reply_eligibility_gate(payload).status == "AMOUNT_REPLY_ALLOWED"
+
+
+def test_reply_gate_rejects_wplus_without_authoritative_amount():
+    payload = _authorized_reply_input()
+    payload["quote"].update({"request_type": "WPLUS_AREA", "unit_sell_price_fen": 2300})
+    payload["quote"].pop("total_sell_price_fen")
+    assert reply_eligibility_gate(payload).status != "AMOUNT_REPLY_ALLOWED"

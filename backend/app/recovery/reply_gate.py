@@ -51,6 +51,11 @@ def validate_amount_reply_authority(result: dict[str, Any]) -> tuple[bool, str]:
     if "provider_preflight_verified" in quote and not bool(quote.get("provider_preflight_verified")):
         return False, "QUOTE_STALE"
     amount = quote.get("total_sell_price_fen", quote.get("total_quote_cents"))
+    if amount is None and str(quote.get("request_type") or "") == "WPLUS_AREA":
+        unit = quote.get("unit_sell_price_fen", quote.get("unit_quote_cents"))
+        count = quote.get("ticket_count")
+        if isinstance(unit, (int, float)) and not isinstance(unit, bool) and isinstance(count, int) and not isinstance(count, bool):
+            amount = unit * count
     if (amount is None or isinstance(amount, bool) or not isinstance(amount, (int, float))
             or not math.isfinite(amount) or amount <= 0):
         return False, "AMOUNT_MISSING"

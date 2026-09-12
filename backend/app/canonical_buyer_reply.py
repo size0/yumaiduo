@@ -125,7 +125,7 @@ class CanonicalBuyerReplyRenderer:
                 total = _amount(quote.get("total_sell_price_fen") or quote.get("total_quote_cents"))
                 if isinstance(count, int) and not isinstance(count, bool) and count >= 1 and total and unit:
                     summary_message = _template(templates, "recognition_template", "{影院}\n《{影片}》\n{日期} {场次}", values)
-                    price_message = _template(templates, "area_quote_template", "W+ {报价单价}一张，共{张数}张{报价合计}元。", {
+                    price_message = _template(templates, "area_quote_template", "{城市}{影院}《{影片}》{日期} {场次}，{报价单价}/张，共{报价合计}", {
                         **values, "报价单价": unit, "张数": count, "报价合计": total,
                         "张数提示": f"共{count}张，合计{total}元",
                     })
@@ -172,7 +172,9 @@ class CanonicalBuyerReplyRenderer:
                     prefix = f"{summary}，" if summary else ""
                     return {
                         "kind": "QUOTE_READY_EXACT",
-                        "text": f"{prefix}{'、'.join(labels)}，{unit}/张，共{total}，直接拍就行哈",
+                        "text": _template(templates, "exact_seat_quote_template",
+                                        "{城市}{影院}《{影片}》{日期} {场次}，{座位}，{逐座报价}/张，共{报价合计}",
+                                        {**values, "逐座报价": unit, "报价合计": total}),
                     }
             if provider_route == "LIANGPIAO" and not quote.get("selected_seats"):
                 return {
