@@ -138,3 +138,25 @@ async def test_text_cancel_does_not_requote(tmp_path: Path):
         "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
     })
     assert result["status"] == "NON_AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_text_time_and_count_patch_are_forwarded(tmp_path: Path):
+    facts_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    facts_store.save(tenant_id="tenant", shop_id="shop", buyer_id="buyer", chat_id="chat",
+                     purchase_context_id="item", facts={"city": "合肥", "cinema": "万达影城", "movie": "奥德赛",
+                     "quote_date": "2026-09-13", "showtime_start": "14:30"}, source="test", fact_tier="verified")
+    class Pricing(FakePricing):
+        def price_gate(self, cost, show, seat, rules, **kwargs):
+            assert kwargs["ticket_count"] == 2
+            return super().price_gate(cost, show, seat, rules, **kwargs)
+    runtime = RecoveryQuoteRuntime(
+        recognition_service=FakeRecognition(), route_service=FakeRoute(), show_service=FakeShow(),
+        seat_service=FakeSeat(), cost_service=FakeCost(), pricing_service=Pricing(),
+        quote_service=FakeQuotes(), rules_provider=lambda: object(), fact_store=facts_store,
+    )
+    result = await runtime.process_text_event({
+        "text": "13点10分那场，两张", "envelope": {"id": "event-text-2", "tenantId": "tenant", "payload": {"itemId": "item", "text": "13点10分那场，两张"}},
+        "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
+    })
+    assert result["status"] == "QUOTED"
