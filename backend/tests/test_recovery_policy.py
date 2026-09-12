@@ -71,6 +71,30 @@ def test_reply_gate_rejects_missing_quote_without_throwing():
     assert result.success is False
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (lambda quote: quote.update({"buyer_id": "other"}), "NO_SAFE_REPLY"),
+        (lambda quote: quote.update({"show_id": "other-show"}), "NO_SAFE_REPLY"),
+        (lambda quote: quote.update({"generation": 1}), "NO_SAFE_REPLY"),
+        (lambda quote: quote.update({"expires_at": "2020-01-01T00:00:00+00:00"}), "NO_SAFE_REPLY"),
+    ],
+)
+def test_reply_gate_rejects_quote_record_authority_mismatch(mutation, expected):
+    quote = {
+        "record_id": "r1", "tenant_id": "t", "shop_id": "s", "buyer_id": "b",
+        "chat_id": "c", "purchase_context_id": "p", "show_id": "show-1", "generation": 2,
+        "expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    mutation(quote)
+    gate = reply_eligibility_gate({
+        "status": "QUOTED", "quote": quote, "quote_persist_status": "QUOTE_PERSISTED",
+        "identity": {"tenant_id": "t", "shop_id": "s", "buyer_id": "b", "chat_id": "c", "purchase_context_id": "p"},
+        "verified_show_id": "show-1", "pipeline_generation": 2,
+    })
+    assert gate.status == expected
+
+
 def test_context_merge_prioritizes_current_and_invalidates_quote_chain():
     context = QuotePipelineContext(conversation_facts={"cinema": "A", "date": "2026-09-12"}, show="old", quote_record="old")
     context.merge_facts({"cinema": "B"}, stored={"cinema": "stale", "movie": "M"})
