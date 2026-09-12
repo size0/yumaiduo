@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +13,7 @@ from app.show_resolve_v2.models import ShowResolutionResult
 from app.seat_facts_v2.models import SeatFactsResult
 from app.wanda_cost_v2.models import WandaCostFacts
 from app.wanda_pricing_v2.models import WandaPricingResult
+from app.selected_seat_quote_service import SelectedSeatQuoteResult
 
 
 def _gate(gate: str, status: str, facts=None, *, success=True, retryable=False):
@@ -201,3 +204,67 @@ async def test_quote_persist_is_the_only_amount_authority(tmp_path: Path):
     assert services["quotes"].calls
     assert result["reply_gate"]["status"] == "AMOUNT_REPLY_ALLOWED"
     assert result["quote"]["record_id"] == "r1"
+
+
+class LiangpiaoRoute:
+    async def resolve_gate(self, recognition):
+        return _gate("CINEMA_ROUTE", "LIANGPIAO", CinemaRouteResult(
+            route="LIANGPIAO", liangpiao_cinema_id="9001", resolution_reason="CROSSWALK",
+        ).model_dump(mode="json"))
+
+
+class LiangpiaoQuote:
+    async def quote(self, request):
+        return SelectedSeatQuoteResult(
+            quote_id="lp-q", quote_hash="a" * 64, show_id="lp-show", seats=request.seats,
+            provider_amount_fen=3000, buyer_amount_fen=3500, pricing_rule_version="test",
+            expires_at=datetime.now(timezone.utc), snapshot={"preflight_response": {"ok": True}},
+            generation=1, trace_id=request.trace_id,
+        )
+
+
+class LiangpiaoFacts:
+    def from_preflight(self, payload, *, request):
+        return SimpleNamespace(provider="LIANGPIAO", payload=payload)
+
+
+class LiangpiaoEngine:
+    def quote(self, facts, rules):
+        return SimpleNamespace(total_quote_cents=3500, provider="LIANGPIAO", quote_route="LIANGPIAO",
+                               price_mode="FIXED", quote_scope="exact_seats", seat_zone_type="REGULAR",
+                               provider_quote_id="lp-q", provider_quote_hash="a" * 64)
+
+
+class LiangpiaoQuotes(RecordingQuotes):
+    def persist_liangpiao(self, pricing, **kwargs):
+        return {"record_id": "lp-r", "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
+                "buyer_id": kwargs["buyer_id"], "chat_id": kwargs["chat_id"],
+                "purchase_context_id": kwargs["purchase_context_id"], "liangpiao_show_id": kwargs["show_id"]}
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_runtime_branch_uses_provider_and_persists(tmp_path: Path):
+    runtime, services = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
+    runtime.route = LiangpiaoRoute()
+    runtime.quotes = LiangpiaoQuotes()
+    runtime.liangpiao_quote = LiangpiaoQuote()
+    runtime.liangpiao_facts = LiangpiaoFacts()
+    runtime.pricing_engine = LiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-1"))
+    assert result["status"] == "QUOTED"
+    assert result["quote"]["liangpiao_show_id"] == "lp-show"
+    assert services["show"].calls == []
+    assert services["cost"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_runtime_branch_requests_exact_seats(tmp_path: Path):
+    runtime, _ = _runtime(tmp_path)
+    runtime.route = LiangpiaoRoute()
+    runtime.quotes = LiangpiaoQuotes()
+    runtime.liangpiao_quote = LiangpiaoQuote()
+    runtime.liangpiao_facts = LiangpiaoFacts()
+    runtime.pricing_engine = LiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-2"))
+    assert result["status"] == "NEED_CLARIFICATION"
+    assert result["reason"] == "SELECTED_SEATS_REQUIRED"

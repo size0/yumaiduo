@@ -86,14 +86,17 @@ class RecoveryQuoteRuntime:
             pricing = self.pricing_engine.quote(facts, self.rules_provider())
             if pricing.total_quote_cents is None:
                 return {"status": "COST_UNAVAILABLE", "reason": "LIANGPIAO_TOTAL_MISSING"}
-            record = self.quotes.persist_liangpiao(pricing, tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
-                buyer_id=identity["buyer_id"], chat_id=identity["chat_id"], purchase_context_id=identity["purchase_context_id"],
-                request_id=f'{identity["event_id"]}:recovery-liangpiao', city=recognition.city_text or "",
-                cinema_id=str(cinema_id), cinema_name=recognition.cinema_text or "",
-                movie=recognition.movie or "", quote_date=recognition.show_date or "", showtime_start=recognition.start_time or "",
-                hall=recognition.hall or "", show_id=preflight.show_id, selected_seats=[item.model_dump(mode="json") for item in preflight.seats],
-                event_id=identity["event_id"], recognition_id=recognition.provider_recognize_id, message_id=identity.get("message_id"),
-                provider_snapshot_id=preflight.quote_id, provider_preflight_expires_at=preflight.snapshot.get("provider_preflight_expires_at"))
+            try:
+                record = self.quotes.persist_liangpiao(pricing, tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
+                    buyer_id=identity["buyer_id"], chat_id=identity["chat_id"], purchase_context_id=identity["purchase_context_id"],
+                    request_id=f'{identity["event_id"]}:recovery-liangpiao', city=recognition.city_text or "",
+                    cinema_id=str(cinema_id), cinema_name=recognition.cinema_text or "",
+                    movie=recognition.movie or "", quote_date=recognition.show_date or "", showtime_start=recognition.start_time or "",
+                    hall=recognition.hall or "", show_id=preflight.show_id, selected_seats=[item.model_dump(mode="json") for item in preflight.seats],
+                    event_id=identity["event_id"], recognition_id=recognition.provider_recognize_id, message_id=identity.get("message_id"),
+                    provider_snapshot_id=preflight.quote_id, provider_preflight_expires_at=preflight.snapshot.get("provider_preflight_expires_at"))
+            except Exception as error:
+                return {"status": "QUOTE_PERSIST_FAILED", "reason": type(error).__name__}
             if not record:
                 return {"status": "QUOTE_PERSIST_FAILED", "reason": "LIANGPIAO_QUOTE_NOT_PERSISTED"}
             return {"status": "QUOTED", "quote": record, "provider_route": "LIANGPIAO", "provider_verified": True}
