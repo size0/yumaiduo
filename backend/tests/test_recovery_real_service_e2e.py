@@ -78,6 +78,35 @@ class _WandaReadSource:
         }]}}}
 
 
+class _FailingPricingEngine:
+    def quote(self, facts, rules):
+        from app.pricing.errors import PricingError
+        raise PricingError("pricing_failed", "fake pricing failure")
+
+
+class _FailingQuoteStore(QuoteRecordStore):
+    def save_quote(self, *args, **kwargs):
+        raise RuntimeError("fake quote persistence failure")
+
+
+class _MultiShowSource(_WandaReadSource):
+    async def get_showtimes(self, *args):
+        response = await super().get_showtimes(*args)
+        show = response["data"]["showtimeFilmInf"][0]["showtimeFilmDateInf"][0]["showtimesInf"]["showtimeList"][0]
+        response["data"]["showtimeFilmInf"][0]["showtimeFilmDateInf"][0]["showtimesInf"]["showtimeList"] = [
+            show, {**show, "showtimeId": "show-2", "realtime": "16:30"},
+        ]
+        return response
+
+
+class _MultipleCinemaSource(_WandaReadSource):
+    async def get_cinema_list(self, *args):
+        return {"code": 0, "data": {"cinemaList": [
+            {"storeId": "store-1", "cinemaName": "\u5408\u80a5\u4e07\u8fbe\u5f71\u57ce", "cityId": "city-1"},
+            {"storeId": "store-2", "cinemaName": "\u5408\u80a5\u4e07\u8fbe\u5f71\u57ce", "cityId": "city-1"},
+        ]}}
+
+
 class _LiangpiaoQuote:
     async def quote(self, request):
         return SelectedSeatQuoteResult(
@@ -217,6 +246,54 @@ async def test_real_cost_probe_required_is_safe(tmp_path: Path):
     result = await _wanda_runtime(tmp_path, _WandaReadSource(priced=False)).process_image_event(_event("probe-needed"))
     assert result["status"] in {"PROBE_REQUIRED", "COST_UNAVAILABLE"}
     assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_real_wplus_without_selected_seats_continues(tmp_path: Path):
+    result = await _wanda_runtime(tmp_path, _WandaReadSource(), _RecognitionTransport(seats=False)).process_image_event(_event("wplus-no-seat"))
+    assert result["status"] == "QUOTED"
+
+
+@pytest.mark.asyncio
+async def test_real_pricing_failure_stops_before_quote(tmp_path: Path):
+    result = await _wanda_runtime(tmp_path, _WandaReadSource(), pricing_engine=_FailingPricingEngine()).process_image_event(_event("pricing-down"))
+    assert result["status"] == "INPUT_INCOMPLETE"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_real_quote_persist_failure_has_no_amount(tmp_path: Path):
+    source = _WandaReadSource()
+    runtime = RecoveryQuoteRuntime(
+        recognition_service=RecognitionV2Service(_RecognitionTransport()), route_service=CinemaRouteV2Service(source),
+        show_service=ShowResolveV2Service(source), seat_service=SeatFactsV2Service(source),
+        cost_service=WandaCostResolutionService(), pricing_service=WandaPricingV2Service(),
+        quote_service=QuoteV2Service(_FailingQuoteStore(tmp_path / "quotes.json")),
+        rules_provider=lambda: PricingRulesSnapshot(),
+    )
+    result = await runtime.process_image_event(_event("persist-down"))
+    assert result["status"] == "PERSIST_FAILED"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_real_show_ordinal_selects_provider_verified_second_show(tmp_path: Path):
+    source = _MultiShowSource()
+    runtime = _wanda_runtime(tmp_path, source)
+    runtime.fact_store = __import__("app.conversation_fact_store", fromlist=["ConversationFactStore"]).ConversationFactStore(tmp_path / "facts.sqlite")
+    first = await runtime.process_image_event(_event("ordinal-context"))
+    assert first["status"] == "QUOTED"
+    followup = {"envelope": {"id": "ordinal-followup", "tenantId": "tenant-1", "payload": {"itemId": "purchase-1", "text": "\u7b2c\u4e8c\u573a"}},
+                "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
+    result = await runtime.process_text_event(followup)
+    assert result["status"] == "QUOTED"
+    assert result["quote"]["wanda_show_id"] == "show-2"
+
+
+@pytest.mark.asyncio
+async def test_real_route_multiple_cinemas_requires_clarification(tmp_path: Path):
+    result = await _wanda_runtime(tmp_path, _MultipleCinemaSource()).process_image_event(_event("multiple-cinema"))
+    assert result["status"] in {"WANDA_CINEMA_NOT_UNIQUE", "SHOW_FINGERPRINT_NOT_UNIQUE"}
 
 
 @pytest.mark.asyncio

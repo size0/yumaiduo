@@ -104,6 +104,12 @@ class RecoveryQuoteRuntime:
                 if changed_selection and key in {"hall", "selected_seats"}:
                     continue
                 source_key = mapping.get(key, key)
+                relative_selection = bool(state.get("showtime_ordinal")) or (
+                    bool(getattr(recognition, "dimension", None))
+                    and getattr(recognition, "dimension", None) != stored_facts.get("dimension")
+                )
+                if source_key == "showtime_start" and relative_selection:
+                    continue
                 if source_key in stored_facts and not getattr(recognition, key, None):
                     recognition = recognition.model_copy(update={key: stored_facts[source_key]})
             state["recognition"] = recognition
@@ -354,6 +360,10 @@ class RecoveryQuoteRuntime:
         ordinal_words = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
         showtime_ordinal = (ordinal_words.get(ordinal_match.group(1), int(ordinal_match.group(1)) if ordinal_match.group(1).isdigit() else None)
                             if ordinal_match else facts.get("showtime_ordinal"))
+        if ordinal_match or "那场" in text or "imax" in text.lower():
+            # Relative/dimension references select from the provider show list;
+            # an old absolute time must not override that selection.
+            start_time = None
         if "明天" in text:
             quote_date = (datetime.now().date() + timedelta(days=1)).isoformat()
         elif "后天" in text:
