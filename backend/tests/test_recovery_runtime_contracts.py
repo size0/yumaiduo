@@ -238,6 +238,13 @@ class LiangpiaoQuote:
         )
 
 
+class MissingShowLiangpiaoQuote(LiangpiaoQuote):
+    async def quote(self, request):
+        result = await super().quote(request)
+        result.show_id = ""
+        return result
+
+
 class UnavailableLiangpiaoQuote:
     async def quote(self, request):
         from app.selected_seat_quote_service import QuoteServiceError
@@ -355,6 +362,17 @@ async def test_liangpiao_wrong_quote_show_cannot_get_amount_reply(tmp_path: Path
     result = await runtime.process_image_event(_event("lp-wrong-show"))
     assert result["status"] == "NO_SAFE_REPLY"
     assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_missing_verified_show_stops_before_amount(tmp_path: Path):
+    runtime, _ = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
+    runtime.route = LiangpiaoRoute()
+    runtime.liangpiao_quote = MissingShowLiangpiaoQuote()
+    runtime.liangpiao_facts = LiangpiaoFacts()
+    runtime.pricing_engine = LiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-missing-show"))
+    assert result["status"] == "SHOW_UNRESOLVED"
 
 
 def test_liangpiao_stage_service_exposes_independent_boundaries():

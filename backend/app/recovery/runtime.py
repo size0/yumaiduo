@@ -55,87 +55,6 @@ class RecoveryQuoteRuntime:
     async def process_image_event(self, body: dict[str, Any]) -> dict[str, Any]:
         return await self._process_image_event(body)
 
-    async def _run_liangpiao(self, recognition: RecognitionResult, route: CinemaRouteResult,
-                             identity: dict[str, str], *, ticket_count: int | None = None) -> dict[str, Any] | None:
-        """Run the Liangpiao read/preflight/pricing path without legacy runtime."""
-        if self.liangpiao_stages is not None:
-            return await self._run_liangpiao_staged(recognition, route, identity)
-        if route.route != "LIANGPIAO" or self.liangpiao_quote is None or self.liangpiao_facts is None or self.pricing_engine is None:
-            return None
-        seats: list[SelectedSeat] = []
-        for raw in recognition.selected_seats or []:
-            match = re.search(r"(\d+)\s*[排行]\s*(\d+)\s*[座號号]", str(raw))
-            if not match:
-                return {"status": "NEED_CLARIFICATION", "reason": "SELECTED_SEATS_REQUIRED", "missing_fields": ["selected_seats"]}
-            seats.append(SelectedSeat(row_no=int(match.group(1)), col_no=int(match.group(2)), seat_no=str(raw)))
-        if not seats:
-            return {"status": "NEED_CLARIFICATION", "reason": "SELECTED_SEATS_REQUIRED", "missing_fields": ["selected_seats"]}
-        raw = recognition.raw_provider_result if isinstance(recognition.raw_provider_result, dict) else {}
-        raw_values = raw.get("rawResults") if isinstance(raw.get("rawResults"), dict) else raw
-        cinema_id = route.liangpiao_cinema_id or raw_values.get("cinemaId") or raw_values.get("cinema_id")
-        show_id = raw_values.get("showId") or raw_values.get("show_id")
-        if not cinema_id:
-            return {"status": "PROVIDER_UNAVAILABLE", "reason": "LIANGPIAO_CINEMA_ID_REQUIRED"}
-        if show_id:
-            show_id = str(show_id)
-        try:
-            request = SelectedSeatQuoteRequest(
-                tenant_id=identity["tenant_id"], conversation_id=identity["chat_id"] or identity["event_id"],
-                cinema_id=int(cinema_id), show_id=show_id, cinema_name=recognition.cinema_text,
-                movie_name=recognition.movie, show_date=recognition.show_date,
-                showtime_start=recognition.start_time, hall_name=recognition.hall,
-                seats=seats, generation=1, trace_id=f'{identity["event_id"]}:liangpiao',
-            )
-            preflight = await self.liangpiao_quote.quote(request)
-            payload = preflight.snapshot.get("preflight_response") if isinstance(preflight.snapshot, dict) else None
-            if not isinstance(payload, dict):
-                return {"status": "PROVIDER_UNAVAILABLE", "reason": "LIANGPIAO_PREFLIGHT_RESPONSE_MISSING"}
-            facts = self.liangpiao_facts.from_preflight(payload, request={"showId": preflight.show_id,
-                "priceMode": preflight.price_mode, "seats": [item.model_dump(mode="json") for item in preflight.seats]})
-            pricing = self.pricing_engine.quote(facts, self.rules_provider())
-            if pricing.total_quote_cents is None:
-                return {"status": "COST_UNAVAILABLE", "reason": "LIANGPIAO_TOTAL_MISSING"}
-            try:
-                record = self.quotes.persist_liangpiao(pricing, tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
-                    buyer_id=identity["buyer_id"], chat_id=identity["chat_id"], purchase_context_id=identity["purchase_context_id"],
-                    request_id=f'{identity["event_id"]}:recovery-liangpiao', city=recognition.city_text or "",
-                    cinema_id=str(cinema_id), cinema_name=recognition.cinema_text or "",
-                    movie=recognition.movie or "", quote_date=recognition.show_date or "", showtime_start=recognition.start_time or "",
-                    hall=recognition.hall or "", show_id=preflight.show_id, selected_seats=[item.model_dump(mode="json") for item in preflight.seats],
-                    event_id=identity["event_id"], recognition_id=recognition.provider_recognize_id, message_id=identity.get("message_id"),
-                    provider_snapshot_id=preflight.quote_id, provider_preflight_expires_at=preflight.snapshot.get("provider_preflight_expires_at"))
-            except Exception as error:
-                return {"status": "QUOTE_PERSIST_FAILED", "reason": type(error).__name__}
-            if not record:
-                return {"status": "QUOTE_PERSIST_FAILED", "reason": "LIANGPIAO_QUOTE_NOT_PERSISTED"}
-            return {"status": "QUOTED", "quote": record, "provider_route": "LIANGPIAO", "provider_verified": True}
-        except (QuoteServiceError, PricingError, ValueError) as error:
-            return {"status": "PROVIDER_UNAVAILABLE", "reason": getattr(error, "code", type(error).__name__)}
-
-    async def _run_liangpiao_staged(self, recognition: RecognitionResult, route: CinemaRouteResult,
-                                    identity: dict[str, str]) -> dict[str, Any]:
-        stages = self.liangpiao_stages
-        assert stages is not None
-        try:
-            request = stages.prepare_request(recognition, route, identity)
-        except ValueError as error:
-            return {"status": "NEED_CLARIFICATION", "reason": str(error), "missing_fields": ["selected_seats"]}
-        except (QuoteServiceError, ValueError) as error:
-            return {"status": "PROVIDER_UNAVAILABLE", "reason": getattr(error, "code", type(error).__name__)}
-        try:
-            preflight = await stages.preflight(request)
-            facts = stages.cost_facts(preflight, request)
-            pricing = stages.price(facts)
-        except (QuoteServiceError, PricingError, ValueError) as error:
-            return {"status": "PROVIDER_UNAVAILABLE", "reason": getattr(error, "code", type(error).__name__)}
-        try:
-            record = stages.persist(pricing, preflight, request, recognition, identity)
-        except Exception as error:
-            return {"status": "QUOTE_PERSIST_FAILED", "reason": type(error).__name__}
-        if not record:
-            return {"status": "QUOTE_PERSIST_FAILED", "reason": "LIANGPIAO_QUOTE_NOT_PERSISTED"}
-        return {"status": "QUOTED", "quote": record, "provider_route": "LIANGPIAO", "provider_verified": True}
-
     async def _process_image_event(self, body: dict[str, Any], *, recognition_override: GateResult | None = None,
                                    ticket_count: int | None = None, showtime_ordinal: int | None = None,
                                    candidate_shows: list[Any] | None = None) -> dict[str, Any]:
@@ -217,6 +136,9 @@ class RecoveryQuoteRuntime:
                                       safety_class="RECOVERABLE", reason_code=error.code)
                 try:
                     preflight = await stages.preflight(state["liangpiao_request"])
+                    if not str(getattr(preflight, "show_id", "") or "").strip():
+                        return GateResult(gate="SHOW", status="SHOW_UNRESOLVED", success=False,
+                                          safety_class="RECOVERABLE", reason_code="LIANGPIAO_SHOW_ID_REQUIRED")
                     state["liangpiao_preflight"] = preflight
                 except (QuoteServiceError, PricingError, ValueError) as error:
                     return GateResult(gate="SHOW", status="PROVIDER_UNAVAILABLE", success=False,
