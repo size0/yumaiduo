@@ -10,10 +10,10 @@ from .models import (
     WandaCostItem,
     WandaProbeTarget,
 )
-from ..recovery.service_contracts import CostResolutionGateMixin
+from ..recovery.models import GateResult, SafetyClass
 
 
-class WandaCostResolutionService(CostResolutionGateMixin):
+class WandaCostResolutionService:
     """Resolve Wanda cost facts without Probe, Pricing, or side effects."""
 
     def resolve(
@@ -32,6 +32,14 @@ class WandaCostResolutionService(CostResolutionGateMixin):
         if seat_facts.has_manual_mark or not exact_seats:
             return self._resolve_wplus_area(show_facts, seat_facts)
         return self._resolve_exact(exact_seats)
+
+    def resolve_cost_gate(self, show_facts: ShowResolutionResult, seat_facts: SeatFactsResult) -> GateResult:
+        result = self.resolve(show_facts, seat_facts)
+        facts = result.model_dump(mode="json")
+        return GateResult(gate="COST", status=result.status, success=result.status == "COST_READY",
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          provider_verified=result.status == "COST_READY",
+                          reason_code=facts.get("reason"), metadata={"source": "cost_resolution"})
 
     def _resolve_wplus_area(
         self,

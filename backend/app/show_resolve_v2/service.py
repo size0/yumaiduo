@@ -9,12 +9,20 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 from .models import ShowResolutionResult, WandaShowCandidate
-from ..recovery.service_contracts import ShowResolveGateMixin
+from ..recovery.models import GateResult, SafetyClass
 from .wanda_source import WandaShowSource
 
 
-class ShowResolveV2Service(ShowResolveGateMixin):
+class ShowResolveV2Service:
     """Resolve a Wanda show ID only after the store ID is already authoritative."""
+    async def resolve_gate(self, request: Mapping[str, Any]) -> GateResult:
+        result = await self.resolve(request)
+        facts = result.model_dump(mode="json")
+        return GateResult(gate="SHOW", status=result.status, success=result.status == "RESOLVED",
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          missing_fields=["showtime"] if result.status == "INPUT_INCOMPLETE" else [],
+                          candidates=[item.model_dump(mode="json") for item in result.candidates],
+                          reason_code=result.resolution_reason, metadata={"source": "show_resolve"})
 
     def __init__(self, source: WandaShowSource) -> None:
         self._source = source

@@ -7,11 +7,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .models import ExactSeatFact, SeatFactsResult, WplusAreaFact
-from ..recovery.service_contracts import SeatFactsGateMixin
+from ..recovery.models import GateResult, SafetyClass
 from .wanda_source import WandaRealtimeSeatSource
 
 
-class SeatFactsV2Service(SeatFactsGateMixin):
+class SeatFactsV2Service:
     """Read Wanda realtime seat facts after store/show identity is complete."""
 
     def __init__(self, source: WandaRealtimeSeatSource) -> None:
@@ -70,6 +70,15 @@ class SeatFactsV2Service(SeatFactsGateMixin):
         if request_type == "EXACT_SEATS":
             return _resolve_exact(store_id, show_id, mark, selected_seats, areas)
         return _resolve_wplus(store_id, show_id, mark, areas)
+
+    async def resolve_gate(self, request: Mapping[str, Any]) -> GateResult:
+        result = await self.resolve(request)
+        facts = result.model_dump(mode="json")
+        return GateResult(gate="SEAT", status=result.status,
+                          success=result.status in {"WPLUS_AREA_RESOLVED", "EXACT_SEATS_RESOLVED", "SEATS_NOT_SELECTED", "SEAT_AREA_ONLY"},
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          missing_fields=["selected_seats"] if result.status in {"MANUAL_MARK_REQUIRED", "INPUT_INCOMPLETE", "SELECTED_SEATS_REQUIRED"} else [],
+                          reason_code=facts.get("reason") or facts.get("resolution_reason"), metadata={"source": "seat_facts"})
 
 
 def _resolve_exact(

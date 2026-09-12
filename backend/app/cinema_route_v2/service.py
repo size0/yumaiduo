@@ -11,7 +11,7 @@ from typing import Any
 from ..recognition_v2.models import RecognitionResult
 
 from .models import CinemaRouteResult, WandaCinemaCandidate
-from ..recovery.service_contracts import CinemaRouteGateMixin
+from ..recovery.models import GateResult, SafetyClass
 from .wanda_source import WandaCatalogSource, cinema_items, city_items
 
 
@@ -26,7 +26,7 @@ _GENERIC_TOKENS = {
 _GENERIC_CHARS = frozenset("万达影城影院电影广场店国际中心厅")
 
 
-class CinemaRouteV2Service(CinemaRouteGateMixin):
+class CinemaRouteV2Service:
     """Resolve only Wanda city/store identity from an isolated recognition fact."""
 
     def __init__(
@@ -150,6 +150,15 @@ class CinemaRouteV2Service(CinemaRouteGateMixin):
                 else "CINEMA_TEXT_INSUFFICIENT"
             ),
         )
+
+    async def resolve_gate(self, recognition: RecognitionResult) -> GateResult:
+        result = await self.resolve(recognition)
+        facts = result.model_dump(mode="json")
+        status = result.route if result.route != "UNRESOLVED" else result.resolution_reason
+        return GateResult(gate="CINEMA_ROUTE", status=status, success=result.route != "UNRESOLVED",
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          candidates=[item.model_dump(mode="json") for item in result.candidates],
+                          reason_code=result.resolution_reason, metadata={"source": "cinema_route"})
 
     async def _resolve_by_show_fingerprint(
         self, recognition: RecognitionResult, wanda_city_id: str, wanda_city_name: str,

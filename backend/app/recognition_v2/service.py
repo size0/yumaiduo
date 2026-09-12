@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from .liangpiao import LiangpiaoRecognitionResponse, LiangpiaoV2Transport
 from .models import RecognitionResult
-from ..recovery.service_contracts import RecognitionGateMixin
+from ..recovery.models import GateResult, SafetyClass
 
 
 _SHOWTIME_PATTERN = re.compile(r"(?P<date>\d{4}-\d{1,2}-\d{1,2})[ T](?P<time>\d{1,2}:[0-5]\d)")
@@ -27,7 +27,7 @@ class RecognitionV2Transport(Protocol):
     async def aclose(self) -> None: ...
 
 
-class RecognitionV2Service(RecognitionGateMixin):
+class RecognitionV2Service:
     """Isolated recognition facts: provider call, raw preservation, normalization."""
 
     def __init__(self, transport: RecognitionV2Transport, *, enrichment_service: Any | None = None) -> None:
@@ -63,6 +63,14 @@ class RecognitionV2Service(RecognitionGateMixin):
             if isinstance(enriched, RecognitionResult):
                 result = enriched
         return result
+
+    async def recognize_gate(self, image_url: str, **kwargs: Any) -> GateResult:
+        result = await self.recognize(image_url, **kwargs)
+        facts = result.model_dump(mode="json")
+        status = "RECOGNIZED" if result.movie or result.cinema_text else "PARTIAL"
+        return GateResult(gate="RECOGNITION", status=status, success=True,
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          reason_code=facts.get("reason"), metadata={"source": "recognition"})
 
     async def aclose(self) -> None:
         await self._transport.aclose()
