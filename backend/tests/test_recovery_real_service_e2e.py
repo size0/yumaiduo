@@ -99,6 +99,21 @@ class _MultiShowSource(_WandaReadSource):
         return response
 
 
+class _ChangedShowTransport(_RecognitionTransport):
+    def __init__(self):
+        super().__init__(seats=True)
+        self.calls = 0
+
+    async def recognize(self, image_url, **kwargs):
+        self.calls += 1
+        response = await super().recognize(image_url, **kwargs)
+        if self.calls == 2:
+            raw = dict(response.data["rawResults"])
+            raw["showtime"] = "2026-09-13 16:30"
+            response.data["rawResults"] = raw
+        return response
+
+
 class _MultipleCinemaSource(_WandaReadSource):
     async def get_cinema_list(self, *args):
         return {"code": 0, "data": {"cinemaList": [
@@ -294,6 +309,24 @@ async def test_real_show_ordinal_selects_provider_verified_second_show(tmp_path:
 async def test_real_route_multiple_cinemas_requires_clarification(tmp_path: Path):
     result = await _wanda_runtime(tmp_path, _MultipleCinemaSource()).process_image_event(_event("multiple-cinema"))
     assert result["status"] in {"WANDA_CINEMA_NOT_UNIQUE", "SHOW_FINGERPRINT_NOT_UNIQUE"}
+
+
+@pytest.mark.asyncio
+async def test_real_runtime_show_change_invalidates_persisted_quote_chain(tmp_path: Path):
+    from app.conversation_fact_store import ConversationFactStore
+    runtime = _wanda_runtime(tmp_path, _MultiShowSource(), _ChangedShowTransport())
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    first = await runtime.process_image_event(_event("change-1"))
+    second = await runtime.process_image_event(_event("change-2"))
+    assert first["status"] == "QUOTED"
+    assert second["status"] == "QUOTED"
+    assert second["quote"]["wanda_show_id"] == "show-2"
+    stored = runtime.fact_store.load_context(
+        tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+        purchase_context_id="purchase-1",
+    )
+    assert stored["facts"]["show_id"] == "show-2"
+    assert "quote_record" not in stored["facts"]
 
 
 @pytest.mark.asyncio

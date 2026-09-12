@@ -313,6 +313,10 @@ class RecoveryQuoteRuntime:
                     dependency_to_fact.get(dependent, dependent)
                     for dependent in invalidated_fields(changed)
                 )
+            # A dependency is stale only when this run did not replace it
+            # with a newly verified fact.  Never delete the current show or
+            # quote while clearing the predecessor's lineage.
+            invalidated.difference_update(key for key in facts if key in invalidated)
             fact_purchase_context_id = identity["purchase_context_id"] or f"chat:{identity['chat_id']}"
             self.fact_store.save(
                 tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
