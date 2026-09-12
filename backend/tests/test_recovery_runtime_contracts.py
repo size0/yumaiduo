@@ -112,7 +112,8 @@ class RecordingQuotes:
     def persist_gate(self, *args, **kwargs):
         self.calls.append((args, kwargs))
         return _gate("QUOTE", "QUOTE_PERSISTED", {"quote_record": {
-            "record_id": "r1", "total": 4500,
+            "record_id": "r1", "total": 4500, "total_sell_price_fen": 4500,
+            "generation": 1, "expires_at": "2099-01-01T00:00:00+00:00",
             "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
             "buyer_id": kwargs["buyer_id"], "chat_id": kwargs["chat_id"],
             "purchase_context_id": kwargs["purchase_context_id"], "wanda_show_id": "show-1",
@@ -314,7 +315,8 @@ class BrokenLiangpiaoEngine(LiangpiaoEngine):
 
 class LiangpiaoQuotes(RecordingQuotes):
     def persist_liangpiao(self, pricing, **kwargs):
-        return {"record_id": "lp-r", "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
+        return {"record_id": "lp-r", "total_sell_price_fen": 3500, "generation": 1,
+                "expires_at": "2099-01-01T00:00:00+00:00", "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
                 "buyer_id": kwargs["buyer_id"], "chat_id": kwargs["chat_id"],
                 "purchase_context_id": kwargs["purchase_context_id"], "liangpiao_show_id": kwargs["show_id"]}
 

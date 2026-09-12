@@ -69,7 +69,8 @@ class FakePricing:
 class FakeQuotes:
     def persist_gate(self, *args, **kwargs):
         return gate("QUOTE", "QUOTE_PERSISTED", {"quote_record": {
-            "record_id": "record-1", "total": 4500,
+            "record_id": "record-1", "total": 4500, "total_sell_price_fen": 4500,
+            "generation": 8, "expires_at": "2099-01-01T00:00:00+00:00",
             "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
             "buyer_id": kwargs["buyer_id"], "chat_id": kwargs["chat_id"],
             "purchase_context_id": kwargs["purchase_context_id"], "wanda_show_id": "show-1",
@@ -85,7 +86,7 @@ async def test_recovery_runtime_runs_full_quote_path(tmp_path: Path):
         fact_store=ConversationFactStore(tmp_path / "facts.sqlite"),
     )
     result = await runtime.process_image_event({
-        "envelope": {"id": "event-1", "tenantId": "tenant", "payload": {"imageUrls": ["https://example/image"]}},
+        "envelope": {"id": "event-1", "tenantId": "tenant", "payload": {"imageUrls": ["https://example/image"], "itemId": "item-1"}},
         "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
     })
     assert result["status"] == "QUOTED"

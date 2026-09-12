@@ -416,9 +416,11 @@ class RecoveryQuoteRuntime:
         session = body.get("session") if isinstance(body.get("session"), Mapping) else {}
         def pick(*values: Any) -> str:
             return next((str(v).strip() for v in values if str(v or "").strip()), "")
+        chat_id = pick(session.get("chatId"), payload.get("chatId"))
+        purchase_context_id = pick(payload.get("itemId"), payload.get("item_id"))
         return {"event_id": pick(envelope.get("id")), "tenant_id": pick(envelope.get("tenantId")),
                 "shop_id": pick(session.get("accountUnb"), payload.get("accountUnb")),
                 "buyer_id": pick(session.get("peerUnb"), payload.get("peerUnb")),
-                "chat_id": pick(session.get("chatId"), payload.get("chatId")),
-                "purchase_context_id": pick(payload.get("itemId")), "message_id": pick(payload.get("messageId"))}
+                "chat_id": chat_id, "purchase_context_id": purchase_context_id,
+                "message_id": pick(payload.get("messageId"))}
 

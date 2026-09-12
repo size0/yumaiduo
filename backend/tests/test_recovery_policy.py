@@ -109,6 +109,54 @@ def test_reply_gate_rejects_quote_record_authority_mismatch(mutation, expected):
     assert gate.status == expected
 
 
+def _authorized_reply_input() -> dict:
+    return {
+        "status": "QUOTED", "quote_persist_status": "QUOTE_PERSISTED",
+        "quote": {
+            "record_id": "r1", "tenant_id": "t", "shop_id": "s", "buyer_id": "b",
+            "chat_id": "c", "purchase_context_id": "p", "show_id": "show-1", "generation": 2,
+            "total_sell_price_fen": 3100, "expires_at": "2099-01-01T00:00:00+00:00",
+        },
+        "identity": {"tenant_id": "t", "shop_id": "s", "buyer_id": "b", "chat_id": "c", "purchase_context_id": "p"},
+        "verified_show_id": "show-1", "pipeline_generation": 2,
+    }
+
+
+@pytest.mark.parametrize("field", ["tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id"])
+def test_reply_gate_requires_every_identity_field(field):
+    payload = _authorized_reply_input()
+    payload["identity"][field] = ""
+    assert reply_eligibility_gate(payload).status != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda p: p.pop("quote_persist_status"),
+    lambda p: p.update(quote_persist_status="UNKNOWN"),
+    lambda p: p.update(quote=None),
+    lambda p: p.update(verified_show_id=""),
+    lambda p: p["quote"].update(show_id="other"),
+    lambda p: p.pop("pipeline_generation"),
+    lambda p: p["quote"].update(generation=1),
+    lambda p: p["quote"].update(expires_at="2020-01-01T00:00:00+00:00"),
+    lambda p: p["quote"].update(invalidated_reason="superseded_by_new_quote"),
+    lambda p: p["quote"].pop("total_sell_price_fen"),
+    lambda p: p["quote"].update(total_sell_price_fen=0),
+    lambda p: p["quote"].update(total_sell_price_fen=-1),
+    lambda p: p["quote"].update(total_sell_price_fen="abc"),
+    lambda p: p["quote"].update(total_sell_price_fen=float("nan")),
+    lambda p: p["quote"].update(total_sell_price_fen=float("inf")),
+])
+def test_reply_gate_is_fail_closed_for_missing_or_stale_authority(mutation):
+    payload = _authorized_reply_input()
+    mutation(payload)
+    assert reply_eligibility_gate(payload).status != "AMOUNT_REPLY_ALLOWED"
+
+
+def test_reply_gate_allows_only_complete_persisted_authority():
+    gate = reply_eligibility_gate(_authorized_reply_input())
+    assert gate.status == "AMOUNT_REPLY_ALLOWED"
+
+
 def test_context_merge_prioritizes_current_and_invalidates_quote_chain():
     context = QuotePipelineContext(conversation_facts={"cinema": "A", "date": "2026-09-12"}, show="old", quote_record="old")
     context.merge_facts({"cinema": "B"}, stored={"cinema": "stale", "movie": "M"})
