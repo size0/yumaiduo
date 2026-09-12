@@ -57,7 +57,18 @@ class CinemaRouteV2Service:
                 )
                 if len(verified) == 1:
                     item = verified[0]
-                    return _crosswalk_result(item, reason="VERIFIED_PROVIDER_CROSSWALK")
+                    # A crosswalk proves the cinema identity, but its legacy
+                    # row has no Wanda city id. Resolve that id from the
+                    # Wanda provider authority before returning WANDA_SELF.
+                    city_name = _text(item.get("city_name")) or city_text
+                    try:
+                        city = _match_city(city_name, city_items(await self._source.get_city_list()))
+                    except Exception:
+                        city = None
+                    if city is not None:
+                        return _crosswalk_result(item, reason="VERIFIED_PROVIDER_CROSSWALK", wanda_city_id=city[0])
+                    # Fall through to the normal provider-backed resolver;
+                    # never return a Wanda route without its authoritative id.
         try:
             city_response = await self._source.get_city_list()
             city = _match_city(city_text, city_items(city_response))
@@ -391,9 +402,9 @@ def _route_result(
     )
 
 
-def _crosswalk_result(item: Mapping[str, Any], *, reason: str) -> CinemaRouteResult:
+def _crosswalk_result(item: Mapping[str, Any], *, reason: str, wanda_city_id: str) -> CinemaRouteResult:
     return CinemaRouteResult(
-        route="WANDA_SELF", liangpiao_cinema_id=_text(item.get("liangpiao_cinema_id")),
+        route="WANDA_SELF", wanda_city_id=wanda_city_id, liangpiao_cinema_id=_text(item.get("liangpiao_cinema_id")),
         canonical_cinema_identity_id=_text(item.get("canonical_cinema_identity_id")),
         wanda_store_id=_text(item.get("wanda_store_id")), wanda_city_name=_text(item.get("city_name")),
         wanda_cinema_name=_text(item.get("wanda_name")), wanda_cinema_address=_text(item.get("address")),
