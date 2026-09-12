@@ -1,4 +1,6 @@
-from app.recovery import GateResult, RecoveryAction, RecoveryPolicy, SafetyClass
+import pytest
+
+from app.recovery import GateResult, QuoteRecoveryOrchestrator, RecoveryAction, RecoveryPolicy, SafetyClass
 from app.recovery.adapters import from_legacy
 from app.recovery.context import QuotePipelineContext
 from app.recovery.invalidation import invalidated_fields
@@ -57,3 +59,21 @@ def test_context_has_stable_identity_and_generation():
     context = QuotePipelineContext(identity={"shop_id": "1"}, generation=2)
     assert context.identity["shop_id"] == "1"
     assert context.generation == 2
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stops_at_first_non_continuation():
+    async def route(context):
+        return GateResult(gate="CINEMA_ROUTE", status="RESOLVED", success=True, safety_class=SafetyClass.RECOVERABLE)
+
+    async def show(context):
+        return GateResult(gate="SHOW", status="SHOW_UNRESOLVED", success=False,
+                          safety_class=SafetyClass.RECOVERABLE, missing_fields=["showtime"])
+
+    async def cost(context):
+        raise AssertionError("later stages must not run")
+
+    context, result, decision = await QuoteRecoveryOrchestrator([route, show, cost]).run(QuotePipelineContext())
+    assert context.current_gate == "SHOW"
+    assert result.status == "SHOW_UNRESOLVED"
+    assert decision.action is RecoveryAction.ASK_CLARIFICATION
