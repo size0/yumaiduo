@@ -7,7 +7,19 @@ from .models import GateResult, SafetyClass
 
 def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
     quote = result.get("quote")
-    if isinstance(quote, dict) and result.get("status") == "QUOTED":
+    persist_status = str(result.get("quote_persist_status") or "")
+    identity = result.get("identity") if isinstance(result.get("identity"), dict) else {}
+    verified_show_id = str(result.get("verified_show_id") or "").strip()
+    authority_ok = isinstance(quote, dict) and bool(str(quote.get("record_id") or "").strip())
+    if persist_status and persist_status != "QUOTE_PERSISTED":
+        authority_ok = False
+    for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id"):
+        expected = str(identity.get(key) or "").strip()
+        if expected and str(quote.get(key) or "").strip() != expected:
+            authority_ok = False
+    if verified_show_id and str(quote.get("wanda_show_id") or quote.get("show_id") or "").strip() != verified_show_id:
+        authority_ok = False
+    if authority_ok and result.get("status") == "QUOTED":
         return GateResult(gate="REPLY", status="AMOUNT_REPLY_ALLOWED", success=True,
                           safety_class=SafetyClass.RECOVERABLE, facts={"quote": quote},
                           provider_verified=True)

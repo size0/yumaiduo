@@ -139,10 +139,17 @@ class RecoveryQuoteRuntime:
                 event_id=identity["event_id"], recognition_id=recognition.provider_recognize_id, message_id=identity.get("message_id"))
             if gate.success:
                 state["quote"] = gate.facts.get("quote_record")
+            state["quote_persist_status"] = gate.status
             return gate
 
         def reply_stage(context: QuotePipelineContext) -> GateResult:
-            return reply_eligibility_gate({"status": "QUOTED", "quote": state.get("quote")})
+            show = state.get("show")
+            return reply_eligibility_gate({
+                "status": "QUOTED", "quote": state.get("quote"),
+                "quote_persist_status": state.get("quote_persist_status"),
+                "identity": identity,
+                "verified_show_id": getattr(show, "wanda_show_id", ""),
+            })
 
         context, final_gate, decision = await QuoteRecoveryOrchestrator(
             [recognition_stage, route_stage, show_stage, seat_stage, cost_stage, pricing_stage, quote_stage, reply_stage],

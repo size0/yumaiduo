@@ -107,7 +107,12 @@ class RecordingQuotes:
 
     def persist_gate(self, *args, **kwargs):
         self.calls.append((args, kwargs))
-        return _gate("QUOTE", "QUOTE_PERSISTED", {"quote_record": {"record_id": "r1", "total": 4500}})
+        return _gate("QUOTE", "QUOTE_PERSISTED", {"quote_record": {
+            "record_id": "r1", "total": 4500,
+            "tenant_id": kwargs["tenant_id"], "shop_id": kwargs["shop_id"],
+            "buyer_id": kwargs["buyer_id"], "chat_id": kwargs["chat_id"],
+            "purchase_context_id": kwargs["purchase_context_id"], "wanda_show_id": "show-1",
+        }})
 
 
 def _runtime(tmp_path, *, seat_status="WPLUS_AREA_RESOLVED", cost_status="COST_READY", recognition=None, show_status="RESOLVED"):
