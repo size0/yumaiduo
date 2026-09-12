@@ -188,10 +188,15 @@ class RecoveryQuoteRuntime:
                      "_recovery_ticket_count": (count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count"))}
         return await self.process_image_event(synthetic)
 
-    @staticmethod
-    def _safe(gate: GateResult) -> dict[str, Any]:
-        return {"status": gate.status, "reason": gate.reason_code, "gate": gate.gate,
-                "missing_fields": gate.missing_fields, "candidates": gate.candidates}
+    def _safe(self, gate: GateResult) -> dict[str, Any]:
+        result = {"status": gate.status, "reason": gate.reason_code, "gate": gate.gate,
+                  "missing_fields": gate.missing_fields, "candidates": gate.candidates}
+        reply_gate = reply_eligibility_gate(result)
+        result["reply_gate"] = reply_gate.model_dump(mode="json")
+        if self.reply_renderer is not None:
+            rendered = self.reply_renderer.render(result)
+            result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
+        return result
 
     @staticmethod
     def _identity(body: Mapping[str, Any]) -> dict[str, str]:
