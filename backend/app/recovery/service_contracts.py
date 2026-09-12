@@ -19,13 +19,21 @@ class CinemaRouteGateMixin:
         result = await self.resolve(*args, **kwargs)
         route = getattr(result, "route", "UNRESOLVED")
         status = route if route != "UNRESOLVED" else str(getattr(result, "resolution_reason", None) or route)
-        return from_service_result("CINEMA_ROUTE", result, status=status)
+        gate = from_service_result("CINEMA_ROUTE", result, status=status)
+        missing = {"CITY_REQUIRED": ["city"], "CINEMA_REQUIRED": ["cinema"],
+                    "CINEMA_TEXT_INSUFFICIENT": ["cinema"]}.get(status, [])
+        candidates = list(getattr(result, "candidates", []) or [])
+        return gate.model_copy(update={"missing_fields": missing, "candidates": candidates})
 
 
 class ShowResolveGateMixin:
     async def resolve_gate(self, *args: Any, **kwargs: Any) -> GateResult:
         result = await self.resolve(*args, **kwargs)
-        return from_service_result("SHOW", result, status=str(getattr(result, "status", "INVALID")))
+        status = str(getattr(result, "status", "INVALID"))
+        gate = from_service_result("SHOW", result, status=status)
+        candidates = list(getattr(result, "candidates", []) or [])
+        missing = ["showtime"] if status == "INPUT_INCOMPLETE" else []
+        return gate.model_copy(update={"missing_fields": missing, "candidates": candidates})
 
 
 class SeatFactsGateMixin:
@@ -34,7 +42,9 @@ class SeatFactsGateMixin:
         status = str(getattr(result, "status", "UNAVAILABLE"))
         if status == "WPLUS_AREA_RESOLVED":
             status = "WPLUS_AREA_RESOLVED"
-        return from_service_result("SEAT", result, status=status)
+        gate = from_service_result("SEAT", result, status=status)
+        missing = ["selected_seats"] if status in {"MANUAL_MARK_REQUIRED", "INPUT_INCOMPLETE"} else []
+        return gate.model_copy(update={"missing_fields": missing})
 
 
 class CostResolutionGateMixin:
