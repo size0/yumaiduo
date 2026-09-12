@@ -42,7 +42,9 @@ class RecoveryQuoteRuntime:
     async def process_image_event(self, body: dict[str, Any]) -> dict[str, Any]:
         return await self._process_image_event(body)
 
-    async def _process_image_event(self, body: dict[str, Any], *, recognition_override: GateResult | None = None) -> dict[str, Any]:
+    async def _process_image_event(self, body: dict[str, Any], *, recognition_override: GateResult | None = None,
+                                   ticket_count: int | None = None, showtime_ordinal: int | None = None,
+                                   candidate_shows: list[Any] | None = None) -> dict[str, Any]:
         envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
         urls = payload.get("imageUrls", payload.get("image_urls"))
@@ -60,9 +62,9 @@ class RecoveryQuoteRuntime:
         stored_facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
         state: dict[str, Any] = {"identity": identity, "url": (urls[0].strip() if isinstance(urls, list) and urls else ""), "stored": stored_facts,
                                  "recognition_gate": recognition_override,
-                                 "ticket_count": body.get("_recovery_ticket_count"),
-                                 "showtime_ordinal": body.get("_recovery_showtime_ordinal"),
-                                 "candidate_shows": body.get("_recovery_candidate_shows") or []}
+                                 "ticket_count": ticket_count,
+                                 "showtime_ordinal": showtime_ordinal,
+                                 "candidate_shows": candidate_shows or []}
 
         async def recognition_stage(context: QuotePipelineContext) -> GateResult:
             gate = state["recognition_gate"] or await self.recognition.recognize_gate(
@@ -148,12 +150,14 @@ class RecoveryQuoteRuntime:
             max_recovery_attempts=1,
             retry_handlers={"COST": lambda ctx, result: cost_stage(ctx), "PRICING": lambda ctx, result: pricing_stage(ctx)},
         ).run(context)
-        if final_gate.gate == "REPLY":
+        if final_gate.gate == "REPLY" and final_gate.success:
             result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json")}
             if self.reply_renderer is not None:
                 rendered = self.reply_renderer.render(result)
                 result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
             return result
+        if final_gate.gate == "REPLY":
+            return self._safe(final_gate)
         return self._safe(final_gate)
 
     async def process_text_event(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -211,7 +215,8 @@ class RecoveryQuoteRuntime:
         return await self._process_image_event(followup, recognition_override=GateResult(
             gate="RECOGNITION", status="PARTIAL", success=True,
             safety_class="RECOVERABLE", facts=recognition.model_dump(mode="json"),
-        ))
+        ), ticket_count=(count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count")),
+            showtime_ordinal=showtime_ordinal, candidate_shows=facts.get("candidate_shows") or [])
 
     def _safe(self, gate: GateResult) -> dict[str, Any]:
         result = {"status": gate.status, "reason": gate.reason_code, "gate": gate.gate,
