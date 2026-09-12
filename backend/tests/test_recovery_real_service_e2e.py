@@ -132,6 +132,12 @@ class _LiangpiaoQuote:
         )
 
 
+class _UnavailableLiangpiaoQuote:
+    async def quote(self, request):
+        from app.selected_seat_quote_service import QuoteServiceError
+        raise QuoteServiceError("PROVIDER_UNAVAILABLE", "fake provider unavailable")
+
+
 class _LiangpiaoFacts:
     def from_preflight(self, payload, *, request):
         return SimpleNamespace(provider="LIANGPIAO", payload=payload)
@@ -154,6 +160,15 @@ class _LiangpiaoRouteSource(_WandaReadSource):
 
     async def get_cinema_list(self, *args):
         return {"code": 0, "data": {"cinemaList": []}}
+
+
+class _LiangpiaoRecognitionTransport(_RecognitionTransport):
+    async def recognize(self, image_url, **kwargs):
+        response = await super().recognize(image_url, **kwargs)
+        raw = dict(response.data["rawResults"])
+        raw.update({"city": "\u6cc9\u5dde", "cinema": "\u6cc9\u5dde\u6d66\u897f\u4e07\u8fbe"})
+        response.data["rawResults"] = raw
+        return LiangpiaoRecognitionResponse(data=response.data, raw_provider_result={"cinemaId": "9001"})
 
 
 def _event(event_id="real-e1", *, with_item=True):
@@ -406,3 +421,32 @@ async def test_real_route_and_orchestrator_enter_liangpiao_exact_seat_path(tmp_p
     result = await runtime.process_image_event(_event("liangpiao-real"))
     assert result["status"] == "QUOTED"
     assert result["quote"]["liangpiao_show_id"] == "provider-show"
+
+
+def _liangpiao_runtime(tmp_path: Path, transport, provider):
+    source = _LiangpiaoRouteSource()
+    quote_store = QuoteV2Service(QuoteRecordStore(tmp_path / "quotes.json"))
+    return RecoveryQuoteRuntime(
+        recognition_service=RecognitionV2Service(transport), route_service=CinemaRouteV2Service(source),
+        show_service=ShowResolveV2Service(source), seat_service=SeatFactsV2Service(source),
+        cost_service=WandaCostResolutionService(), pricing_service=WandaPricingV2Service(),
+        quote_service=quote_store, rules_provider=lambda: PricingRulesSnapshot(),
+        liangpiao_quote_service=provider, liangpiao_facts_adapter=_LiangpiaoFacts(),
+        pricing_engine=_LiangpiaoEngine(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_liangpiao_missing_exact_seats_asks_for_seats(tmp_path: Path):
+    runtime = _liangpiao_runtime(tmp_path, _LiangpiaoRecognitionTransport(seats=False), _LiangpiaoQuote())
+    result = await runtime.process_image_event(_event("lp-no-seats-real"))
+    assert result["status"] == "NEED_CLARIFICATION"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_real_liangpiao_provider_unavailable_is_safe(tmp_path: Path):
+    runtime = _liangpiao_runtime(tmp_path, _LiangpiaoRecognitionTransport(), _UnavailableLiangpiaoQuote())
+    result = await runtime.process_image_event(_event("lp-down-real"))
+    assert result["status"] == "PROVIDER_UNAVAILABLE"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
