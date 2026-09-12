@@ -99,6 +99,14 @@ def test_persisted_fact_invalidation_cannot_revive_old_show_or_cost(tmp_path):
     assert facts["facts"] == {"movie": "新片"}
 
 
+def test_persisted_pure_invalidation_clears_old_facts(tmp_path):
+    store = ConversationFactStore(tmp_path / "facts.sqlite", ttl_seconds=60)
+    base = dict(tenant_id="t", shop_id="s", buyer_id="b", chat_id="c", purchase_context_id="p")
+    store.save(**base, facts={"show_id": "old", "selected_seats": ["4排7座"]}, source="test")
+    store.save(**base, facts={}, source="test", invalidated_fields=["show_id", "selected_seats"])
+    assert store.load_context(**base)["facts"] == {}
+
+
 def test_runtime_routing_selects_one_path():
     legacy, recovery = object(), object()
     assert select_runtime(recovery_enabled=False, legacy_enabled=True, image_event=True, text_event=False,
@@ -177,3 +185,20 @@ async def test_orchestrator_isolates_stage_exception():
     assert result.metadata == {"stage": "broken_stage", "stage_index": 0}
     assert decision.action is RecoveryAction.STOP
     assert decision.stop_scope == "STOP_QUOTE_PIPELINE"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_isolates_retry_handler_exception():
+    def stage(context):
+        return GateResult(gate="COST", status="PROVIDER_UNAVAILABLE", success=False,
+                          safety_class=SafetyClass.RECOVERABLE, retryable=True)
+
+    def broken_retry(context, result):
+        raise RuntimeError("retry failed")
+
+    _, result, decision = await QuoteRecoveryOrchestrator(
+        [stage], retry_handlers={"COST": broken_retry}, max_recovery_attempts=1,
+    ).run(QuotePipelineContext())
+    assert result.status == "RECOVERY_HANDLER_EXCEPTION"
+    assert result.metadata == {"handler": "retry", "gate": "COST"}
+    assert decision.action is RecoveryAction.STOP

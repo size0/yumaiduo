@@ -166,7 +166,7 @@ class ConversationFactStore:
     ) -> dict[str, Any]:
         identity = self._identity(tenant_id, shop_id, buyer_id, chat_id, purchase_context_id)
         incoming = self._sanitize_facts(facts)
-        if not incoming:
+        if not incoming and not invalidated_fields:
             raise ValueError("conversation_facts_empty")
         source_value = _text(source, limit=80)
         tier_value = _text(fact_tier, limit=40)

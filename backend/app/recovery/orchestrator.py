@@ -69,9 +69,20 @@ class QuoteRecoveryOrchestrator:
                 handler = self._retry_handlers.get(result.gate)
                 if handler is not None and recovery_attempts > 0:
                     recovery_attempts -= 1
-                    retry_result = handler(context, result)
-                    if hasattr(retry_result, "__await__"):
-                        retry_result = await retry_result
+                    try:
+                        retry_result = handler(context, result)
+                        if hasattr(retry_result, "__await__"):
+                            retry_result = await retry_result
+                    except Exception as error:
+                        return context, GateResult(
+                            gate=result.gate, status="RECOVERY_HANDLER_EXCEPTION", success=False,
+                            safety_class="HARD_SAFETY", reason_code=type(error).__name__,
+                            metadata={"handler": "retry", "gate": result.gate},
+                        ), RecoveryDecision(
+                            gate=result.gate, status="RECOVERY_HANDLER_EXCEPTION", safety_class="HARD_SAFETY",
+                            action=RecoveryAction.STOP, reason="RECOVERY_HANDLER_EXCEPTION",
+                            stop_scope="STOP_QUOTE_PIPELINE",
+                        )
                     if isinstance(retry_result, GateResult):
                         last_result = retry_result
                         last_decision = self._policy.evaluate(retry_result)
@@ -82,9 +93,20 @@ class QuoteRecoveryOrchestrator:
             if last_decision.action is RecoveryAction.FALLBACK:
                 handler = self._fallback_handlers.get(result.gate)
                 if handler is not None:
-                    fallback_result = handler(context, result)
-                    if hasattr(fallback_result, "__await__"):
-                        fallback_result = await fallback_result
+                    try:
+                        fallback_result = handler(context, result)
+                        if hasattr(fallback_result, "__await__"):
+                            fallback_result = await fallback_result
+                    except Exception as error:
+                        return context, GateResult(
+                            gate=result.gate, status="RECOVERY_HANDLER_EXCEPTION", success=False,
+                            safety_class="HARD_SAFETY", reason_code=type(error).__name__,
+                            metadata={"handler": "fallback", "gate": result.gate},
+                        ), RecoveryDecision(
+                            gate=result.gate, status="RECOVERY_HANDLER_EXCEPTION", safety_class="HARD_SAFETY",
+                            action=RecoveryAction.STOP, reason="RECOVERY_HANDLER_EXCEPTION",
+                            stop_scope="STOP_QUOTE_PIPELINE",
+                        )
                     if isinstance(fallback_result, GateResult):
                         last_result = fallback_result
                         last_decision = self._policy.evaluate(fallback_result)
