@@ -139,6 +139,9 @@ class RecoveryQuoteRuntime:
                 event_id=identity["event_id"], recognition_id=recognition.provider_recognize_id, message_id=identity.get("message_id"))
             if gate.success:
                 state["quote"] = gate.facts.get("quote_record")
+                record_generation = (state["quote"] or {}).get("generation") if isinstance(state.get("quote"), dict) else None
+                if isinstance(record_generation, int):
+                    context.quote_generation = record_generation
             state["quote_persist_status"] = gate.status
             return gate
 
@@ -149,6 +152,7 @@ class RecoveryQuoteRuntime:
                 "quote_persist_status": state.get("quote_persist_status"),
                 "identity": identity,
                 "verified_show_id": getattr(show, "wanda_show_id", ""),
+                "pipeline_generation": context.quote_generation,
             })
 
         context, final_gate, decision = await QuoteRecoveryOrchestrator(
@@ -161,7 +165,8 @@ class RecoveryQuoteRuntime:
             result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json"),
                       "recognition": state.get("recognition").model_dump(mode="json"),
                       "conversation_facts": dict(context.conversation_facts),
-                      "invalidated_fields": sorted(context.stale_fields), "generation": context.generation}
+                      "invalidated_fields": sorted(context.stale_fields), "generation": context.generation,
+                      "quote_generation": context.quote_generation}
             if self.reply_renderer is not None:
                 rendered = self.reply_renderer.render(result)
                 result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
@@ -236,7 +241,7 @@ class RecoveryQuoteRuntime:
         if context is not None:
             result.update({"conversation_facts": dict(context.conversation_facts),
                            "invalidated_fields": sorted(context.stale_fields),
-                           "generation": context.generation})
+                           "generation": context.generation, "quote_generation": context.quote_generation})
         if self.reply_renderer is not None:
             rendered = self.reply_renderer.render(result)
             result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})

@@ -11,6 +11,7 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
     persist_status = str(result.get("quote_persist_status") or "")
     identity = result.get("identity") if isinstance(result.get("identity"), dict) else {}
     verified_show_id = str(result.get("verified_show_id") or "").strip()
+    pipeline_generation = result.get("pipeline_generation")
     authority_ok = isinstance(quote, dict) and bool(str(quote.get("record_id") or "").strip())
     if persist_status and persist_status != "QUOTE_PERSISTED":
         authority_ok = False
@@ -20,6 +21,8 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
             authority_ok = False
     if verified_show_id and str(quote.get("wanda_show_id") or quote.get("show_id") or "").strip() != verified_show_id:
         authority_ok = False
+    if pipeline_generation is not None and "generation" in quote:
+        authority_ok = authority_ok and quote.get("generation") == pipeline_generation
     expires_at = str(quote.get("expires_at") or quote.get("quote_expires_at") or "").strip() if isinstance(quote, dict) else ""
     if expires_at:
         try:

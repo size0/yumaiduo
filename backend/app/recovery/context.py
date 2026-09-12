@@ -22,6 +22,7 @@ class QuotePipelineContext(BaseModel):
     generation: int = 0
     invalidated_fields: set[str] = Field(default_factory=set)
     stale_fields: set[str] = Field(default_factory=set)
+    quote_generation: int | None = None
 
     def merge_facts(self, current: dict[str, Any], *, stored: dict[str, Any] | None = None,
                     candidates: dict[str, Any] | None = None) -> None:
