@@ -367,7 +367,7 @@ class RecoveryQuoteRuntime:
         showtime_ordinal = (ordinal_words.get(ordinal_match.group(1), int(ordinal_match.group(1)) if ordinal_match.group(1).isdigit() else None)
                             if ordinal_match else facts.get("showtime_ordinal"))
         candidate_count = len(facts.get("candidate_shows") or [])
-        if ordinal_match or "imax" in text.lower() or ("那场" in text and candidate_count > 1):
+        if ordinal_match or "imax" in text.lower() or ("那场" in text):
             # Relative/dimension references select from the provider show list;
             # an old absolute time must not override that selection.
             start_time = None
@@ -422,3 +422,4 @@ class RecoveryQuoteRuntime:
                 "buyer_id": pick(session.get("peerUnb"), payload.get("peerUnb")),
                 "chat_id": pick(session.get("chatId"), payload.get("chatId")),
                 "purchase_context_id": pick(payload.get("itemId")), "message_id": pick(payload.get("messageId"))}
+
