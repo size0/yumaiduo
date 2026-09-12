@@ -38,7 +38,7 @@ class RecognitionV2Service:
     def from_settings(cls, settings: Any) -> "RecognitionV2Service":
         return cls(LiangpiaoV2Transport(settings))
 
-    async def recognize(
+    async def _recognize_result(
         self,
         image_url: str,
         *,
@@ -64,8 +64,11 @@ class RecognitionV2Service:
                 result = enriched
         return result
 
+    async def recognize(self, image_url: str, **kwargs: Any) -> RecognitionResult:
+        return await self._recognize_result(image_url, **kwargs)
+
     async def recognize_gate(self, image_url: str, **kwargs: Any) -> GateResult:
-        result = await self.recognize(image_url, **kwargs)
+        result = await self._recognize_result(image_url, **kwargs)
         facts = result.model_dump(mode="json")
         status = "RECOGNIZED" if result.movie or result.cinema_text else "PARTIAL"
         return GateResult(gate="RECOGNITION", status=status, success=True,

@@ -38,7 +38,7 @@ class CinemaRouteV2Service:
         self._show_index_ttl_seconds = max(60, min(int(show_index_ttl_seconds), 86_400))
         self._show_index_cache: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
-    async def resolve(self, recognition: RecognitionResult) -> CinemaRouteResult:
+    async def _resolve_result(self, recognition: RecognitionResult) -> CinemaRouteResult:
         city_text = _text(recognition.city_text)
         cinema_text = _text(recognition.cinema_text)
         if not city_text:
@@ -151,8 +151,11 @@ class CinemaRouteV2Service:
             ),
         )
 
+    async def resolve(self, recognition: RecognitionResult) -> CinemaRouteResult:
+        return await self._resolve_result(recognition)
+
     async def resolve_gate(self, recognition: RecognitionResult) -> GateResult:
-        result = await self.resolve(recognition)
+        result = await self._resolve_result(recognition)
         facts = result.model_dump(mode="json")
         status = result.route if result.route != "UNRESOLVED" else result.resolution_reason
         return GateResult(gate="CINEMA_ROUTE", status=status, success=result.route != "UNRESOLVED",

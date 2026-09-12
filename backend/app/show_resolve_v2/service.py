@@ -16,7 +16,7 @@ from .wanda_source import WandaShowSource
 class ShowResolveV2Service:
     """Resolve a Wanda show ID only after the store ID is already authoritative."""
     async def resolve_gate(self, request: Mapping[str, Any]) -> GateResult:
-        result = await self.resolve(request)
+        result = await self._resolve_result(request)
         facts = result.model_dump(mode="json")
         return GateResult(gate="SHOW", status=result.status, success=result.status == "RESOLVED",
                           safety_class=SafetyClass.RECOVERABLE, facts=facts,
@@ -27,7 +27,7 @@ class ShowResolveV2Service:
     def __init__(self, source: WandaShowSource) -> None:
         self._source = source
 
-    async def resolve(self, request: Mapping[str, Any]) -> ShowResolutionResult:
+    async def _resolve_result(self, request: Mapping[str, Any]) -> ShowResolutionResult:
         store_id = _text(request.get("wanda_store_id"))
         movie = _text(request.get("movie"))
         show_date = _date_key(request.get("show_date"))
@@ -107,6 +107,9 @@ class ShowResolveV2Service:
             candidate_count=len(candidates),
             candidates=candidates,
         )
+
+    async def resolve(self, request: Mapping[str, Any]) -> ShowResolutionResult:
+        return await self._resolve_result(request)
 
 
 def _provider_success(response: Mapping[str, Any]) -> bool:
