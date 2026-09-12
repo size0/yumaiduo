@@ -249,11 +249,21 @@ class LiangpiaoFacts:
         return SimpleNamespace(provider="LIANGPIAO", payload=payload)
 
 
+class BrokenLiangpiaoFacts(LiangpiaoFacts):
+    def from_preflight(self, payload, *, request):
+        raise ValueError("cost facts failed")
+
+
 class LiangpiaoEngine:
     def quote(self, facts, rules):
         return SimpleNamespace(total_quote_cents=3500, provider="LIANGPIAO", quote_route="LIANGPIAO",
                                price_mode="FIXED", quote_scope="exact_seats", seat_zone_type="REGULAR",
                                provider_quote_id="lp-q", provider_quote_hash="a" * 64)
+
+
+class BrokenLiangpiaoEngine(LiangpiaoEngine):
+    def quote(self, facts, rules):
+        raise ValueError("pricing failed")
 
 
 class LiangpiaoQuotes(RecordingQuotes):
@@ -301,6 +311,30 @@ async def test_liangpiao_provider_failure_has_no_amount_reply(tmp_path: Path):
     result = await runtime.process_image_event(_event("lp-provider-failure"))
     assert result["status"] == "PROVIDER_UNAVAILABLE"
     assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_cost_failure_stops_before_pricing(tmp_path: Path):
+    runtime, _ = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
+    runtime.route = LiangpiaoRoute()
+    runtime.liangpiao_quote = LiangpiaoQuote()
+    runtime.liangpiao_facts = BrokenLiangpiaoFacts()
+    runtime.pricing_engine = LiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-cost-failure"))
+    assert result["status"] == "COST_UNAVAILABLE"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_liangpiao_pricing_failure_stops_before_persist(tmp_path: Path):
+    runtime, services = _runtime(tmp_path, recognition=RecordingRecognition(seats=["9排11座"]))
+    runtime.route = LiangpiaoRoute()
+    runtime.liangpiao_quote = LiangpiaoQuote()
+    runtime.liangpiao_facts = LiangpiaoFacts()
+    runtime.pricing_engine = BrokenLiangpiaoEngine()
+    result = await runtime.process_image_event(_event("lp-pricing-failure"))
+    assert result["status"] == "PRICING_FAILED"
+    assert services["quotes"].calls == []
 
 
 def test_liangpiao_stage_service_exposes_independent_boundaries():
