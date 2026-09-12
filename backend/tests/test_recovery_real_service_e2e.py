@@ -179,6 +179,24 @@ class _LiangpiaoRecognitionTransport(_RecognitionTransport):
         return LiangpiaoRecognitionResponse(data=response.data, raw_provider_result={"cinemaId": "9001"})
 
 
+class _TimeRecognitionTransport(_RecognitionTransport):
+    async def recognize(self, image_url, **kwargs):
+        response = await super().recognize(image_url, **kwargs)
+        raw = dict(response.data["rawResults"])
+        raw["showtime"] = "2026-09-13 13:10"
+        response.data["rawResults"] = raw
+        return response
+
+
+class _AliasRecognitionTransport(_RecognitionTransport):
+    async def recognize(self, image_url, **kwargs):
+        response = await super().recognize(image_url, **kwargs)
+        raw = dict(response.data["rawResults"])
+        raw["cinema"] = "\u5408\u80a5\u4e07\u8fbe\u5e97"
+        response.data["rawResults"] = raw
+        return response
+
+
 def _event(event_id="real-e1", *, with_item=True):
     return {"envelope": {"id": event_id, "tenantId": "tenant-1", "payload": {
         "imageUrls": ["https://example.test/image"],
@@ -208,6 +226,28 @@ async def test_real_services_and_orchestrator_quote_with_fake_provider(tmp_path:
     assert result["reply_gate"]["status"] == "AMOUNT_REPLY_ALLOWED"
     assert result["quote"]["wanda_show_id"] == "show-1"
     assert result["quote"]["buyer_id"] == "buyer-1"
+
+
+@pytest.mark.asyncio
+async def test_real_absolute_1310_showtime_reaches_provider_verified_quote(tmp_path: Path):
+    class Source(_WandaReadSource):
+        async def get_showtimes(self, *args):
+            response = await super().get_showtimes(*args)
+            show = response["data"]["showtimeFilmInf"][0]["showtimeFilmDateInf"][0]["showtimesInf"]["showtimeList"][0]
+            show["realtime"] = "13:10"
+            show["showtimeId"] = "show-1310"
+            return response
+
+    result = await _wanda_runtime(tmp_path, Source(), _TimeRecognitionTransport()).process_image_event(_event("show-1310"))
+    assert result["status"] == "QUOTED"
+    assert result["quote"]["wanda_show_id"] == "show-1310"
+
+
+@pytest.mark.asyncio
+async def test_real_unique_cinema_alias_reaches_wanda_route(tmp_path: Path):
+    result = await _wanda_runtime(tmp_path, _WandaReadSource(), _AliasRecognitionTransport()).process_image_event(_event("cinema-alias"))
+    assert result["status"] == "QUOTED"
+    assert result["quote"]["provider_route"] == "WANDA_SELF"
 
 
 @pytest.mark.asyncio
@@ -339,6 +379,19 @@ async def test_real_show_dimension_selects_provider_verified_imax_show(tmp_path:
     result = await runtime.process_text_event(followup)
     assert result["status"] == "QUOTED"
     assert result["quote"]["wanda_show_id"] == "show-2"
+
+
+@pytest.mark.asyncio
+async def test_real_unique_context_resolves_na_chang(tmp_path: Path):
+    from app.conversation_fact_store import ConversationFactStore
+    runtime = _wanda_runtime(tmp_path, _WandaReadSource())
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    assert (await runtime.process_image_event(_event("that-context")))["status"] == "QUOTED"
+    followup = {"envelope": {"id": "that-followup", "tenantId": "tenant-1", "payload": {"itemId": "purchase-1", "text": "\u90a3\u573a"}},
+                "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
+    result = await runtime.process_text_event(followup)
+    assert result["status"] == "QUOTED"
+    assert result["quote"]["wanda_show_id"] == "show-1"
 
 
 @pytest.mark.asyncio
