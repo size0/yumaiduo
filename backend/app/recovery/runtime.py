@@ -366,7 +366,6 @@ class RecoveryQuoteRuntime:
         ordinal_words = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
         showtime_ordinal = (ordinal_words.get(ordinal_match.group(1), int(ordinal_match.group(1)) if ordinal_match.group(1).isdigit() else None)
                             if ordinal_match else facts.get("showtime_ordinal"))
-        candidate_count = len(facts.get("candidate_shows") or [])
         if ordinal_match or "imax" in text.lower() or ("那场" in text):
             # Relative/dimension references select from the provider show list;
             # an old absolute time must not override that selection.
