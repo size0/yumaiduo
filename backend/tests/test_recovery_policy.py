@@ -90,6 +90,15 @@ def test_facts_are_isolated_and_expire(tmp_path):
     assert expired["expired"] is True
 
 
+def test_persisted_fact_invalidation_cannot_revive_old_show_or_cost(tmp_path):
+    store = ConversationFactStore(tmp_path / "facts.sqlite", ttl_seconds=60)
+    base = dict(tenant_id="t", shop_id="s", buyer_id="b", chat_id="c", purchase_context_id="p")
+    store.save(**base, facts={"show_id": "old", "cost": 2000, "movie": "旧片"}, source="test")
+    store.save(**base, facts={"movie": "新片"}, source="test", invalidated_fields=["show_id", "cost"])
+    facts = store.load_context(**base)
+    assert facts["facts"] == {"movie": "新片"}
+
+
 def test_runtime_routing_selects_one_path():
     legacy, recovery = object(), object()
     assert select_runtime(recovery_enabled=False, legacy_enabled=True, image_event=True, text_event=False,

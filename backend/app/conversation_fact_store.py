@@ -162,6 +162,7 @@ class ConversationFactStore:
         message_id: str | None = None,
         observed_at: datetime | None = None,
         ttl_seconds: int | None = None,
+        invalidated_fields: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         identity = self._identity(tenant_id, shop_id, buyer_id, chat_id, purchase_context_id)
         incoming = self._sanitize_facts(facts)
@@ -184,6 +185,8 @@ class ConversationFactStore:
             ).fetchone()
             previous = self._row_view(existing) if existing is not None else None
             merged = merge_conversation_facts(previous.get("facts") if previous else {}, incoming)
+            for field in invalidated_fields or ():
+                merged.pop(str(field), None)
             fact_id = str(previous.get("fact_id")) if previous else f"cf-{uuid4().hex}"
             created_at = str(previous.get("created_at")) if previous else now.isoformat()
             values = (
@@ -291,6 +294,9 @@ class ConversationFactStore:
         facts = merge_conversation_facts(facts, updates)
         if not facts:
             return None
+        invalidated = result.get("invalidated_fields", [])
+        if not isinstance(invalidated, (list, tuple, set)):
+            invalidated = []
         return self.save(
             tenant_id=str(identity.get("tenant_id") or ""), shop_id=str(identity.get("shop_id") or ""),
             buyer_id=str(identity.get("buyer_id") or ""), chat_id=str(identity.get("chat_id") or ""),
@@ -331,6 +337,7 @@ class ConversationFactStore:
             chat_id=identity["chat_id"], purchase_context_id=identity.get("purchase_context_id") or f"chat:{identity['chat_id']}",
             facts=facts, source=source, event_id=identity.get("event_id") or None,
             message_id=identity.get("message_id") or None,
+            invalidated_fields={str(field) for field in invalidated},
         )
 
     @staticmethod
