@@ -9,6 +9,7 @@ from app.show_resolve_v2.models import ShowResolutionResult
 from app.wanda_cost_v2.models import WandaCostFacts
 
 from .models import WandaPricingCostItem, WandaPricingResult, WandaSeatQuote
+from ..recovery.service_contracts import PricingGateMixin
 
 _ALLOWED_COST_SOURCES = frozenset({
     "SHOWTIME_WPLUS",
@@ -17,7 +18,7 @@ _ALLOWED_COST_SOURCES = frozenset({
 })
 
 
-class WandaPricingV2Service:
+class WandaPricingV2Service(PricingGateMixin):
     """Adapt Wanda Cost V2 facts into the existing V4 pricing engine."""
 
     def __init__(self, engine: V4PricingEngine | object | None = None) -> None:

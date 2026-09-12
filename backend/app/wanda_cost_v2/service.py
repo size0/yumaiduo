@@ -10,9 +10,10 @@ from .models import (
     WandaCostItem,
     WandaProbeTarget,
 )
+from ..recovery.service_contracts import CostResolutionGateMixin
 
 
-class WandaCostResolutionService:
+class WandaCostResolutionService(CostResolutionGateMixin):
     """Resolve Wanda cost facts without Probe, Pricing, or side effects."""
 
     def resolve(

@@ -11,6 +11,7 @@ from typing import Any
 from ..recognition_v2.models import RecognitionResult
 
 from .models import CinemaRouteResult, WandaCinemaCandidate
+from ..recovery.service_contracts import CinemaRouteGateMixin
 from .wanda_source import WandaCatalogSource, cinema_items, city_items
 
 
@@ -25,7 +26,7 @@ _GENERIC_TOKENS = {
 _GENERIC_CHARS = frozenset("万达影城影院电影广场店国际中心厅")
 
 
-class CinemaRouteV2Service:
+class CinemaRouteV2Service(CinemaRouteGateMixin):
     """Resolve only Wanda city/store identity from an isolated recognition fact."""
 
     def __init__(

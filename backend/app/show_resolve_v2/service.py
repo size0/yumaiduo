@@ -9,10 +9,11 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 from .models import ShowResolutionResult, WandaShowCandidate
+from ..recovery.service_contracts import ShowResolveGateMixin
 from .wanda_source import WandaShowSource
 
 
-class ShowResolveV2Service:
+class ShowResolveV2Service(ShowResolveGateMixin):
     """Resolve a Wanda show ID only after the store ID is already authoritative."""
 
     def __init__(self, source: WandaShowSource) -> None:

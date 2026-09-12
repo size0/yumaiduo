@@ -7,10 +7,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .models import ExactSeatFact, SeatFactsResult, WplusAreaFact
+from ..recovery.service_contracts import SeatFactsGateMixin
 from .wanda_source import WandaRealtimeSeatSource
 
 
-class SeatFactsV2Service:
+class SeatFactsV2Service(SeatFactsGateMixin):
     """Read Wanda realtime seat facts after store/show identity is complete."""
 
     def __init__(self, source: WandaRealtimeSeatSource) -> None:

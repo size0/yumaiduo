@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from .liangpiao import LiangpiaoRecognitionResponse, LiangpiaoV2Transport
 from .models import RecognitionResult
+from ..recovery.service_contracts import RecognitionGateMixin
 
 
 _SHOWTIME_PATTERN = re.compile(r"(?P<date>\d{4}-\d{1,2}-\d{1,2})[ T](?P<time>\d{1,2}:[0-5]\d)")
@@ -26,7 +27,7 @@ class RecognitionV2Transport(Protocol):
     async def aclose(self) -> None: ...
 
 
-class RecognitionV2Service:
+class RecognitionV2Service(RecognitionGateMixin):
     """Isolated recognition facts: provider call, raw preservation, normalization."""
 
     def __init__(self, transport: RecognitionV2Transport, *, enrichment_service: Any | None = None) -> None:
