@@ -3,15 +3,22 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from .adapters import from_service_result
-from .models import GateResult
+from .models import GateResult, SafetyClass
+
+
+def _native_gate(gate: str, result: object, status: str) -> GateResult:
+    values = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result) if isinstance(result, dict) else {"value": result}
+    success = status in {"RECOGNIZED", "PARTIAL", "RESOLVED", "WANDA_SELF", "LIANGPIAO", "EXACT_SEATS_RESOLVED", "WPLUS_AREA_RESOLVED", "SEATS_NOT_SELECTED", "SEAT_AREA_ONLY", "COST_READY", "PRICED", "QUOTED", "SENT"}
+    return GateResult(gate=gate, status=status, success=success, safety_class=SafetyClass.RECOVERABLE,
+                      facts=values, reason_code=values.get("reason") or values.get("resolution_reason"),
+                      provider_verified=status in {"COST_READY", "PRICED", "QUOTED"}, metadata={"native": True})
 
 
 class RecognitionGateMixin:
     async def recognize_gate(self, *args: Any, **kwargs: Any) -> GateResult:
         result = await self.recognize(*args, **kwargs)
         status = "RECOGNIZED" if getattr(result, "movie", None) or getattr(result, "cinema_text", None) else "PARTIAL"
-        return from_service_result("RECOGNITION", result, status=status)
+        return _native_gate("RECOGNITION", result, status)
 
 
 class CinemaRouteGateMixin:
@@ -19,7 +26,7 @@ class CinemaRouteGateMixin:
         result = await self.resolve(*args, **kwargs)
         route = getattr(result, "route", "UNRESOLVED")
         status = route if route != "UNRESOLVED" else str(getattr(result, "resolution_reason", None) or route)
-        gate = from_service_result("CINEMA_ROUTE", result, status=status)
+        gate = _native_gate("CINEMA_ROUTE", result, status)
         missing = {"CITY_REQUIRED": ["city"], "CINEMA_REQUIRED": ["cinema"],
                     "CINEMA_TEXT_INSUFFICIENT": ["cinema"]}.get(status, [])
         candidates = list(getattr(result, "candidates", []) or [])
@@ -30,7 +37,7 @@ class ShowResolveGateMixin:
     async def resolve_gate(self, *args: Any, **kwargs: Any) -> GateResult:
         result = await self.resolve(*args, **kwargs)
         status = str(getattr(result, "status", "INVALID"))
-        gate = from_service_result("SHOW", result, status=status)
+        gate = _native_gate("SHOW", result, status)
         candidates = list(getattr(result, "candidates", []) or [])
         missing = ["showtime"] if status == "INPUT_INCOMPLETE" else []
         return gate.model_copy(update={"missing_fields": missing, "candidates": candidates})
@@ -42,7 +49,7 @@ class SeatFactsGateMixin:
         status = str(getattr(result, "status", "UNAVAILABLE"))
         if status == "WPLUS_AREA_RESOLVED":
             status = "WPLUS_AREA_RESOLVED"
-        gate = from_service_result("SEAT", result, status=status)
+        gate = _native_gate("SEAT", result, status)
         missing = ["selected_seats"] if status in {"MANUAL_MARK_REQUIRED", "INPUT_INCOMPLETE"} else []
         return gate.model_copy(update={"missing_fields": missing})
 
@@ -52,7 +59,7 @@ class CostResolutionGateMixin:
         result = self.resolve(*args, **kwargs)
         if inspect.isawaitable(result):
             raise TypeError("CostResolutionGateMixin expects a synchronous resolver")
-        return from_service_result("COST", result, status=str(getattr(result, "status", "INVALID")))
+        return _native_gate("COST", result, str(getattr(result, "status", "INVALID")))
 
 
 class PricingGateMixin:
@@ -60,4 +67,4 @@ class PricingGateMixin:
         result = self.price(*args, **kwargs)
         if inspect.isawaitable(result):
             raise TypeError("PricingGateMixin expects a synchronous pricing service")
-        return from_service_result("PRICING", result, status="PRICED" if getattr(result, "status", "") == "PRICED" else "INVALID")
+        return _native_gate("PRICING", result, status="PRICED" if getattr(result, "status", "") == "PRICED" else "INVALID")
