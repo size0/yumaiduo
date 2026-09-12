@@ -57,6 +57,32 @@ class ShowResolveV2Service:
             if item["show_date"] == show_date
             and _movie_key(item["movie_name"]) == _movie_key(movie)
         ]
+        # Conversation Facts may carry provider-independent candidate shows
+        # from an earlier turn.  They are hints only: use their normalized
+        # time/dimension to narrow the current authoritative provider result,
+        # but never copy a candidate show_id into the resolved result.
+        candidate_hints = [item for item in (candidate_hint or []) if isinstance(item, Mapping)]
+        if not start_time and candidate_hints:
+            hinted_times = {
+                _time_key(item.get("start_time") or item.get("showtime"))
+                for item in candidate_hints
+            }
+            hinted_times.discard(None)
+            if len(hinted_times) == 1:
+                core_matches = [item for item in core_matches if item["start_time"] in hinted_times]
+            elif len(hinted_times) > 1 and not ordinal:
+                # Multiple unresolved candidates require an explicit choice.
+                core_matches = [item for item in core_matches if item["start_time"] in hinted_times]
+            hinted_dimensions = {
+                _simple_key(item.get("dimension") or item.get("format"))
+                for item in candidate_hints
+                if _simple_key(item.get("dimension") or item.get("format"))
+            }
+            if len(hinted_dimensions) == 1 and not request.get("dimension"):
+                core_matches = [
+                    item for item in core_matches
+                    if _same_value(next(iter(hinted_dimensions)), item.get("dimension"))
+                ]
         if start_time:
             core_matches = [item for item in core_matches if item["start_time"] == start_time]
         else:
