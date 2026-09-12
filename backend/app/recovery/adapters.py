@@ -37,7 +37,11 @@ def from_service_result(gate: str, result: object, *, status: str | None = None)
     else:
         values = {"value": result}
     resolved_status = status or str(values.get("status") or "UNRESOLVED")
-    success = resolved_status in {"RESOLVED", "COST_READY", "PRICED", "QUOTED", "SENT"}
+    success = resolved_status in {
+        "RECOGNIZED", "PARTIAL", "RESOLVED", "WANDA_SELF", "LIANGPIAO",
+        "EXACT_SEATS_RESOLVED", "WPLUS_AREA_RESOLVED", "SEATS_NOT_SELECTED",
+        "SEAT_AREA_ONLY", "COST_READY", "PRICED", "QUOTED", "SENT",
+    }
     missing = []
     reason = values.get("reason") or values.get("resolution_reason")
     if resolved_status in {"INPUT_INCOMPLETE", "MISSING_COST", "SELECTED_SEATS_REQUIRED"}:
