@@ -330,6 +330,26 @@ async def test_real_runtime_show_change_invalidates_persisted_quote_chain(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_real_runtime_ticket_count_reprices_and_replaces_quote(tmp_path: Path):
+    from app.conversation_fact_store import ConversationFactStore
+    runtime = _wanda_runtime(tmp_path, _WandaReadSource(), _RecognitionTransport(seats=False))
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    first = await runtime.process_image_event(_event("count-1"))
+    assert first["status"] == "QUOTED"
+    followup = {"envelope": {"id": "count-2", "tenantId": "tenant-1", "payload": {"itemId": "purchase-1", "text": "\u4e24\u5f20"}},
+                "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
+    second = await runtime.process_text_event(followup)
+    assert second["status"] == "QUOTED"
+    assert second["quote"]["ticket_count"] == 2
+    assert second["quote"]["total_sell_price_fen"] == second["quote"]["unit_sell_price_fen"] * 2
+    stored = runtime.fact_store.load_context(
+        tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+        purchase_context_id="purchase-1",
+    )
+    assert stored["facts"]["ticket_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_real_show_service_uses_candidate_time_but_provider_verifies_id():
     source = _WandaReadSource()
     service = ShowResolveV2Service(source)

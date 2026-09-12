@@ -294,6 +294,8 @@ class RecoveryQuoteRuntime:
             candidates = state.get("candidate_shows")
             if candidates:
                 facts["candidate_shows"] = list(candidates)
+            if state.get("ticket_count") is not None:
+                facts["ticket_count"] = state["ticket_count"]
             show = state.get("show")
             show_id = getattr(show, "wanda_show_id", None)
             if show_id:
