@@ -67,7 +67,8 @@ class RecoveryQuoteRuntime:
         if not identity["event_id"] or not identity["shop_id"] or not identity["buyer_id"]:
             return {"status": "IDENTITY_INCOMPLETE"}
         context = QuotePipelineContext(identity=identity)
-        fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")}
+        fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")}
+        fact_identity["purchase_context_id"] = identity["purchase_context_id"] or f"chat:{identity['chat_id']}"
         try:
             stored = self.fact_store.load_context(**fact_identity) if self.fact_store is not None else None
         except Exception:
@@ -306,10 +307,11 @@ class RecoveryQuoteRuntime:
                     dependency_to_fact.get(dependent, dependent)
                     for dependent in invalidated_fields(changed)
                 )
+            fact_purchase_context_id = identity["purchase_context_id"] or f"chat:{identity['chat_id']}"
             self.fact_store.save(
                 tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
                 buyer_id=identity["buyer_id"], chat_id=identity["chat_id"],
-                purchase_context_id=identity["purchase_context_id"], facts=facts,
+                purchase_context_id=fact_purchase_context_id, facts=facts,
                 invalidated_fields=invalidated, source="recovery_runtime",
                 fact_tier="verified" if final_gate.success else "candidate",
                 event_id=identity["event_id"], message_id=identity.get("message_id"),
@@ -320,7 +322,8 @@ class RecoveryQuoteRuntime:
 
     async def process_text_event(self, body: dict[str, Any]) -> dict[str, Any]:
         identity = self._identity(body)
-        fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")}
+        fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")}
+        fact_identity["purchase_context_id"] = identity["purchase_context_id"] or f"chat:{identity['chat_id']}"
         try:
             stored = self.fact_store.load_context(**fact_identity) if self.fact_store is not None else None
         except Exception:

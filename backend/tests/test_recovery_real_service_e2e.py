@@ -112,9 +112,10 @@ class _LiangpiaoRouteSource(_WandaReadSource):
         return {"code": 0, "data": {"cinemaList": []}}
 
 
-def _event(event_id="real-e1"):
+def _event(event_id="real-e1", *, with_item=True):
     return {"envelope": {"id": event_id, "tenantId": "tenant-1", "payload": {
-        "imageUrls": ["https://example.test/image"], "itemId": "purchase-1",
+        "imageUrls": ["https://example.test/image"],
+        **({"itemId": "purchase-1"} if with_item else {}),
     }}, "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
 
 
@@ -170,6 +171,38 @@ async def test_real_services_context_image_then_seat_image(tmp_path: Path):
     assert second["status"] == "QUOTED"
     assert second["quote"]["wanda_show_id"] == "show-1"
     assert transport.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_real_services_context_fallback_works_without_item_id(tmp_path: Path):
+    class TwoImages(_RecognitionTransport):
+        def __init__(self):
+            super().__init__(seats=False)
+            self.calls = 0
+
+        async def recognize(self, image_url, **kwargs):
+            self.calls += 1
+            response = await super().recognize(image_url, **kwargs)
+            if self.calls == 2:
+                raw = dict(response.data["rawResults"])
+                raw.update({"city": None, "cinema": None, "film": None, "showtime": None,
+                            "seat": [{"seatName": "9\u639211\u5ea7"}]})
+                response.data["rawResults"] = raw
+            return response
+
+    from app.conversation_fact_store import ConversationFactStore
+    runtime = _wanda_runtime(tmp_path, _WandaReadSource(), TwoImages())
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    first = await runtime.process_image_event(_event("no-item-1", with_item=False))
+    second = await runtime.process_image_event(_event("no-item-2", with_item=False))
+    assert first["status"] == "INPUT_INVALID"
+    assert second["status"] == "INPUT_INVALID"
+    stored = runtime.fact_store.load_context(
+        tenant_id="tenant-1", shop_id="shop-1", buyer_id="buyer-1", chat_id="chat-1",
+        purchase_context_id="chat:chat-1",
+    )
+    assert stored["available"] is True
+    assert stored["facts"]["cinema"] == "\u5408\u80a5\u4e07\u8fbe\u5f71\u57ce"
 
 
 @pytest.mark.asyncio

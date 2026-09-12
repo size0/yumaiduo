@@ -146,7 +146,7 @@ def _runtime(tmp_path, *, seat_status="WPLUS_AREA_RESOLVED", cost_status="COST_R
 
 
 def _event(event_id="e1", text=None):
-    payload = {"imageUrls": ["https://example/image"]}
+    payload = {"imageUrls": ["https://example/image"], "itemId": "item"}
     if text is not None:
         payload = {"itemId": "item", "text": text}
     return {"envelope": {"id": event_id, "tenantId": "tenant", "payload": payload},
