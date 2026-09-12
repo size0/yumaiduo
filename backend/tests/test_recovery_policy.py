@@ -5,6 +5,7 @@ from app.recovery.adapters import from_legacy
 from app.recovery.context import QuotePipelineContext
 from app.recovery.invalidation import invalidated_fields
 from app.recovery.routing import select_runtime
+from app.recovery.reply_gate import reply_eligibility_gate
 from app.conversation_fact_store import ConversationFactStore
 from datetime import datetime, timedelta, timezone
 
@@ -62,6 +63,12 @@ def test_context_has_stable_identity_and_generation():
     context = QuotePipelineContext(identity={"shop_id": "1"}, generation=2)
     assert context.identity["shop_id"] == "1"
     assert context.generation == 2
+
+
+def test_reply_gate_rejects_missing_quote_without_throwing():
+    result = reply_eligibility_gate({"status": "QUOTED", "quote": None, "identity": {"buyer_id": "b"}})
+    assert result.status == "NO_SAFE_REPLY"
+    assert result.success is False
 
 
 def test_context_merge_prioritizes_current_and_invalidates_quote_chain():

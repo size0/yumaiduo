@@ -8,6 +8,7 @@ from .models import GateResult, SafetyClass
 
 def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
     quote = result.get("quote")
+    quote_values = quote if isinstance(quote, dict) else {}
     persist_status = str(result.get("quote_persist_status") or "")
     identity = result.get("identity") if isinstance(result.get("identity"), dict) else {}
     verified_show_id = str(result.get("verified_show_id") or "").strip()
@@ -17,13 +18,13 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
         authority_ok = False
     for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id"):
         expected = str(identity.get(key) or "").strip()
-        if expected and str(quote.get(key) or "").strip() != expected:
+        if expected and str(quote_values.get(key) or "").strip() != expected:
             authority_ok = False
-    if verified_show_id and str(quote.get("wanda_show_id") or quote.get("show_id") or "").strip() != verified_show_id:
+    if verified_show_id and str(quote_values.get("wanda_show_id") or quote_values.get("show_id") or "").strip() != verified_show_id:
         authority_ok = False
-    if pipeline_generation is not None and "generation" in quote:
-        authority_ok = authority_ok and quote.get("generation") == pipeline_generation
-    expires_at = str(quote.get("expires_at") or quote.get("quote_expires_at") or "").strip() if isinstance(quote, dict) else ""
+    if pipeline_generation is not None and "generation" in quote_values:
+        authority_ok = authority_ok and quote_values.get("generation") == pipeline_generation
+    expires_at = str(quote_values.get("expires_at") or quote_values.get("quote_expires_at") or "").strip()
     if expires_at:
         try:
             expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
@@ -33,7 +34,7 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
                 authority_ok = False
         except ValueError:
             authority_ok = False
-    if isinstance(quote, dict) and "provider_preflight_verified" in quote and not bool(quote.get("provider_preflight_verified")):
+    if "provider_preflight_verified" in quote_values and not bool(quote_values.get("provider_preflight_verified")):
         authority_ok = False
     if authority_ok and result.get("status") == "QUOTED":
         return GateResult(gate="REPLY", status="AMOUNT_REPLY_ALLOWED", success=True,
