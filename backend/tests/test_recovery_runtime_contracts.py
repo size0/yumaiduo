@@ -146,7 +146,7 @@ def _event(event_id="e1", text=None):
 async def test_wplus_without_selected_seats_reaches_cost_and_pricing(tmp_path: Path):
     runtime, services = _runtime(tmp_path)
     result = await runtime.process_image_event(_event())
-    assert result["status"] == "NO_SAFE_REPLY"
+    assert result["status"] == "QUOTED"
     assert len(services["cost"].calls) == 1
     assert len(services["pricing"].calls) == 1
     assert services["seat"].calls[0]["selected_seats"] == []
