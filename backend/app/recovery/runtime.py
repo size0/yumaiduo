@@ -129,6 +129,8 @@ class RecoveryQuoteRuntime:
         context, final_gate, decision = await QuoteRecoveryOrchestrator(
             [recognition_stage, route_stage, show_stage, seat_stage, cost_stage, pricing_stage, quote_stage, reply_stage],
             max_steps=8,
+            max_recovery_attempts=1,
+            retry_handlers={"COST": lambda ctx, result: cost_stage(ctx), "PRICING": lambda ctx, result: pricing_stage(ctx)},
         ).run(context)
         if final_gate.gate == "REPLY":
             result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json")}

@@ -85,3 +85,23 @@ async def test_orchestrator_stops_at_first_non_continuation():
     assert context.current_gate == "SHOW"
     assert result.status == "SHOW_UNRESOLVED"
     assert decision.action is RecoveryAction.ASK_CLARIFICATION
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_executes_retry_handler():
+    attempts = {"count": 0}
+
+    def stage(context):
+        attempts["count"] += 1
+        return GateResult(gate="COST", status="PROVIDER_UNAVAILABLE", success=False,
+                          safety_class=SafetyClass.RECOVERABLE, retryable=True)
+
+    def retry(context, result):
+        return GateResult(gate="COST", status="COST_READY", success=True, safety_class=SafetyClass.RECOVERABLE)
+
+    context, result, decision = await QuoteRecoveryOrchestrator(
+        [stage], retry_handlers={"COST": retry}, max_recovery_attempts=1,
+    ).run(QuotePipelineContext())
+    assert attempts["count"] == 1
+    assert result.status == "COST_READY"
+    assert decision.action is RecoveryAction.CONTINUE
