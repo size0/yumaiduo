@@ -158,24 +158,22 @@ class RecoveryQuoteRuntime:
             gate = await self.route.resolve_gate(state["recognition"])
             if gate.success:
                 state["route"] = CinemaRouteResult.model_validate(gate.facts)
-                if state["route"].route == "LIANGPIAO":
-                    lp = await self._run_liangpiao(state["recognition"], state["route"], identity,
-                                                   ticket_count=state.get("ticket_count"))
-                    state["liangpiao_result"] = lp
-                    if lp and lp.get("status") == "QUOTED":
-                        state["quote"] = lp.get("quote")
-                        state["quote_persist_status"] = "QUOTE_PERSISTED"
-                        return GateResult(gate="ROUTE", status="LIANGPIAO_READY", success=True,
-                                          safety_class="RECOVERABLE", facts=gate.facts, provider_verified=True)
-                    return GateResult(gate="ROUTE", status=str((lp or {}).get("status") or "PROVIDER_UNAVAILABLE"),
-                                      success=False, safety_class="RECOVERABLE", reason_code=str((lp or {}).get("reason") or "LIANGPIAO_FAILED"),
-                                      missing_fields=list((lp or {}).get("missing_fields") or []))
             return gate
 
         async def show_stage(context: QuotePipelineContext) -> GateResult:
-            if state.get("liangpiao_result") is not None:
-                return GateResult(gate="SHOW", status="LIANGPIAO_SKIPPED", success=True, safety_class="RECOVERABLE")
             recognition, route = state["recognition"], state["route"]
+            if route.route == "LIANGPIAO":
+                lp = await self._run_liangpiao(recognition, route, identity, ticket_count=state.get("ticket_count"))
+                state["liangpiao_result"] = lp
+                if lp and lp.get("status") == "QUOTED":
+                    state["quote"] = lp.get("quote")
+                    state["quote_persist_status"] = "QUOTE_PERSISTED"
+                    return GateResult(gate="SHOW", status="RESOLVED", success=True,
+                                      safety_class="RECOVERABLE", facts={"provider_route": "LIANGPIAO",
+                                      "show_id": (lp.get("quote") or {}).get("liangpiao_show_id")}, provider_verified=True)
+                return GateResult(gate="SHOW", status=str((lp or {}).get("status") or "PROVIDER_UNAVAILABLE"),
+                                  success=False, safety_class="RECOVERABLE", reason_code=str((lp or {}).get("reason") or "LIANGPIAO_FAILED"),
+                                  missing_fields=list((lp or {}).get("missing_fields") or []))
             gate = await self.show.resolve_gate({"route": route.route, "wanda_store_id": route.wanda_store_id,
                 "movie": recognition.movie, "show_date": recognition.show_date, "start_time": recognition.start_time,
                 "hall": recognition.hall, "language": recognition.language, "dimension": recognition.dimension,
