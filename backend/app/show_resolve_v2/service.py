@@ -24,7 +24,9 @@ class ShowResolveV2Service(ShowResolveGateMixin):
         movie = _text(request.get("movie"))
         show_date = _date_key(request.get("show_date"))
         start_time = _time_key(request.get("start_time"))
-        if not store_id or not movie or not show_date or not start_time:
+        ordinal = request.get("showtime_ordinal")
+        candidate_hint = request.get("candidate_shows")
+        if not store_id or not movie or not show_date or (not start_time and not ordinal and not candidate_hint):
             return ShowResolutionResult(
                 status="INPUT_INCOMPLETE",
                 wanda_store_id=store_id,
@@ -45,9 +47,25 @@ class ShowResolveV2Service(ShowResolveGateMixin):
         core_matches = [
             item for item in official
             if item["show_date"] == show_date
-            and item["start_time"] == start_time
             and _movie_key(item["movie_name"]) == _movie_key(movie)
         ]
+        if start_time:
+            core_matches = [item for item in core_matches if item["start_time"] == start_time]
+        else:
+            core_matches.sort(key=lambda item: item["start_time"])
+            dimension = _simple_key(request.get("dimension"))
+            if dimension:
+                dimension_matches = [item for item in core_matches if _same_value(dimension, item.get("dimension"))]
+                if dimension_matches:
+                    core_matches = dimension_matches
+            if ordinal:
+                try:
+                    selected = core_matches[int(ordinal) - 1]
+                except (TypeError, ValueError, IndexError):
+                    selected = None
+                core_matches = [selected] if selected is not None else []
+            elif len(core_matches) == 1:
+                core_matches = core_matches
         core_matches = _dedupe_shows(core_matches)
         if not core_matches:
             return ShowResolutionResult(
