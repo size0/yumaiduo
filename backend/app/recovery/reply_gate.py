@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime, timezone
 
 from .models import GateResult, SafetyClass
 
@@ -18,6 +19,18 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
         if expected and str(quote.get(key) or "").strip() != expected:
             authority_ok = False
     if verified_show_id and str(quote.get("wanda_show_id") or quote.get("show_id") or "").strip() != verified_show_id:
+        authority_ok = False
+    expires_at = str(quote.get("expires_at") or quote.get("quote_expires_at") or "").strip() if isinstance(quote, dict) else ""
+    if expires_at:
+        try:
+            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+                authority_ok = False
+        except ValueError:
+            authority_ok = False
+    if isinstance(quote, dict) and "provider_preflight_verified" in quote and not bool(quote.get("provider_preflight_verified")):
         authority_ok = False
     if authority_ok and result.get("status") == "QUOTED":
         return GateResult(gate="REPLY", status="AMOUNT_REPLY_ALLOWED", success=True,
