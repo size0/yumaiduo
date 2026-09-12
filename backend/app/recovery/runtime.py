@@ -16,7 +16,7 @@ from .models import GateResult
 from .orchestrator import QuoteRecoveryOrchestrator
 from .reply_gate import reply_eligibility_gate
 from .liangpiao_stages import LiangpiaoStageService
-from ..selected_seat_quote_service import SelectedSeatQuoteRequest, SelectedSeat, QuoteServiceError
+from ..selected_seat_quote_service import QuoteServiceError
 from ..pricing.errors import PricingError
 
 
