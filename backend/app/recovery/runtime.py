@@ -150,6 +150,8 @@ class RecoveryQuoteRuntime:
                 "movie": recognition.movie, "show_date": recognition.show_date, "start_time": recognition.start_time,
                 "hall": recognition.hall, "language": recognition.language, "dimension": recognition.dimension,
                 "showtime_ordinal": state.get("showtime_ordinal"), "candidate_shows": state.get("candidate_shows", [])})
+            if gate.candidates:
+                state["candidate_shows"] = list(gate.candidates)
             if gate.success:
                 state["show"] = ShowResolutionResult.model_validate(gate.facts)
             return gate
@@ -255,6 +257,7 @@ class RecoveryQuoteRuntime:
             max_recovery_attempts=1,
             retry_handlers={"COST": lambda ctx, result: cost_stage(ctx), "PRICING": lambda ctx, result: pricing_stage(ctx)},
         ).run(context)
+        self._persist_facts(identity, context, state, final_gate)
         if final_gate.gate == "REPLY" and final_gate.success:
             result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json"),
                       "recognition": state.get("recognition").model_dump(mode="json"),
@@ -268,6 +271,52 @@ class RecoveryQuoteRuntime:
         if final_gate.gate == "REPLY":
             return self._safe(final_gate, context)
         return self._safe(final_gate, context)
+
+    def _persist_facts(self, identity: Mapping[str, str], context: QuotePipelineContext,
+                       state: Mapping[str, Any], final_gate: GateResult) -> None:
+        """Best-effort durable write of the current conversation facts.
+
+        Facts are input/context evidence only.  QuoteRecord remains the amount
+        authority; this write exists so a follow-up image can reuse identity
+        and invalidate stale downstream facts across process boundaries.
+        """
+        if self.fact_store is None:
+            return
+        try:
+            facts = dict(context.conversation_facts)
+            candidates = state.get("candidate_shows")
+            if candidates:
+                facts["candidate_shows"] = list(candidates)
+            show = state.get("show")
+            show_id = getattr(show, "wanda_show_id", None)
+            if show_id:
+                facts["show_id"] = show_id
+            quote = state.get("quote")
+            if isinstance(quote, Mapping) and quote.get("record_id"):
+                facts["quote_record"] = {"record_id": quote["record_id"], "generation": quote.get("generation")}
+            invalidated: set[str] = set(context.stale_fields)
+            dependency_to_fact = {
+                "show": "show_id", "show_id": "show_id", "seat_facts": "selected_seats",
+                "seat": "selected_seats", "cost": "cost", "pricing": "pricing",
+                "quote_record": "quote_record",
+            }
+            from .invalidation import invalidated_fields
+            for changed in context.invalidated_fields:
+                invalidated.update(
+                    dependency_to_fact.get(dependent, dependent)
+                    for dependent in invalidated_fields(changed)
+                )
+            self.fact_store.save(
+                tenant_id=identity["tenant_id"], shop_id=identity["shop_id"],
+                buyer_id=identity["buyer_id"], chat_id=identity["chat_id"],
+                purchase_context_id=identity["purchase_context_id"], facts=facts,
+                invalidated_fields=invalidated, source="recovery_runtime",
+                fact_tier="verified" if final_gate.success else "candidate",
+                event_id=identity["event_id"], message_id=identity.get("message_id"),
+            )
+        except Exception:
+            # Fact persistence must never change quote decisions or reply safety.
+            return
 
     async def process_text_event(self, body: dict[str, Any]) -> dict[str, Any]:
         identity = self._identity(body)

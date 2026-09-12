@@ -19,6 +19,9 @@ from types import SimpleNamespace
 
 
 class _RecognitionTransport:
+    def __init__(self, *, seats=True):
+        self.seats = seats
+
     async def recognize(self, image_url, **kwargs):
         return LiangpiaoRecognitionResponse(
             data={
@@ -27,7 +30,7 @@ class _RecognitionTransport:
                     "city": "\u5408\u80a5", "cinema": "\u5408\u80a5\u4e07\u8fbe\u5f71\u57ce",
                     "film": "\u5965\u5fb7\u8d5b", "showtime": "2026-09-13 14:30",
                     "hall": "1\u53f7\u5385", "dimension": "2D",
-                    "seat": [{"seatName": "9\u639211\u5ea7"}],
+                    "seat": [{"seatName": "9\u639211\u5ea7"}] if self.seats else [],
                 },
             },
             raw_provider_result={},
@@ -38,6 +41,10 @@ class _RecognitionTransport:
 
 
 class _WandaReadSource:
+    def __init__(self, *, show_ok=True, priced=True):
+        self.show_ok = show_ok
+        self.priced = priced
+
     async def get_city_list(self):
         return {"code": 0, "data": {"cityList": [{"cityId": "city-1", "cityName": "\u5408\u80a5"}]}}
 
@@ -47,21 +54,25 @@ class _WandaReadSource:
         }]}}
 
     async def get_showtimes(self, *args):
+        if not self.show_ok:
+            return {"code": 500, "data": {}}
+        member_price = "4200" if self.priced else None
         return {"code": 0, "data": {"showtimeFilmInf": [{
             "filmName": "\u5965\u5fb7\u8d5b", "showtimeFilmDateInf": [{
                 "date": "20260913", "showtimesInf": {"showtimeList": [{
                     "showtimeId": "show-1", "filmName": "\u5965\u5fb7\u8d5b",
                     "showDate": "2026-09-13", "realtime": "14:30",
                     "hallName": "1\u53f7\u5385", "dimension": "2D",
-                    "salesPrice": "4500", "wPlusActivityPrice": "4200",
+                    "salesPrice": "4500", "wPlusActivityPrice": member_price,
                 }]},
             }],
         }]}}
 
     async def get_realtime_seats(self, show_id):
+        member_price = "4200" if self.priced else None
         return {"code": 0, "data": {"realtimeSeats": {"area": [{
             "areaName": "W+", "areaCode": "w1",
-            "areaPrice": {"originalPrice": "4500", "memberPrice": "4200"},
+            "areaPrice": {"originalPrice": "4500", "memberPrice": member_price},
             "seat": [{"seatName": "9\u639211\u5ea7", "seatId": "seat-1",
                        "payMemberSeatStatus": 1, "status": "AVAILABLE"}],
         }]}}}
@@ -107,21 +118,21 @@ def _event(event_id="real-e1"):
     }}, "session": {"accountUnb": "shop-1", "peerUnb": "buyer-1", "chatId": "chat-1"}}
 
 
+def _wanda_runtime(tmp_path: Path, source, transport=None, *, pricing_engine=None):
+    return RecoveryQuoteRuntime(
+        recognition_service=RecognitionV2Service(transport or _RecognitionTransport()),
+        route_service=CinemaRouteV2Service(source), show_service=ShowResolveV2Service(source),
+        seat_service=SeatFactsV2Service(source), cost_service=WandaCostResolutionService(),
+        pricing_service=WandaPricingV2Service(pricing_engine),
+        quote_service=QuoteV2Service(QuoteRecordStore(tmp_path / "quotes.json")),
+        rules_provider=lambda: PricingRulesSnapshot(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_real_services_and_orchestrator_quote_with_fake_provider(tmp_path: Path):
     source = _WandaReadSource()
-    recognition = RecognitionV2Service(_RecognitionTransport())
-    route = CinemaRouteV2Service(source)
-    show = ShowResolveV2Service(source)
-    seat = SeatFactsV2Service(source)
-    cost = WandaCostResolutionService()
-    pricing = WandaPricingV2Service()
-    quote = QuoteV2Service(QuoteRecordStore(tmp_path / "quotes.json"))
-    runtime = RecoveryQuoteRuntime(
-        recognition_service=recognition, route_service=route, show_service=show,
-        seat_service=seat, cost_service=cost, pricing_service=pricing,
-        quote_service=quote, rules_provider=lambda: PricingRulesSnapshot(),
-    )
+    runtime = _wanda_runtime(tmp_path, source)
 
     result = await runtime.process_image_event(_event())
 
@@ -129,6 +140,50 @@ async def test_real_services_and_orchestrator_quote_with_fake_provider(tmp_path:
     assert result["reply_gate"]["status"] == "AMOUNT_REPLY_ALLOWED"
     assert result["quote"]["wanda_show_id"] == "show-1"
     assert result["quote"]["buyer_id"] == "buyer-1"
+
+
+@pytest.mark.asyncio
+async def test_real_services_context_image_then_seat_image(tmp_path: Path):
+    class TwoImages(_RecognitionTransport):
+        def __init__(self):
+            super().__init__(seats=False)
+            self.calls = 0
+
+        async def recognize(self, image_url, **kwargs):
+            self.calls += 1
+            response = await super().recognize(image_url, **kwargs)
+            if self.calls == 2:
+                raw = dict(response.data["rawResults"])
+                raw.update({"city": None, "cinema": None, "film": None, "showtime": None,
+                            "seat": [{"seatName": "9\u639211\u5ea7"}]})
+                response.data["rawResults"] = raw
+            return response
+
+    from app.conversation_fact_store import ConversationFactStore
+    source = _WandaReadSource()
+    transport = TwoImages()
+    runtime = _wanda_runtime(tmp_path, source, transport)
+    runtime.fact_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    first = await runtime.process_image_event(_event("context-image"))
+    second = await runtime.process_image_event(_event("seat-image"))
+    assert first["status"] == "QUOTED"
+    assert second["status"] == "QUOTED"
+    assert second["quote"]["wanda_show_id"] == "show-1"
+    assert transport.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_real_show_provider_failure_is_safe(tmp_path: Path):
+    result = await _wanda_runtime(tmp_path, _WandaReadSource(show_ok=False)).process_image_event(_event("show-down"))
+    assert result["status"] == "PROVIDER_UNAVAILABLE"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_real_cost_probe_required_is_safe(tmp_path: Path):
+    result = await _wanda_runtime(tmp_path, _WandaReadSource(priced=False)).process_image_event(_event("probe-needed"))
+    assert result["status"] in {"PROBE_REQUIRED", "COST_UNAVAILABLE"}
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
 
 
 @pytest.mark.asyncio
