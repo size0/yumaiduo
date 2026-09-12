@@ -270,7 +270,11 @@ class RecoveryQuoteRuntime:
                       "recognition": state.get("recognition").model_dump(mode="json"),
                       "conversation_facts": dict(context.conversation_facts),
                       "invalidated_fields": sorted(context.stale_fields), "generation": context.generation,
-                      "quote_generation": context.quote_generation}
+                      "quote_generation": context.quote_generation,
+                      "gate_trace": list(context.gate_trace),
+                      "first_failed_gate": context.first_failed_gate,
+                      "first_failed_status": context.first_failed_status,
+                      "first_failed_reason_code": context.first_failed_reason_code}
             if self.reply_renderer is not None:
                 rendered = self.reply_renderer.render(result)
                 result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
@@ -404,6 +408,9 @@ class RecoveryQuoteRuntime:
             result.update({"conversation_facts": dict(context.conversation_facts),
                            "invalidated_fields": sorted(context.stale_fields),
                            "generation": context.generation, "quote_generation": context.quote_generation})
+            result.update({"gate_trace": list(context.gate_trace), "first_failed_gate": context.first_failed_gate,
+                           "first_failed_status": context.first_failed_status,
+                           "first_failed_reason_code": context.first_failed_reason_code})
         if self.reply_renderer is not None:
             rendered = self.reply_renderer.render(result)
             result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
