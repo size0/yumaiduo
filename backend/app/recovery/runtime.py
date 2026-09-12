@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import re
 from typing import Any
 
 from ..recognition_v2.models import RecognitionResult
@@ -48,14 +49,25 @@ class RecoveryQuoteRuntime:
             return {"status": "IDENTITY_INCOMPLETE"}
         context = QuotePipelineContext(identity=identity)
         fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")}
-        stored = self.fact_store.load_context(**fact_identity) if self.fact_store is not None else None
+        try:
+            stored = self.fact_store.load_context(**fact_identity) if self.fact_store is not None else None
+        except Exception:
+            stored = None
         stored_facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
-        state: dict[str, Any] = {"identity": identity, "url": urls[0].strip(), "stored": stored_facts}
+        state: dict[str, Any] = {"identity": identity, "url": urls[0].strip(), "stored": stored_facts,
+                                 "recognition_gate": body.get("_recovery_recognition_gate"),
+                                 "ticket_count": body.get("_recovery_ticket_count")}
 
         async def recognition_stage(context: QuotePipelineContext) -> GateResult:
-            gate = await self.recognition.recognize_gate(state["url"], trace_id=identity["event_id"], idempotency_key=identity["event_id"])
+            gate = state["recognition_gate"] or await self.recognition.recognize_gate(
+                state["url"], trace_id=identity["event_id"], idempotency_key=identity["event_id"],
+            )
             recognition = RecognitionResult.model_validate(gate.facts)
-            context.merge_facts(recognition.model_dump(mode="json"), stored=stored_facts)
+            current_facts = {"city": recognition.city_text, "cinema": recognition.cinema_text,
+                             "movie": recognition.movie, "quote_date": recognition.show_date,
+                             "showtime_start": recognition.start_time, "hall": recognition.hall,
+                             "dimension": recognition.dimension, "selected_seats": recognition.selected_seats}
+            context.merge_facts({key: value for key, value in current_facts.items() if value not in (None, "", [])}, stored=stored_facts)
             mapping = {"city_text": "city", "cinema_text": "cinema", "show_date": "quote_date", "start_time": "showtime_start"}
             for key in ("city_text", "cinema_text", "movie", "show_date", "start_time", "hall", "dimension", "selected_seats"):
                 source_key = mapping.get(key, key)
@@ -95,7 +107,7 @@ class RecoveryQuoteRuntime:
             return gate
 
         def pricing_stage(context: QuotePipelineContext) -> GateResult:
-            gate = self.pricing.price_gate(state["cost"], state["show"], state["seat"], self.rules_provider())
+            gate = self.pricing.price_gate(state["cost"], state["show"], state["seat"], self.rules_provider(), ticket_count=state.get("ticket_count"))
             if gate.success:
                 state["pricing"] = WandaPricingResult.model_validate(gate.facts)
             return gate
@@ -119,8 +131,38 @@ class RecoveryQuoteRuntime:
             max_steps=8,
         ).run(context)
         if final_gate.gate == "REPLY":
-            return {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json")}
+            result = {"status": "QUOTED", "quote": state.get("quote"), "reply_gate": final_gate.model_dump(mode="json")}
+            if self.reply_renderer is not None:
+                rendered = self.reply_renderer.render(result)
+                result.update({"current_runtime_reply": rendered.get("text"), "canonical_reply_kind": rendered.get("kind")})
+            return result
         return self._safe(final_gate)
+
+    async def process_text_event(self, body: dict[str, Any]) -> dict[str, Any]:
+        identity = self._identity(body)
+        fact_identity = {key: identity[key] for key in ("tenant_id", "shop_id", "buyer_id", "chat_id", "purchase_context_id")}
+        try:
+            stored = self.fact_store.load_context(**fact_identity) if self.fact_store is not None else None
+        except Exception:
+            stored = None
+        facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
+        payload = body.get("envelope", {}).get("payload", {}) if isinstance(body.get("envelope"), Mapping) else {}
+        text = str(payload.get("text") or payload.get("content") or body.get("text") or "").strip()
+        if not facts:
+            return {"status": "NEED_CLARIFICATION", "missing_fields": ["cinema", "movie", "date", "showtime"]}
+        time_match = re.search(r"(?<!\d)(\d{1,2})\s*(?:点|时|:)[ ]*(\d{1,2})?", text)
+        count_match = re.search(r"([一二两三四五六七八九十]|\d+)\s*(?:张|票|人)", text)
+        count_words = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        recognition = RecognitionResult(city_text=facts.get("city"), cinema_text=facts.get("cinema"), movie=facts.get("movie"),
+            show_date=facts.get("quote_date") or facts.get("date"), start_time=(f"{int(time_match.group(1)):02d}:{int(time_match.group(2) or 0):02d}" if time_match else facts.get("showtime_start")),
+            hall=facts.get("hall"), dimension=facts.get("dimension"), selected_seats=list(facts.get("selected_seats") or []),
+            has_selected_seats=bool(facts.get("selected_seats")))
+        synthetic = {"envelope": {"id": identity["event_id"], "tenantId": identity["tenant_id"], "payload": {"imageUrls": ["about:blank"]}},
+                     "session": {"accountUnb": identity["shop_id"], "peerUnb": identity["buyer_id"], "chatId": identity["chat_id"]},
+                     "_recovery_recognition_gate": GateResult(gate="RECOGNITION", status="PARTIAL", success=True,
+                         safety_class="RECOVERABLE", facts=recognition.model_dump(mode="json")),
+                     "_recovery_ticket_count": (count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count"))}
+        return await self.process_image_event(synthetic)
 
     @staticmethod
     def _safe(gate: GateResult) -> dict[str, Any]:

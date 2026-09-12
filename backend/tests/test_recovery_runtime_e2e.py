@@ -59,7 +59,7 @@ class FakeCost:
 
 
 class FakePricing:
-    def price_gate(self, cost, show, seat, rules):
+    def price_gate(self, cost, show, seat, rules, **kwargs):
         return gate("PRICING", "PRICED", WandaPricingResult(
             status="PRICED", request_type="WPLUS_AREA", unit_sell_price_fen=4500,
             total_sell_price_fen=4500, ticket_count=1,
@@ -103,3 +103,21 @@ async def test_recovery_runtime_stops_without_amount_when_route_unresolved():
         "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
     })
     assert result["status"] == "CINEMA_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_text_followup_uses_same_conversation_facts(tmp_path: Path):
+    facts_store = ConversationFactStore(tmp_path / "facts.sqlite")
+    facts_store.save(tenant_id="tenant", shop_id="shop", buyer_id="buyer", chat_id="chat",
+                     purchase_context_id="item", facts={"city": "合肥", "cinema": "万达影城", "movie": "奥德赛",
+                     "quote_date": "2026-09-13", "showtime_start": "14:30"}, source="test", fact_tier="verified")
+    runtime = RecoveryQuoteRuntime(
+        recognition_service=FakeRecognition(), route_service=FakeRoute(), show_service=FakeShow(),
+        seat_service=FakeSeat(), cost_service=FakeCost(), pricing_service=FakePricing(),
+        quote_service=FakeQuotes(), rules_provider=lambda: object(), fact_store=facts_store,
+    )
+    result = await runtime.process_text_event({
+        "text": "两张", "envelope": {"id": "event-text", "tenantId": "tenant", "payload": {"itemId": "item", "text": "两张"}},
+        "session": {"accountUnb": "shop", "peerUnb": "buyer", "chatId": "chat"},
+    })
+    assert result["status"] == "QUOTED"

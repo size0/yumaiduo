@@ -502,7 +502,7 @@ def create_app(
         if service is None
         else None
     )
-    if configured_canonical_quote_runtime is None and canonical_quote_runtime_enabled:
+    if configured_canonical_quote_runtime is None and (canonical_quote_runtime_enabled or recovery_gate_pipeline_enabled):
         # The default composition reuses the existing Wanda adapter strictly as
         # a signed read transport. All pricing and persistence below remain V2.
         if isinstance(authoritative_quote_service, WandaDirectQuoteService):
@@ -1107,6 +1107,11 @@ def create_app(
             envelope.get("event") == "im.message.received"
             and isinstance(image_urls, list) and bool(image_urls)
         )
+        text_value = payload.get("text", payload.get("content"))
+        canonical_text_event = (
+            envelope.get("event") == "im.message.received"
+            and isinstance(text_value, str) and bool(text_value.strip())
+        )
         if canonical_image_event and configured_wplus_mark_service.should_handle_event(body):
             # An explicit WAITING_WPLUS_MARK state takes precedence over both
             # quote entry paths. It is still durable: the existing RulesFirst
@@ -1124,15 +1129,16 @@ def create_app(
                 "fulfillment_mark_status": result.get("status") if result else None,
             }
         if (
-            canonical_image_event
-            and (canonical_quote_runtime_enabled or recovery_gate_pipeline_enabled)
+            ((canonical_image_event and (canonical_quote_runtime_enabled or recovery_gate_pipeline_enabled))
+             or (canonical_text_event and recovery_gate_pipeline_enabled))
             and canonical_shop_canary_enabled(body)
         ):
             # This is deliberately terminal for the event: canonical quote
             # processing is read-only and must not fall through to Legacy NLP.
             if recovery_gate_pipeline_enabled:
                 result = (
-                    await configured_recovery_quote_runtime.process_image_event(body)
+                    await (configured_recovery_quote_runtime.process_text_event(body) if canonical_text_event and not canonical_image_event
+                           else configured_recovery_quote_runtime.process_image_event(body))
                     if configured_recovery_quote_runtime is not None
                     else {"status": "RECOVERY_COMPOSITION_UNAVAILABLE"}
                 )
