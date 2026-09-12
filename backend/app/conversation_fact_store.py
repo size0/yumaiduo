@@ -162,10 +162,11 @@ class ConversationFactStore:
         message_id: str | None = None,
         observed_at: datetime | None = None,
         ttl_seconds: int | None = None,
+        invalidated_fields: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         identity = self._identity(tenant_id, shop_id, buyer_id, chat_id, purchase_context_id)
         incoming = self._sanitize_facts(facts)
-        if not incoming:
+        if not incoming and not invalidated_fields:
             raise ValueError("conversation_facts_empty")
         source_value = _text(source, limit=80)
         tier_value = _text(fact_tier, limit=40)
@@ -184,6 +185,8 @@ class ConversationFactStore:
             ).fetchone()
             previous = self._row_view(existing) if existing is not None else None
             merged = merge_conversation_facts(previous.get("facts") if previous else {}, incoming)
+            for field in invalidated_fields or ():
+                merged.pop(str(field), None)
             fact_id = str(previous.get("fact_id")) if previous else f"cf-{uuid4().hex}"
             created_at = str(previous.get("created_at")) if previous else now.isoformat()
             values = (
@@ -319,13 +322,22 @@ class ConversationFactStore:
         recognition = result.get("recognition") if isinstance(result.get("recognition"), Mapping) else {}
         quote = result.get("quote") if isinstance(result.get("quote"), Mapping) else {}
         facts = self._facts_from_values(recognition, quote)
+        persisted_context = result.get("conversation_facts") if isinstance(result.get("conversation_facts"), Mapping) else {}
+        if persisted_context:
+            facts.update(dict(persisted_context))
+        for field in result.get("invalidated_fields", []) if isinstance(result.get("invalidated_fields"), list) else []:
+            facts.pop(str(field), None)
         if not facts or not all(identity.get(key) for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")):
             return None
+        invalidated = result.get("invalidated_fields", [])
+        if not isinstance(invalidated, (list, tuple, set)):
+            invalidated = []
         return self.save(
             tenant_id=identity["tenant_id"], shop_id=identity["shop_id"], buyer_id=identity["buyer_id"],
             chat_id=identity["chat_id"], purchase_context_id=identity.get("purchase_context_id") or f"chat:{identity['chat_id']}",
             facts=facts, source=source, event_id=identity.get("event_id") or None,
             message_id=identity.get("message_id") or None,
+            invalidated_fields={str(field) for field in invalidated},
         )
 
     @staticmethod

@@ -73,6 +73,20 @@ def test_canonical_and_legacy_writers_share_the_same_fact_schema(tmp_path: Path)
     assert current["facts"]["selected_seats"] == ["6排6座"]
     assert current["facts"]["seat_request_type"] == "EXACT_SEATS"
 
+    facts.record_canonical_event(body, {
+        "status": "NEED_CLARIFICATION",
+        "invalidated_fields": ["show_id", "selected_seats", "cost", "quote_record"],
+        "conversation_facts": {"showtime_start": "13:10"},
+    })
+    refreshed = facts.get_current(
+        tenant_id="tenant-a", shop_id="shop-a", buyer_id="buyer-a", chat_id="chat-a",
+        purchase_context_id="purchase-a",
+    )
+    assert refreshed is not None
+    assert refreshed["facts"]["showtime_start"] == "13:10"
+    assert "selected_seats" not in refreshed["facts"]
+    assert "show_id" not in refreshed["facts"]
+
 
 def test_store_merges_facts_and_isolates_purchase_identity(tmp_path: Path) -> None:
     facts = store(tmp_path)

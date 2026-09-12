@@ -9,21 +9,33 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 from .models import ShowResolutionResult, WandaShowCandidate
+from ..recovery.models import GateResult, SafetyClass
 from .wanda_source import WandaShowSource
 
 
 class ShowResolveV2Service:
     """Resolve a Wanda show ID only after the store ID is already authoritative."""
+    async def resolve_gate(self, request: Mapping[str, Any]) -> GateResult:
+        result = await self._resolve_result(request)
+        facts = result.model_dump(mode="json")
+        return GateResult(gate="SHOW", status=result.status, success=result.status == "RESOLVED",
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          missing_fields=["showtime"] if result.status == "INPUT_INCOMPLETE" else [],
+                          candidates=[item.model_dump(mode="json") for item in result.candidates],
+                          reason_code=result.resolution_reason, metadata={"source": "show_resolve"})
 
     def __init__(self, source: WandaShowSource) -> None:
         self._source = source
 
-    async def resolve(self, request: Mapping[str, Any]) -> ShowResolutionResult:
+    async def _resolve_result(self, request: Mapping[str, Any]) -> ShowResolutionResult:
         store_id = _text(request.get("wanda_store_id"))
         movie = _text(request.get("movie"))
         show_date = _date_key(request.get("show_date"))
         start_time = _time_key(request.get("start_time"))
-        if not store_id or not movie or not show_date or not start_time:
+        ordinal = request.get("showtime_ordinal")
+        candidate_hint = request.get("candidate_shows")
+        dimension_hint = _simple_key(request.get("dimension"))
+        if not store_id or not movie or not show_date or (not start_time and not ordinal and not candidate_hint and not dimension_hint):
             return ShowResolutionResult(
                 status="INPUT_INCOMPLETE",
                 wanda_store_id=store_id,
@@ -44,9 +56,51 @@ class ShowResolveV2Service:
         core_matches = [
             item for item in official
             if item["show_date"] == show_date
-            and item["start_time"] == start_time
             and _movie_key(item["movie_name"]) == _movie_key(movie)
         ]
+        # Conversation Facts may carry provider-independent candidate shows
+        # from an earlier turn.  They are hints only: use their normalized
+        # time/dimension to narrow the current authoritative provider result,
+        # but never copy a candidate show_id into the resolved result.
+        candidate_hints = [item for item in (candidate_hint or []) if isinstance(item, Mapping)]
+        if not start_time and candidate_hints:
+            hinted_times = {
+                _time_key(item.get("start_time") or item.get("showtime"))
+                for item in candidate_hints
+            }
+            hinted_times.discard(None)
+            if len(hinted_times) == 1:
+                core_matches = [item for item in core_matches if item["start_time"] in hinted_times]
+            elif len(hinted_times) > 1 and not ordinal:
+                # Multiple unresolved candidates require an explicit choice.
+                core_matches = [item for item in core_matches if item["start_time"] in hinted_times]
+            hinted_dimensions = {
+                _simple_key(item.get("dimension") or item.get("format"))
+                for item in candidate_hints
+                if _simple_key(item.get("dimension") or item.get("format"))
+            }
+            if len(hinted_dimensions) == 1 and not request.get("dimension"):
+                core_matches = [
+                    item for item in core_matches
+                    if _same_value(next(iter(hinted_dimensions)), item.get("dimension"))
+                ]
+        if start_time:
+            core_matches = [item for item in core_matches if item["start_time"] == start_time]
+        else:
+            core_matches.sort(key=lambda item: item["start_time"])
+            dimension = _simple_key(request.get("dimension"))
+            if dimension:
+                dimension_matches = [item for item in core_matches if _same_value(dimension, item.get("dimension"))]
+                if dimension_matches:
+                    core_matches = dimension_matches
+            if ordinal:
+                try:
+                    selected = core_matches[int(ordinal) - 1]
+                except (TypeError, ValueError, IndexError):
+                    selected = None
+                core_matches = [selected] if selected is not None else []
+            elif len(core_matches) == 1:
+                core_matches = core_matches
         core_matches = _dedupe_shows(core_matches)
         if not core_matches:
             return ShowResolutionResult(
@@ -80,6 +134,9 @@ class ShowResolveV2Service:
             candidate_count=len(candidates),
             candidates=candidates,
         )
+
+    async def resolve(self, request: Mapping[str, Any]) -> ShowResolutionResult:
+        return await self._resolve_result(request)
 
 
 def _provider_success(response: Mapping[str, Any]) -> bool:

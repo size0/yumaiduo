@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from .liangpiao import LiangpiaoRecognitionResponse, LiangpiaoV2Transport
 from .models import RecognitionResult
+from ..recovery.models import GateResult, SafetyClass
 
 
 _SHOWTIME_PATTERN = re.compile(r"(?P<date>\d{4}-\d{1,2}-\d{1,2})[ T](?P<time>\d{1,2}:[0-5]\d)")
@@ -37,7 +38,7 @@ class RecognitionV2Service:
     def from_settings(cls, settings: Any) -> "RecognitionV2Service":
         return cls(LiangpiaoV2Transport(settings))
 
-    async def recognize(
+    async def _recognize_result(
         self,
         image_url: str,
         *,
@@ -62,6 +63,17 @@ class RecognitionV2Service:
             if isinstance(enriched, RecognitionResult):
                 result = enriched
         return result
+
+    async def recognize(self, image_url: str, **kwargs: Any) -> RecognitionResult:
+        return await self._recognize_result(image_url, **kwargs)
+
+    async def recognize_gate(self, image_url: str, **kwargs: Any) -> GateResult:
+        result = await self._recognize_result(image_url, **kwargs)
+        facts = result.model_dump(mode="json")
+        status = "RECOGNIZED" if result.movie or result.cinema_text else "PARTIAL"
+        return GateResult(gate="RECOGNITION", status=status, success=True,
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          reason_code=facts.get("reason"), metadata={"source": "recognition"})
 
     async def aclose(self) -> None:
         await self._transport.aclose()

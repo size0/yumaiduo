@@ -52,6 +52,7 @@ class Settings(BaseModel):
     # Active Probe is a state-writing operation and remains independently fused off.
     wanda_active_probe_enabled: bool = False
     liangpiao_callback_enabled: bool = False
+    recovery_gate_pipeline_enabled: bool = False
 
     @field_validator("base_url", "chat_base_url", "liangpiao_base_url")
     @classmethod
@@ -114,4 +115,5 @@ class Settings(BaseModel):
             ),
             wanda_active_probe_enabled=_env_flag("WANDA_ACTIVE_PROBE_ENABLED"),
             liangpiao_callback_enabled=_env_flag("LIANGPIAO_CALLBACK_ENABLED"),
+            recovery_gate_pipeline_enabled=_env_flag("RECOVERY_GATE_PIPELINE_ENABLED"),
         )

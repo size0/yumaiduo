@@ -68,6 +68,8 @@ from .plugin_automation import RulesFirstDecisionEngine
 from .payment_validation import AuthoritativePaymentValidationService
 from .quote_record_store import QuoteRecordStore
 from .quote_v2.service import CanonicalQuoteRuntime, QuoteV2Service
+from .recovery.runtime import RecoveryQuoteRuntime
+from .recovery.routing import select_runtime
 from .quote_v2.wanda_source import WandaDirectQuoteV2ReadSource
 from .reminder_service import plan_shipped_order_reminders
 from .reminder_store import ReminderStore
@@ -422,7 +424,11 @@ def create_app(
     canonical_quote_runtime_enabled = os.getenv(
         "CANONICAL_QUOTE_RUNTIME_ENABLED", "false",
     ).strip().lower() in {"1", "true", "yes", "on"}
+    recovery_gate_pipeline_enabled = os.getenv(
+        "RECOVERY_GATE_PIPELINE_ENABLED", "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
     configured_canonical_quote_runtime = canonical_quote_runtime
+    configured_recovery_quote_runtime = None
     canonical_quote_store_service = QuoteV2Service(
         persistent_quote_records, settings=Settings.from_env(),
     )
@@ -432,6 +438,7 @@ def create_app(
         or runtime_settings.liangpiao_order_create_enabled
         or runtime_settings.liangpiao_callback_enabled
         or canonical_quote_runtime_enabled
+        or recovery_gate_pipeline_enabled
     ) and runtime_settings.liangpiao_app_key and runtime_settings.liangpiao_app_secret:
         configured_liangpiao_client = LiangpiaoClient(runtime_settings)
     configured_quote_service = selected_seat_quote_service
@@ -496,7 +503,7 @@ def create_app(
         if service is None
         else None
     )
-    if configured_canonical_quote_runtime is None and canonical_quote_runtime_enabled:
+    if configured_canonical_quote_runtime is None and (canonical_quote_runtime_enabled or recovery_gate_pipeline_enabled):
         # The default composition reuses the existing Wanda adapter strictly as
         # a signed read transport. All pricing and persistence below remain V2.
         if isinstance(authoritative_quote_service, WandaDirectQuoteService):
@@ -528,6 +535,24 @@ def create_app(
                 manual_mark_detector=canonical_manual_mark_detector,
                 reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
             )
+            if recovery_gate_pipeline_enabled:
+                configured_recovery_quote_runtime = RecoveryQuoteRuntime(
+                    recognition_service=canonical_recognition,
+                    route_service=configured_canonical_quote_runtime._route,
+                    show_service=configured_canonical_quote_runtime._show,
+                    seat_service=configured_canonical_quote_runtime._seats,
+                    cost_service=configured_canonical_quote_runtime._cost,
+                    pricing_service=configured_canonical_quote_runtime._wanda_pricing,
+                    quote_service=canonical_quote_store_service,
+                    rules_provider=lambda: PricingRulesSnapshot.from_mapping(
+                        persistent_pricing_rules.view().model_dump(mode="json"),
+                    ),
+                    fact_store=persistent_conversation_facts,
+                    reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
+                    liangpiao_quote_service=configured_quote_service,
+                    liangpiao_facts_adapter=LiangpiaoPricingFactsAdapter(),
+                    pricing_engine=V4PricingEngine(),
+                )
         else:
             LOGGER.warning("event=canonical_quote_composition_unavailable reason=wanda_adapter_missing")
     configured_payment_validation = payment_validation_service or AuthoritativePaymentValidationService(
@@ -1086,6 +1111,11 @@ def create_app(
             envelope.get("event") == "im.message.received"
             and isinstance(image_urls, list) and bool(image_urls)
         )
+        text_value = payload.get("text", payload.get("content"))
+        canonical_text_event = (
+            envelope.get("event") == "im.message.received"
+            and isinstance(text_value, str) and bool(text_value.strip())
+        )
         if canonical_image_event and configured_wplus_mark_service.should_handle_event(body):
             # An explicit WAITING_WPLUS_MARK state takes precedence over both
             # quote entry paths. It is still durable: the existing RulesFirst
@@ -1102,18 +1132,30 @@ def create_app(
                 "duplicate": False, "fulfillment_mark_routed": True,
                 "fulfillment_mark_status": result.get("status") if result else None,
             }
-        if (
-            canonical_image_event
-            and canonical_quote_runtime_enabled
-            and canonical_shop_canary_enabled(body)
-        ):
+        selected_quote_runtime = select_runtime(
+            recovery_enabled=recovery_gate_pipeline_enabled,
+            legacy_enabled=canonical_quote_runtime_enabled,
+            image_event=canonical_image_event and canonical_shop_canary_enabled(body),
+            text_event=canonical_text_event and canonical_shop_canary_enabled(body),
+            recovery_runtime=configured_recovery_quote_runtime,
+            legacy_runtime=configured_canonical_quote_runtime,
+        )
+        if selected_quote_runtime is not None:
             # This is deliberately terminal for the event: canonical quote
             # processing is read-only and must not fall through to Legacy NLP.
-            result = (
-                await configured_canonical_quote_runtime.process_image_event(body)
-                if configured_canonical_quote_runtime is not None
-                else {"status": "CANONICAL_COMPOSITION_UNAVAILABLE"}
-            )
+            if recovery_gate_pipeline_enabled:
+                result = (
+                    await (configured_recovery_quote_runtime.process_text_event(body) if canonical_text_event and not canonical_image_event
+                           else configured_recovery_quote_runtime.process_image_event(body))
+                    if configured_recovery_quote_runtime is not None
+                    else {"status": "RECOVERY_COMPOSITION_UNAVAILABLE"}
+                )
+            else:
+                result = (
+                    await configured_canonical_quote_runtime.process_image_event(body)
+                    if configured_canonical_quote_runtime is not None
+                    else {"status": "CANONICAL_COMPOSITION_UNAVAILABLE"}
+                )
             persistent_conversation_facts.record_canonical_event(body, result)
             configured_wplus_mark_service.record_quote_context(body, result)
             if durable_runtime is not None:

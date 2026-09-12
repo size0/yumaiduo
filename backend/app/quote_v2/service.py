@@ -226,6 +226,24 @@ class QuoteV2Service:
             record, ttl_seconds=self._configured_ttl_seconds, now=created,
         ))
 
+    def persist_gate(self, pricing_result: WandaPricingResult, show_facts: ShowResolutionResult, **kwargs: Any):
+        """Native GateResult contract for the recovery pipeline."""
+        from ..recovery.models import GateResult, SafetyClass
+        try:
+            record = self.persist(pricing_result, show_facts, **kwargs)
+        except ValueError as error:
+            return GateResult(gate="QUOTE", status="INPUT_INVALID", success=False,
+                              safety_class=SafetyClass.HARD_SAFETY, reason_code=str(error))
+        except Exception as error:
+            return GateResult(gate="QUOTE", status="PERSIST_FAILED", success=False,
+                              safety_class=SafetyClass.RECOVERABLE, reason_code=type(error).__name__, retryable=True)
+        if record is None:
+            return GateResult(gate="QUOTE", status="INPUT_INVALID", success=False,
+                              safety_class=SafetyClass.RECOVERABLE, reason_code="PRICING_NOT_PERSISTABLE")
+        return GateResult(gate="QUOTE", status="QUOTE_PERSISTED", success=True,
+                          safety_class=SafetyClass.RECOVERABLE, facts={"quote_record": record},
+                          provider_verified=True)
+
     def persist_liangpiao(
         self,
         pricing_result: QuoteResult,
