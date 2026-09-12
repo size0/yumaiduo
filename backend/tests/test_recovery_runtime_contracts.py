@@ -188,6 +188,20 @@ async def test_text_patch_forwards_ordinal_and_dimension(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_image_followup_uses_persisted_candidate_shows(tmp_path: Path):
+    runtime, services = _runtime(tmp_path)
+    runtime.fact_store.save(
+        tenant_id="tenant", shop_id="shop", buyer_id="buyer", chat_id="chat", purchase_context_id="item",
+        facts={"city": "合肥", "cinema": "万达影城", "movie": "奥德赛", "quote_date": "2026-09-13",
+               "candidate_shows": [{"show_id": "candidate-2", "start_time": "11:20", "dimension": "IMAX"}]},
+        source="test", fact_tier="verified",
+    )
+    result = await runtime.process_image_event(_event("e-candidate"))
+    assert result["status"] == "QUOTED"
+    assert services["show"].calls[0]["candidate_shows"] == [{"show_id": "candidate-2", "start_time": "11:20", "dimension": "IMAX"}]
+
+
+@pytest.mark.asyncio
 async def test_fact_identity_isolation_does_not_mix_buyers(tmp_path: Path):
     runtime, services = _runtime(tmp_path)
     runtime.fact_store.save(tenant_id="tenant", shop_id="shop", buyer_id="other", chat_id="chat", purchase_context_id="item",

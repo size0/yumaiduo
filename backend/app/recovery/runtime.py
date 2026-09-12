@@ -125,7 +125,7 @@ class RecoveryQuoteRuntime:
                                  "recognition_gate": recognition_override,
                                  "ticket_count": ticket_count,
                                  "showtime_ordinal": showtime_ordinal,
-                                 "candidate_shows": candidate_shows or []}
+                                 "candidate_shows": candidate_shows or stored_facts.get("candidate_shows") or []}
 
         async def recognition_stage(context: QuotePipelineContext) -> GateResult:
             gate = state["recognition_gate"] or await self.recognition.recognize_gate(
