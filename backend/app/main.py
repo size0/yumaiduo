@@ -549,6 +549,9 @@ def create_app(
                     ),
                     fact_store=persistent_conversation_facts,
                     reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
+                    liangpiao_quote_service=configured_quote_service,
+                    liangpiao_facts_adapter=LiangpiaoPricingFactsAdapter(),
+                    pricing_engine=V4PricingEngine(),
                 )
         else:
             LOGGER.warning("event=canonical_quote_composition_unavailable reason=wanda_adapter_missing")
