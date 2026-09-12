@@ -61,6 +61,14 @@ def test_context_has_stable_identity_and_generation():
     assert context.generation == 2
 
 
+def test_context_merge_prioritizes_current_and_invalidates_quote_chain():
+    context = QuotePipelineContext(conversation_facts={"cinema": "A", "date": "2026-09-12"}, show="old", quote_record="old")
+    context.merge_facts({"cinema": "B"}, stored={"cinema": "stale", "movie": "M"})
+    assert context.conversation_facts["cinema"] == "B"
+    assert context.show is None
+    assert context.quote_record is None
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_stops_at_first_non_continuation():
     async def route(context):

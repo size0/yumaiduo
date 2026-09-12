@@ -15,14 +15,21 @@ class QuoteRecoveryOrchestrator:
     runner owns progression; stage services only return facts and status.
     """
 
-    def __init__(self, stages: Sequence[GateRunner], *, policy: RecoveryPolicy | None = None) -> None:
+    def __init__(self, stages: Sequence[GateRunner], *, policy: RecoveryPolicy | None = None,
+                 max_steps: int = 16) -> None:
         self._stages = tuple(stages)
         self._policy = policy or RecoveryPolicy()
+        self._max_steps = max(1, max_steps)
 
     async def run(self, context: QuotePipelineContext) -> tuple[QuotePipelineContext, GateResult, RecoveryDecision]:
         last_result = GateResult(gate="PIPELINE", status="EMPTY", success=False, safety_class="RECOVERABLE")
         last_decision = self._policy.evaluate(last_result)
-        for stage in self._stages:
+        for step, stage in enumerate(self._stages):
+            if step >= self._max_steps:
+                return context, last_result.model_copy(update={"status": "RECOVERY_LIMIT"}), RecoveryDecision(
+                    gate="PIPELINE", status="RECOVERY_LIMIT", safety_class=last_result.safety_class,
+                    action=RecoveryAction.STOP, reason="MAX_RECOVERY_STEPS", stop_scope="STOP_QUOTE_PIPELINE",
+                )
             result = stage(context)
             if hasattr(result, "__await__"):
                 result = await result

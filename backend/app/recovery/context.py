@@ -20,3 +20,29 @@ class QuotePipelineContext(BaseModel):
     quote_record: Any | None = None
     current_gate: str | None = None
     generation: int = 0
+
+    def merge_facts(self, current: dict[str, Any], *, stored: dict[str, Any] | None = None,
+                    candidates: dict[str, Any] | None = None) -> None:
+        """Merge facts with explicit input precedence and invalidate dependents."""
+        from .invalidation import invalidated_fields
+
+        before = dict(self.conversation_facts)
+        merged = dict(stored or {})
+        merged.update(self.conversation_facts)
+        merged.update(candidates or {})
+        merged.update(current)
+        changed = {key for key, value in merged.items() if before.get(key) != value}
+        self.conversation_facts = merged
+        for field in changed:
+            for dependent in invalidated_fields(field):
+                if dependent in {"show", "show_id"}:
+                    self.show = None
+                elif dependent == "seat_facts":
+                    self.seat_facts = None
+                elif dependent == "cost":
+                    self.cost = None
+                elif dependent == "pricing":
+                    self.pricing = None
+                elif dependent == "quote_record":
+                    self.quote_record = None
+        self.generation += 1
