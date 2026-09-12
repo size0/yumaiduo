@@ -46,9 +46,10 @@ class QuoteRecoveryOrchestrator:
                 if hasattr(result, "__await__"):
                     result = await result
             except Exception as error:
+                stage_name = getattr(stage, "__name__", None) or f"stage_{step}"
                 result = GateResult(gate="PIPELINE", status="STAGE_EXCEPTION", success=False,
                                     safety_class="HARD_SAFETY", reason_code=type(error).__name__,
-                                    metadata={"stage": step})
+                                    metadata={"stage": stage_name, "stage_index": step})
             if not isinstance(result, GateResult):
                 raise TypeError(f"stage returned {type(result).__name__}, expected GateResult")
             context.current_gate = result.gate

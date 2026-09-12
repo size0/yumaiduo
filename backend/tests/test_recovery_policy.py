@@ -165,6 +165,6 @@ async def test_orchestrator_isolates_stage_exception():
     assert context.current_gate == "PIPELINE"
     assert result.status == "STAGE_EXCEPTION"
     assert result.reason_code == "RuntimeError"
-    assert result.metadata == {"stage": "broken_stage"}
+    assert result.metadata == {"stage": "broken_stage", "stage_index": 0}
     assert decision.action is RecoveryAction.STOP
     assert decision.stop_scope == "STOP_QUOTE_PIPELINE"
