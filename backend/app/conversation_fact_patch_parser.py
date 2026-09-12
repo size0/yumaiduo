@@ -79,7 +79,20 @@ class ConversationFactPatchParser:
         if compact in {"第二场", "第2场", "第三场", "第3场", "第一场", "第1场"}:
             ordinal = int(re.search(r"[一二三123]", compact).group(0).translate(str.maketrans("一二三", "123")))
             patch["showtime_ordinal"] = ordinal
+            selected = self._candidate_show(current, ordinal=ordinal)
+            if selected:
+                patch.update(selected)
+            elif isinstance(current.get("candidate_shows"), list):
+                return ConversationFactPatch({}, referenced=True, requires_requote=False, reason="show_selection_unresolved")
             referenced = True
+
+        if "imax" in compact.lower() or "杜比" in compact:
+            selected = self._candidate_show(current, dimension="IMAX" if "imax" in compact.lower() else "杜比")
+            if selected:
+                patch.update(selected)
+                referenced = True
+            elif isinstance(current.get("candidate_shows"), list):
+                return ConversationFactPatch({}, referenced=True, requires_requote=False, reason="show_selection_unresolved")
 
         # “那场/这场/刚才那场” is a request to revalidate the current
         # structured context, not permission to reuse its old quote.
@@ -116,6 +129,26 @@ class ConversationFactPatchParser:
             if re.search(rf"{re.escape(word)}\s*(?:张|张票|票)", value):
                 return count
         return None
+
+    @staticmethod
+    def _candidate_show(source: Mapping[str, Any], *, ordinal: int | None = None, dimension: str | None = None) -> dict[str, Any]:
+        shows = source.get("candidate_shows")
+        if not isinstance(shows, list):
+            return {}
+        candidates = [item for item in shows if isinstance(item, Mapping) and item.get("start_time")]
+        if dimension:
+            candidates = [item for item in candidates if dimension.lower() in str(item.get("dimension") or "").lower()]
+        if ordinal is not None:
+            if ordinal < 1 or ordinal > len(candidates):
+                return {}
+            candidates = [candidates[ordinal - 1]]
+        if len(candidates) != 1:
+            return {}
+        item = candidates[0]
+        aliases = {"showtime_start": "start_time", "showtime_end": "end_time", "hall": "hall_name", "dimension": "dimension", "language": "language"}
+        # Candidate IDs and prices never authorize a quote; the provider must
+        # resolve this descriptive request again.
+        return {target: item[key] for target, key in aliases.items() if item.get(key) not in (None, "")}
 
 
 def merge_conversation_facts(

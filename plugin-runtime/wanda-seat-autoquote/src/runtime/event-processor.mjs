@@ -10,6 +10,7 @@ import {
   sameFulfillmentFingerprint,
 } from '../actions/fulfillment.mjs';
 import { normalizeAuthoritativeOrder, orderChangeability } from '../actions/contracts.mjs';
+import { latencyRun, latencyStage } from './latency.mjs';
 import { V2EventStore } from './event-store.mjs';
 
 function text(value) { const result = String(value ?? '').trim(); return result || null; }
@@ -971,13 +972,13 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
 
   async function process(record) {
     const { envelope } = record;
-    try {
+    return latencyRun(envelope.id, 'event', logger, async () => { try {
       const client = platform.createClient(envelope.tenantId);
-      await syncShops(client, envelope.tenantId);
-      const resolved = await resolveOrderContext(client, envelope);
+      await latencyStage('shop_sync', () => syncShops(client, envelope.tenantId));
+      const resolved = await latencyStage('order_context', () => resolveOrderContext(client, envelope));
       const { session } = resolved;
       let { order } = resolved;
-      const recent = await readRecentMessages(client, session);
+      const recent = await latencyStage('recent_messages', () => readRecentMessages(client, session));
       if (!order) {
         const recentOrderId = latestOrderIdFromMessages(recent.messages);
         if (recentOrderId) {
@@ -1019,7 +1020,10 @@ export function createV2Runtime({ config, platform, backend, logger = console, s
     } catch (error) {
       logger.error('v2 event failed', { eventId: envelope.id, event: envelope.event, error });
       await store.fail(record.id, record.lease, String(error?.message ?? 'unknown_error'));
-    }
+      // Preserve rejection for latencyRun so failed events are not reported as
+      // successful spans; drain() owns the final bounded worker error log.
+      throw error;
+    } });
   }
 
   async function executeAction({ client, mode, session, order, action, envelope, record, completedActionResult = null, baselineMessages = [], baselineAvailable = false }) {

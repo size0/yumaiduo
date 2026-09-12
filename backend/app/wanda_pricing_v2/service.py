@@ -9,6 +9,7 @@ from app.show_resolve_v2.models import ShowResolutionResult
 from app.wanda_cost_v2.models import WandaCostFacts
 
 from .models import WandaPricingCostItem, WandaPricingResult, WandaSeatQuote
+from ..recovery.models import GateResult, SafetyClass
 
 _ALLOWED_COST_SOURCES = frozenset({
     "SHOWTIME_WPLUS",
@@ -23,7 +24,7 @@ class WandaPricingV2Service:
     def __init__(self, engine: V4PricingEngine | object | None = None) -> None:
         self._engine = engine or V4PricingEngine()
 
-    def price(
+    def _price_result(
         self,
         cost_facts: WandaCostFacts,
         show_facts: ShowResolutionResult,
@@ -44,6 +45,20 @@ class WandaPricingV2Service:
         if cost_facts.request_type == "EXACT_SEATS":
             return self._price_exact(cost_facts, show_facts, seat_facts, rules)
         return _incomplete("COST_REQUEST_TYPE_REQUIRED", cost_facts)
+
+    def price_gate(self, cost: WandaCostFacts, show: ShowResolutionResult, seat: SeatFactsResult,
+                   rules: PricingRulesSnapshot, **kwargs: object) -> GateResult:
+        result = self._price_result(cost, show, seat, rules, ticket_count=kwargs.get("ticket_count"))
+        facts = result.model_dump(mode="json")
+        return GateResult(gate="PRICING", status=result.status, success=result.status == "PRICED",
+                          safety_class=SafetyClass.RECOVERABLE, facts=facts,
+                          provider_verified=result.status == "PRICED",
+                          reason_code=facts.get("reason"), metadata={"source": "pricing"})
+
+    def price(self, cost_facts: WandaCostFacts, show_facts: ShowResolutionResult,
+              seat_facts: SeatFactsResult, rules: PricingRulesSnapshot, *,
+              ticket_count: int | None = None) -> WandaPricingResult:
+        return self._price_result(cost_facts, show_facts, seat_facts, rules, ticket_count=ticket_count)
 
     def _price_area(
         self,

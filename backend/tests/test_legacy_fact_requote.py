@@ -85,3 +85,25 @@ async def test_canonical_facts_are_loaded_by_legacy_text_and_requoted(tmp_path: 
     assert request.date_text == "2026-09-11"
     assert request.showtime_start == "13:10"
     assert request.hall_name == "IMAX厅"
+
+class ContinuationQuoteRuntime:
+    async def quote_structured(self, request):
+        return {"status": "QUOTED", "quote": {"showtime_start": request.showtime_start, "show_id": "official-1", "request_type": "WPLUS_AREA", "unit_quote_cents": 3590}}
+
+@pytest.mark.asyncio
+async def test_candidate_selection_replaces_old_showtime_and_requotes(tmp_path: Path):
+    facts = ConversationFactStore(tmp_path / "facts.sqlite3", ttl_seconds=604800)
+    facts.save(tenant_id="t", shop_id="s", buyer_id="b", chat_id="c", purchase_context_id="p", facts={
+        "city": "北京", "cinema": "怀柔万达", "movie": "八仙！", "quote_date": "2026-09-12",
+        "showtime_start": "08:40", "candidate_shows": [
+            {"show_id": "old", "start_time": "08:40", "dimension": "2D"},
+            {"show_id": "new", "start_time": "13:10", "dimension": "IMAX"},
+        ],
+    }, source="canonical_image")
+    from app.conversation_quote_continuation import ConversationQuoteContinuation
+    result = await ConversationQuoteContinuation(fact_store=facts, quote_runtime=ContinuationQuoteRuntime()).process({
+        "envelope": {"id": "e", "tenantId": "t", "payload": {"accountUnb": "s", "peerUnb": "b", "chatId": "c", "itemId": "p", "content": "13:10", "messageType": 1}}
+    })
+    assert result["tool_trace"][0]["result"]["status"] == "QUOTED"
+    assert result["tool_trace"][0]["result"]["quote"]["showtime_start"] == "13:10"
+    assert facts.get_current(tenant_id="t", shop_id="s", buyer_id="b", chat_id="c", purchase_context_id="p")["facts"]["verified"] is True

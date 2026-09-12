@@ -28,6 +28,7 @@ from .canonical_agent_audit_store import CanonicalAgentAuditStore
 from .cinema_route_v2.service import CinemaRouteV2Service
 from .conversation_policy_store import ConversationPolicyStore
 from .conversation_fact_store import ConversationFactStore
+from .conversation_quote_continuation import ConversationQuoteContinuation
 from .diagnostics import DiagnosticsStore
 from .errors import ImageValidationError, ProviderError, RecognitionError
 from .config import Settings
@@ -67,6 +68,8 @@ from .plugin_automation import RulesFirstDecisionEngine
 from .payment_validation import AuthoritativePaymentValidationService
 from .quote_record_store import QuoteRecordStore
 from .quote_v2.service import CanonicalQuoteRuntime, QuoteV2Service
+from .recovery.runtime import RecoveryQuoteRuntime
+from .recovery.routing import select_runtime
 from .quote_v2.wanda_source import WandaDirectQuoteV2ReadSource
 from .reminder_service import plan_shipped_order_reminders
 from .reminder_store import ReminderStore
@@ -94,6 +97,29 @@ from .wanda_direct_quote import WandaDirectQuoteService
 APP_NAME = "wanda-movie-image-recognition"
 UPLOAD_READ_LIMIT = 20 * 1024 * 1024
 INDEX_PATH = Path(__file__).resolve().parents[2] / "frontend" / "v4" / "index.html"
+
+
+_GATE_TRACE_LOG_FIELDS = (
+    "gate", "status", "success", "reason_code", "missing_fields_count",
+    "retryable", "provider_verified", "amount_safe", "quote_record_created",
+    "duration_ms",
+)
+
+
+def _sanitize_gate_trace_for_log(value: Any) -> list[dict[str, Any]]:
+    """Keep summary logs to the non-sensitive, scalar gate diagnostics."""
+    if not isinstance(value, list):
+        return []
+    sanitized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        safe_item = {}
+        for field in _GATE_TRACE_LOG_FIELDS:
+            value = item.get(field)
+            safe_item[field] = value if value is None or isinstance(value, (str, int, float, bool)) else None
+        sanitized.append(safe_item)
+    return sanitized
 
 
 def _liangpiao_order_no(value: Mapping[str, object]) -> str:
@@ -204,6 +230,17 @@ def _quote_delivery_record_id(action: Mapping[str, object], *, event_id: str) ->
     if not record_id or record_id == normalized_event:
         return None
     return record_id
+
+
+def _delivery_receipt_result(*, succeeded: bool, message_id: str, record_id: str | None,
+                             action_type: str) -> tuple[bool, str, str]:
+    """Classify receipt tracing without changing receipt eligibility."""
+    attempted = bool(succeeded and message_id and record_id)
+    if attempted:
+        return True, "PENDING", ""
+    if succeeded and message_id and action_type == "send_message":
+        return False, ("SKIPPED_NO_QUOTE_RECORD" if not record_id else "SKIPPED_NOT_QUOTE_REPLY"), ""
+    return False, "NOT_ATTEMPTED", "COMMAND_RESULT_NOT_SUCCEEDED_OR_MESSAGE_ID_MISSING"
 
 
 def _new_flow_reprice_input(body: Mapping[str, object]) -> tuple[str, dict[str, str], Mapping[str, object]] | None:
@@ -410,7 +447,11 @@ def create_app(
     canonical_quote_runtime_enabled = os.getenv(
         "CANONICAL_QUOTE_RUNTIME_ENABLED", "false",
     ).strip().lower() in {"1", "true", "yes", "on"}
+    recovery_gate_pipeline_enabled = os.getenv(
+        "RECOVERY_GATE_PIPELINE_ENABLED", "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
     configured_canonical_quote_runtime = canonical_quote_runtime
+    configured_recovery_quote_runtime = None
     canonical_quote_store_service = QuoteV2Service(
         persistent_quote_records, settings=Settings.from_env(),
     )
@@ -420,6 +461,7 @@ def create_app(
         or runtime_settings.liangpiao_order_create_enabled
         or runtime_settings.liangpiao_callback_enabled
         or canonical_quote_runtime_enabled
+        or recovery_gate_pipeline_enabled
     ) and runtime_settings.liangpiao_app_key and runtime_settings.liangpiao_app_secret:
         configured_liangpiao_client = LiangpiaoClient(runtime_settings)
     configured_quote_service = selected_seat_quote_service
@@ -484,7 +526,7 @@ def create_app(
         if service is None
         else None
     )
-    if configured_canonical_quote_runtime is None and canonical_quote_runtime_enabled:
+    if configured_canonical_quote_runtime is None and (canonical_quote_runtime_enabled or recovery_gate_pipeline_enabled):
         # The default composition reuses the existing Wanda adapter strictly as
         # a signed read transport. All pricing and persistence below remain V2.
         if isinstance(authoritative_quote_service, WandaDirectQuoteService):
@@ -516,6 +558,24 @@ def create_app(
                 manual_mark_detector=canonical_manual_mark_detector,
                 reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
             )
+            if recovery_gate_pipeline_enabled:
+                configured_recovery_quote_runtime = RecoveryQuoteRuntime(
+                    recognition_service=canonical_recognition,
+                    route_service=configured_canonical_quote_runtime._route,
+                    show_service=configured_canonical_quote_runtime._show,
+                    seat_service=configured_canonical_quote_runtime._seats,
+                    cost_service=configured_canonical_quote_runtime._cost,
+                    pricing_service=configured_canonical_quote_runtime._wanda_pricing,
+                    quote_service=canonical_quote_store_service,
+                    rules_provider=lambda: PricingRulesSnapshot.from_mapping(
+                        persistent_pricing_rules.view().model_dump(mode="json"),
+                    ),
+                    fact_store=persistent_conversation_facts,
+                    reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
+                    liangpiao_quote_service=configured_quote_service,
+                    liangpiao_facts_adapter=LiangpiaoPricingFactsAdapter(),
+                    pricing_engine=V4PricingEngine(),
+                )
         else:
             LOGGER.warning("event=canonical_quote_composition_unavailable reason=wanda_adapter_missing")
     configured_payment_validation = payment_validation_service or AuthoritativePaymentValidationService(
@@ -576,6 +636,9 @@ def create_app(
         agent=canonical_agent, shop_store=persistent_shop_automation, inbox=persistent_rules_store,
         quote_context_writer=configured_wplus_mark_service.record_quote_context,
         reply_renderer=CanonicalBuyerReplyRenderer(persistent_reply_templates.current),
+        quote_continuation=(ConversationQuoteContinuation(
+            fact_store=persistent_conversation_facts, quote_runtime=configured_canonical_quote_runtime,
+        ) if configured_canonical_quote_runtime is not None else None),
     )
     durable_runtime = rules_first_runtime or (
         RulesFirstRuntime(
@@ -1071,6 +1134,11 @@ def create_app(
             envelope.get("event") == "im.message.received"
             and isinstance(image_urls, list) and bool(image_urls)
         )
+        text_value = payload.get("text", payload.get("content"))
+        canonical_text_event = (
+            envelope.get("event") == "im.message.received"
+            and isinstance(text_value, str) and bool(text_value.strip())
+        )
         if canonical_image_event and configured_wplus_mark_service.should_handle_event(body):
             # An explicit WAITING_WPLUS_MARK state takes precedence over both
             # quote entry paths. It is still durable: the existing RulesFirst
@@ -1087,18 +1155,30 @@ def create_app(
                 "duplicate": False, "fulfillment_mark_routed": True,
                 "fulfillment_mark_status": result.get("status") if result else None,
             }
-        if (
-            canonical_image_event
-            and canonical_quote_runtime_enabled
-            and canonical_shop_canary_enabled(body)
-        ):
+        selected_quote_runtime = select_runtime(
+            recovery_enabled=recovery_gate_pipeline_enabled,
+            legacy_enabled=canonical_quote_runtime_enabled,
+            image_event=canonical_image_event and canonical_shop_canary_enabled(body),
+            text_event=canonical_text_event and canonical_shop_canary_enabled(body),
+            recovery_runtime=configured_recovery_quote_runtime,
+            legacy_runtime=configured_canonical_quote_runtime,
+        )
+        if selected_quote_runtime is not None:
             # This is deliberately terminal for the event: canonical quote
             # processing is read-only and must not fall through to Legacy NLP.
-            result = (
-                await configured_canonical_quote_runtime.process_image_event(body)
-                if configured_canonical_quote_runtime is not None
-                else {"status": "CANONICAL_COMPOSITION_UNAVAILABLE"}
-            )
+            if recovery_gate_pipeline_enabled:
+                result = (
+                    await (configured_recovery_quote_runtime.process_text_event(body) if canonical_text_event and not canonical_image_event
+                           else configured_recovery_quote_runtime.process_image_event(body))
+                    if configured_recovery_quote_runtime is not None
+                    else {"status": "RECOVERY_COMPOSITION_UNAVAILABLE"}
+                )
+            else:
+                result = (
+                    await configured_canonical_quote_runtime.process_image_event(body)
+                    if configured_canonical_quote_runtime is not None
+                    else {"status": "CANONICAL_COMPOSITION_UNAVAILABLE"}
+                )
             persistent_conversation_facts.record_canonical_event(body, result)
             configured_wplus_mark_service.record_quote_context(body, result)
             if durable_runtime is not None:
@@ -1110,6 +1190,16 @@ def create_app(
                     "canonical_runtime_reply": result.get("current_runtime_reply"),
                     "durable_reply_command_count": len(durable.get("commands", [])),
                 }
+                try:
+                    LOGGER.info(
+                        "canonical_quote_observability_v2 event=durable_reply_trace event_id=%s durable_command_count=%s action_types=%s has_quote_record_id=%s",
+                        str(accepted.get("event_id") or "")[:16],
+                        len(durable.get("commands", [])),
+                        sorted({str(item.get("type") or "") for item in durable.get("commands", []) if isinstance(item, Mapping)}),
+                        bool(result.get("quote_record_id") or (result.get("quote") or {}).get("record_id")),
+                    )
+                except Exception:
+                    pass
             else:
                 accepted = {
                     "event_id": str(envelope.get("id") or ""), "accepted": True,
@@ -1118,10 +1208,16 @@ def create_app(
                     "canonical_runtime_reply": result.get("current_runtime_reply"),
                     "durable_reply_command_count": 0,
                 }
-            LOGGER.info(
-                "event=canonical_quote_event_processed event_id=%s status=%s reply_command_count=%s",
-                accepted["event_id"], result.get("status"), accepted.get("durable_reply_command_count"),
-            )
+            try:
+                LOGGER.info(
+                    "event=canonical_quote_event_processed event_id=%s status=%s reply_command_count=%s first_failed_gate=%s first_failed_status=%s first_failed_reason_code=%s gate_trace=%s",
+                    accepted["event_id"], result.get("status"), accepted.get("durable_reply_command_count"),
+                    result.get("first_failed_gate"), result.get("first_failed_status"),
+                    result.get("first_failed_reason_code"),
+                    _sanitize_gate_trace_for_log(result.get("gate_trace")),
+                )
+            except Exception:
+                pass
             return accepted
         new_flow_authorization = None
         binding_result = None
@@ -1218,19 +1314,39 @@ def create_app(
             record_id = _quote_delivery_record_id(
                 action, event_id=str(command.get("event_id") or ""),
             )
-            if result.get("status") == "succeeded" and message_id and record_id:
-                delivered = persistent_quote_records.mark_delivered(
-                    tenant_id=command["tenant_id"], record_id=record_id,
-                    delivered_at=datetime.now(timezone.utc), message_id=message_id,
-                )
+            receipt_attempted, receipt_result, failure_code = _delivery_receipt_result(
+                succeeded=result.get("status") == "succeeded", message_id=message_id,
+                record_id=record_id, action_type=str(action.get("type") or ""),
+            )
+            if receipt_attempted:
+                try:
+                    delivered = persistent_quote_records.mark_delivered(
+                        tenant_id=command["tenant_id"], record_id=record_id,
+                        delivered_at=datetime.now(timezone.utc), message_id=message_id,
+                    )
+                    receipt_result = "MARKED_DELIVERED" if delivered is not None else "FAILED"
+                    failure_code = "MARK_DELIVERED_RETURNED_NONE" if delivered is None else ""
+                except Exception:
+                    receipt_result = "FAILED"
+                    failure_code = "MARK_DELIVERED_EXCEPTION"
+                    raise
                 LOGGER.info(
-                    "event=quote_delivery_receipt_recorded command_id=%s record_id=%s message_id=%s recorded=%s",
-                    command_id, record_id, message_id, str(delivered is not None).lower(),
+                    "event=quote_delivery_receipt_trace command_id=%s attempted=true result=%s failure_code=%s",
+                    command_id, receipt_result, failure_code,
                 )
-            elif result.get("status") == "succeeded" and message_id and action.get("type") == "send_message":
+            elif receipt_result.startswith("SKIPPED_"):
+                LOGGER.info(
+                    "event=quote_delivery_receipt_trace command_id=%s attempted=false result=%s failure_code=%s",
+                    command_id, receipt_result, "",
+                )
                 LOGGER.info(
                     "event=quote_delivery_receipt_skipped command_id=%s event_id=%s reason=quote_record_id_missing_or_action_not_quote_reply",
                     command_id, command.get("event_id"),
+                )
+            else:
+                LOGGER.info(
+                    "event=quote_delivery_receipt_trace command_id=%s attempted=false result=NOT_ATTEMPTED failure_code=%s",
+                    command_id, "COMMAND_RESULT_NOT_SUCCEEDED_OR_MESSAGE_ID_MISSING",
                 )
         return recorded
 

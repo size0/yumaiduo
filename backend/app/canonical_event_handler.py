@@ -10,12 +10,13 @@ class CanonicalEventHandler:
     """Handle buyer text after the existing durable inbox lease is acquired."""
 
     def __init__(self, *, agent: Any, shop_store: Any, inbox: Any, quote_context_writer: Any = None,
-                 reply_renderer: Any = None) -> None:
+                 reply_renderer: Any = None, quote_continuation: Any = None) -> None:
         self._agent = agent
         self._shops = shop_store
         self._inbox = inbox
         self._quote_context_writer = quote_context_writer
         self._reply_renderer = reply_renderer or CanonicalBuyerReplyRenderer()
+        self._quote_continuation = quote_continuation
 
     async def process_event(self, body: Mapping[str, Any]) -> dict[str, Any] | None:
         envelope = _mapping(body.get("envelope"))
@@ -48,7 +49,9 @@ class CanonicalEventHandler:
         try:
             stored_context = self._inbox.latest_canonical_context(body)
             enriched = {**dict(body), **stored_context}
-            result = await self._agent.process(enriched)
+            result = await self._quote_continuation.process(body) if self._quote_continuation is not None else None
+            if result is None:
+                result = await self._agent.process(enriched)
         except Exception:
             return self._outcome("AGENT_REPLY_UNAVAILABLE", reason="canonical_agent_failed")
         quoted = next((entry.get("result") for entry in reversed(result.get("tool_trace") or [])

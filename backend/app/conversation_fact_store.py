@@ -19,6 +19,7 @@ _ALLOWED_FACTS = frozenset({
     "city", "cinema", "cinema_address", "movie", "quote_date", "showtime_start",
     "showtime_end", "hall", "dimension", "language", "seat_request_type",
     "selected_seats", "ticket_count", "showtime_ordinal",
+    "candidate_shows", "show_id", "verified",
 })
 
 
@@ -161,10 +162,11 @@ class ConversationFactStore:
         message_id: str | None = None,
         observed_at: datetime | None = None,
         ttl_seconds: int | None = None,
+        invalidated_fields: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         identity = self._identity(tenant_id, shop_id, buyer_id, chat_id, purchase_context_id)
         incoming = self._sanitize_facts(facts)
-        if not incoming:
+        if not incoming and not invalidated_fields:
             raise ValueError("conversation_facts_empty")
         source_value = _text(source, limit=80)
         tier_value = _text(fact_tier, limit=40)
@@ -183,6 +185,8 @@ class ConversationFactStore:
             ).fetchone()
             previous = self._row_view(existing) if existing is not None else None
             merged = merge_conversation_facts(previous.get("facts") if previous else {}, incoming)
+            for field in invalidated_fields or ():
+                merged.pop(str(field), None)
             fact_id = str(previous.get("fact_id")) if previous else f"cf-{uuid4().hex}"
             created_at = str(previous.get("created_at")) if previous else now.isoformat()
             values = (
@@ -318,13 +322,22 @@ class ConversationFactStore:
         recognition = result.get("recognition") if isinstance(result.get("recognition"), Mapping) else {}
         quote = result.get("quote") if isinstance(result.get("quote"), Mapping) else {}
         facts = self._facts_from_values(recognition, quote)
+        persisted_context = result.get("conversation_facts") if isinstance(result.get("conversation_facts"), Mapping) else {}
+        if persisted_context:
+            facts.update(dict(persisted_context))
+        for field in result.get("invalidated_fields", []) if isinstance(result.get("invalidated_fields"), list) else []:
+            facts.pop(str(field), None)
         if not facts or not all(identity.get(key) for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")):
             return None
+        invalidated = result.get("invalidated_fields", [])
+        if not isinstance(invalidated, (list, tuple, set)):
+            invalidated = []
         return self.save(
             tenant_id=identity["tenant_id"], shop_id=identity["shop_id"], buyer_id=identity["buyer_id"],
             chat_id=identity["chat_id"], purchase_context_id=identity.get("purchase_context_id") or f"chat:{identity['chat_id']}",
             facts=facts, source=source, event_id=identity.get("event_id") or None,
             message_id=identity.get("message_id") or None,
+            invalidated_fields={str(field) for field in invalidated},
         )
 
     @staticmethod
@@ -367,6 +380,21 @@ class ConversationFactStore:
             if labels:
                 result["selected_seats"] = list(dict.fromkeys(labels))
                 result.setdefault("seat_request_type", "EXACT_SEATS")
+        shows = recognition.get("candidate_shows")
+        if isinstance(shows, list):
+            normalized_shows = []
+            for item in shows[:10]:
+                if not isinstance(item, Mapping):
+                    continue
+                show = {
+                    key: str(item[key]).strip()
+                    for key in ("show_id", "start_time", "end_time", "hall_name", "dimension", "language")
+                    if item.get(key) not in (None, "")
+                }
+                if show.get("start_time"):
+                    normalized_shows.append(show)
+            if normalized_shows:
+                result["candidate_shows"] = normalized_shows
         return {key: value for key, value in result.items() if key in _ALLOWED_FACTS}
 
     @staticmethod
@@ -402,6 +430,18 @@ class ConversationFactStore:
                 continue
             if name == "showtime_ordinal":
                 if type(value) is int and 1 <= value <= 10:
+                    result[name] = value
+                continue
+            if name == "candidate_shows":
+                if isinstance(value, list):
+                    fields = ("show_id", "start_time", "end_time", "hall_name", "dimension", "language")
+                    result[name] = [
+                        {key: _text(item.get(key), limit=120) for key in fields if _text(item.get(key), limit=120)}
+                        for item in value[:10] if isinstance(item, Mapping) and _text(item.get("start_time"), limit=120)
+                    ]
+                continue
+            if name == "verified":
+                if type(value) is bool:
                     result[name] = value
                 continue
             text = _text(value)
