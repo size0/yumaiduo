@@ -18,3 +18,8 @@ def reply_eligibility_gate(result: dict[str, Any]) -> GateResult:
                           facts={"status": status, "reason": result.get("reason")})
     return GateResult(gate="REPLY", status="NO_SAFE_REPLY", success=False,
                       safety_class=SafetyClass.HARD_SAFETY, reason_code="QUOTE_RECORD_REQUIRED")
+
+
+class ReplyEligibilityService:
+    def evaluate(self, result: dict[str, Any]) -> GateResult:
+        return reply_eligibility_gate(result)
