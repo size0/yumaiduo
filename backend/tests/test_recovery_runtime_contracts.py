@@ -119,6 +119,17 @@ class RecordingQuotes:
         }})
 
 
+class BrokenQuotes(RecordingQuotes):
+    def persist_gate(self, *args, **kwargs):
+        return _gate("QUOTE", "QUOTE_PERSIST_FAILED", {}, success=False)
+
+
+class BrokenPricing(RecordingPricing):
+    def price_gate(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return _gate("PRICING", "PRICING_FAILED", {}, success=False)
+
+
 def _runtime(tmp_path, *, seat_status="WPLUS_AREA_RESOLVED", cost_status="COST_READY", recognition=None, show_status="RESOLVED"):
     services = {
         "recognition": recognition or RecordingRecognition(), "route": RecordingRoute(),
@@ -170,6 +181,34 @@ async def test_cost_failure_never_prices_or_persists(tmp_path: Path):
     assert result["status"] == "PROVIDER_UNAVAILABLE"
     assert services["pricing"].calls == []
     assert services["quotes"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_show_failure_never_reaches_seat(tmp_path: Path):
+    runtime, services = _runtime(tmp_path, show_status="SHOW_UNRESOLVED")
+    result = await runtime.process_image_event(_event("show-failure"))
+    assert result["status"] == "SHOW_UNRESOLVED"
+    assert services["seat"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_pricing_failure_never_persists(tmp_path: Path):
+    runtime, services = _runtime(tmp_path)
+    services["pricing"] = BrokenPricing()
+    runtime.pricing = services["pricing"]
+    result = await runtime.process_image_event(_event("pricing-failure"))
+    assert result["status"] == "PRICING_FAILED"
+    assert services["quotes"].calls == []
+
+
+@pytest.mark.asyncio
+async def test_quote_persist_failure_has_no_amount(tmp_path: Path):
+    runtime, services = _runtime(tmp_path)
+    services["quotes"] = BrokenQuotes()
+    runtime.quotes = services["quotes"]
+    result = await runtime.process_image_event(_event("persist-failure"))
+    assert result["status"] == "QUOTE_PERSIST_FAILED"
+    assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
 
 
 @pytest.mark.asyncio

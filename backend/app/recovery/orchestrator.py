@@ -55,7 +55,7 @@ class QuoteRecoveryOrchestrator:
             context.current_gate = result.gate
             context.generation += 1
             last_result = result
-            fingerprint = json.dumps({"step": step, "gate": result.gate, "status": result.status,
+            fingerprint = json.dumps({"gate": result.gate, "status": result.status,
                                       "facts": result.facts, "missing": result.missing_fields,
                                       "candidates": result.candidates}, sort_keys=True, default=str)
             if fingerprint in seen_states:

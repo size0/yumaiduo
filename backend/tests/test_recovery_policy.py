@@ -247,3 +247,14 @@ async def test_orchestrator_isolates_retry_handler_exception():
     assert result.status == "RECOVERY_HANDLER_EXCEPTION"
     assert result.metadata == {"handler": "retry", "gate": "COST"}
     assert decision.action is RecoveryAction.STOP
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stops_repeated_gate_fingerprint():
+    def repeated_stage(context):
+        return GateResult(gate="SHOW", status="RESOLVED", success=True,
+                          safety_class=SafetyClass.RECOVERABLE)
+
+    _, result, decision = await QuoteRecoveryOrchestrator([repeated_stage, repeated_stage]).run(QuotePipelineContext())
+    assert result.status == "RECOVERY_LOOP_DETECTED"
+    assert decision.action is RecoveryAction.STOP
