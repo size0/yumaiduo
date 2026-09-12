@@ -41,8 +41,10 @@ class QuoteRecoveryOrchestrator:
             context.gate_trace.append(trace)
             if not result.success and context.first_failed_gate is None:
                 context.first_failed_gate, context.first_failed_status, context.first_failed_reason_code = result.gate, result.status, result.reason_code
-            try: LOGGER.info("canonical_quote_gate_trace %s", trace)
-            except Exception: pass
+            try:
+                LOGGER.info("canonical_quote_gate_trace %s", trace)
+            except Exception:
+                pass
         last_result = GateResult(gate="PIPELINE", status="EMPTY", success=False, safety_class="RECOVERABLE")
         last_decision = self._policy.evaluate(last_result)
         recovery_attempts = self._max_recovery_attempts
