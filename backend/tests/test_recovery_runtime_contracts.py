@@ -14,6 +14,7 @@ from app.seat_facts_v2.models import SeatFactsResult
 from app.wanda_cost_v2.models import WandaCostFacts
 from app.wanda_pricing_v2.models import WandaPricingResult
 from app.selected_seat_quote_service import SelectedSeatQuoteResult
+from app.recovery.liangpiao_stages import LiangpiaoStageService
 
 
 def _gate(gate: str, status: str, facts=None, *, success=True, retryable=False):
@@ -300,3 +301,17 @@ async def test_liangpiao_provider_failure_has_no_amount_reply(tmp_path: Path):
     result = await runtime.process_image_event(_event("lp-provider-failure"))
     assert result["status"] == "PROVIDER_UNAVAILABLE"
     assert result["reply_gate"]["status"] != "AMOUNT_REPLY_ALLOWED"
+
+
+def test_liangpiao_stage_service_exposes_independent_boundaries():
+    service = LiangpiaoStageService(LiangpiaoQuote(), LiangpiaoFacts(), LiangpiaoEngine(), LiangpiaoQuotes(), lambda: object())
+    recognition = RecognitionResult(
+        city_text="厦门", cinema_text="浦西万达", movie="奥德赛", show_date="2026-09-13", start_time="09:55",
+        selected_seats=["9排11座"], has_selected_seats=True,
+    )
+    route = CinemaRouteResult(route="LIANGPIAO", liangpiao_cinema_id="9001", resolution_reason="TEST")
+    request = service.prepare_request(recognition, route, {
+        "tenant_id": "t", "shop_id": "s", "buyer_id": "b", "chat_id": "c", "purchase_context_id": "p", "event_id": "e",
+    })
+    assert request.cinema_id == 9001
+    assert len(request.seats) == 1

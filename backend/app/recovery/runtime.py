@@ -15,6 +15,7 @@ from .context import QuotePipelineContext
 from .models import GateResult
 from .orchestrator import QuoteRecoveryOrchestrator
 from .reply_gate import reply_eligibility_gate
+from .liangpiao_stages import LiangpiaoStageService
 from ..selected_seat_quote_service import SelectedSeatQuoteRequest, SelectedSeat, QuoteServiceError
 from ..pricing.errors import PricingError
 
@@ -44,6 +45,12 @@ class RecoveryQuoteRuntime:
         self.liangpiao_quote = liangpiao_quote_service
         self.liangpiao_facts = liangpiao_facts_adapter
         self.pricing_engine = pricing_engine
+        self.liangpiao_stages = (
+            LiangpiaoStageService(liangpiao_quote_service, liangpiao_facts_adapter, pricing_engine,
+                                  quote_service, rules_provider)
+            if liangpiao_quote_service is not None and liangpiao_facts_adapter is not None and pricing_engine is not None
+            else None
+        )
 
     async def process_image_event(self, body: dict[str, Any]) -> dict[str, Any]:
         return await self._process_image_event(body)
@@ -51,6 +58,8 @@ class RecoveryQuoteRuntime:
     async def _run_liangpiao(self, recognition: RecognitionResult, route: CinemaRouteResult,
                              identity: dict[str, str], *, ticket_count: int | None = None) -> dict[str, Any] | None:
         """Run the Liangpiao read/preflight/pricing path without legacy runtime."""
+        if self.liangpiao_stages is not None:
+            return await self._run_liangpiao_staged(recognition, route, identity)
         if route.route != "LIANGPIAO" or self.liangpiao_quote is None or self.liangpiao_facts is None or self.pricing_engine is None:
             return None
         seats: list[SelectedSeat] = []
@@ -103,6 +112,30 @@ class RecoveryQuoteRuntime:
         except (QuoteServiceError, PricingError, ValueError) as error:
             return {"status": "PROVIDER_UNAVAILABLE", "reason": getattr(error, "code", type(error).__name__)}
 
+    async def _run_liangpiao_staged(self, recognition: RecognitionResult, route: CinemaRouteResult,
+                                    identity: dict[str, str]) -> dict[str, Any]:
+        stages = self.liangpiao_stages
+        assert stages is not None
+        try:
+            request = stages.prepare_request(recognition, route, identity)
+        except ValueError as error:
+            return {"status": "NEED_CLARIFICATION", "reason": str(error), "missing_fields": ["selected_seats"]}
+        except (QuoteServiceError, ValueError) as error:
+            return {"status": "PROVIDER_UNAVAILABLE", "reason": getattr(error, "code", type(error).__name__)}
+        try:
+            preflight = await stages.preflight(request)
+            facts = stages.cost_facts(preflight, request)
+            pricing = stages.price(facts)
+        except (QuoteServiceError, PricingError, ValueError) as error:
+            return {"status": "PROVIDER_UNAVAILABLE", "reason": getattr(error, "code", type(error).__name__)}
+        try:
+            record = stages.persist(pricing, preflight, request, recognition, identity)
+        except Exception as error:
+            return {"status": "QUOTE_PERSIST_FAILED", "reason": type(error).__name__}
+        if not record:
+            return {"status": "QUOTE_PERSIST_FAILED", "reason": "LIANGPIAO_QUOTE_NOT_PERSISTED"}
+        return {"status": "QUOTED", "quote": record, "provider_route": "LIANGPIAO", "provider_verified": True}
+
     async def _process_image_event(self, body: dict[str, Any], *, recognition_override: GateResult | None = None,
                                    ticket_count: int | None = None, showtime_ordinal: int | None = None,
                                    candidate_shows: list[Any] | None = None) -> dict[str, Any]:
@@ -125,7 +158,9 @@ class RecoveryQuoteRuntime:
                                  "recognition_gate": recognition_override,
                                  "ticket_count": ticket_count,
                                  "showtime_ordinal": showtime_ordinal,
-                                 "candidate_shows": candidate_shows or stored_facts.get("candidate_shows") or []}
+                                 "candidate_shows": candidate_shows or stored_facts.get("candidate_shows") or [],
+                                 "liangpiao_request": None, "liangpiao_preflight": None,
+                                 "liangpiao_cost": None, "liangpiao_pricing": None}
 
         async def recognition_stage(context: QuotePipelineContext) -> GateResult:
             gate = state["recognition_gate"] or await self.recognition.recognize_gate(
@@ -163,17 +198,32 @@ class RecoveryQuoteRuntime:
         async def show_stage(context: QuotePipelineContext) -> GateResult:
             recognition, route = state["recognition"], state["route"]
             if route.route == "LIANGPIAO":
-                lp = await self._run_liangpiao(recognition, route, identity, ticket_count=state.get("ticket_count"))
-                state["liangpiao_result"] = lp
-                if lp and lp.get("status") == "QUOTED":
-                    state["quote"] = lp.get("quote")
-                    state["quote_persist_status"] = "QUOTE_PERSISTED"
-                    return GateResult(gate="SHOW", status="RESOLVED", success=True,
-                                      safety_class="RECOVERABLE", facts={"provider_route": "LIANGPIAO",
-                                      "show_id": (lp.get("quote") or {}).get("liangpiao_show_id")}, provider_verified=True)
-                return GateResult(gate="SHOW", status=str((lp or {}).get("status") or "PROVIDER_UNAVAILABLE"),
-                                  success=False, safety_class="RECOVERABLE", reason_code=str((lp or {}).get("reason") or "LIANGPIAO_FAILED"),
-                                  missing_fields=list((lp or {}).get("missing_fields") or []))
+                if self.liangpiao_quote is not None and self.liangpiao_facts is not None and self.pricing_engine is not None:
+                    self.liangpiao_stages = LiangpiaoStageService(
+                        self.liangpiao_quote, self.liangpiao_facts, self.pricing_engine,
+                        self.quotes, self.rules_provider,
+                    )
+                stages = self.liangpiao_stages
+                if stages is None:
+                    return GateResult(gate="SHOW", status="PROVIDER_UNAVAILABLE", success=False,
+                                      safety_class="RECOVERABLE", reason_code="LIANGPIAO_STAGE_UNAVAILABLE")
+                try:
+                    state["liangpiao_request"] = stages.prepare_request(recognition, route, identity)
+                except ValueError as error:
+                    return GateResult(gate="SHOW", status="NEED_CLARIFICATION", success=False,
+                                      safety_class="RECOVERABLE", reason_code=str(error), missing_fields=["selected_seats"])
+                except QuoteServiceError as error:
+                    return GateResult(gate="SHOW", status="PROVIDER_UNAVAILABLE", success=False,
+                                      safety_class="RECOVERABLE", reason_code=error.code)
+                try:
+                    preflight = await stages.preflight(state["liangpiao_request"])
+                    state["liangpiao_preflight"] = preflight
+                except (QuoteServiceError, PricingError, ValueError) as error:
+                    return GateResult(gate="SHOW", status="PROVIDER_UNAVAILABLE", success=False,
+                                      safety_class="RECOVERABLE", reason_code=getattr(error, "code", type(error).__name__))
+                return GateResult(gate="SHOW", status="RESOLVED", success=True, safety_class="RECOVERABLE",
+                                  facts={"provider_route": "LIANGPIAO", "show_id": preflight.show_id},
+                                  provider_verified=True)
             gate = await self.show.resolve_gate({"route": route.route, "wanda_store_id": route.wanda_store_id,
                 "movie": recognition.movie, "show_date": recognition.show_date, "start_time": recognition.start_time,
                 "hall": recognition.hall, "language": recognition.language, "dimension": recognition.dimension,
@@ -183,8 +233,12 @@ class RecoveryQuoteRuntime:
             return gate
 
         async def seat_stage(context: QuotePipelineContext) -> GateResult:
-            if state.get("liangpiao_result") is not None:
-                return GateResult(gate="SEAT", status="LIANGPIAO_SKIPPED", success=True, safety_class="RECOVERABLE")
+            if state["route"].route == "LIANGPIAO":
+                preflight = state.get("liangpiao_preflight")
+                seats = getattr(preflight, "seats", []) if preflight is not None else []
+                return GateResult(gate="SEAT", status="EXACT_SEATS_RESOLVED", success=bool(seats),
+                                  safety_class="RECOVERABLE", facts={"selected_seats": [seat.model_dump(mode="json") for seat in seats]},
+                                  reason_code=None if seats else "SELECTED_SEATS_REQUIRED")
             route, show, recognition = state["route"], state["show"], state["recognition"]
             gate = await self.seat.resolve_gate({"route": route.route, "wanda_store_id": route.wanda_store_id,
                 "wanda_show_id": show.wanda_show_id, "selected_seats": recognition.selected_seats,
@@ -194,25 +248,55 @@ class RecoveryQuoteRuntime:
             return gate
 
         def cost_stage(context: QuotePipelineContext) -> GateResult:
-            if state.get("liangpiao_result") is not None:
-                return GateResult(gate="COST", status="LIANGPIAO_SKIPPED", success=True, safety_class="RECOVERABLE")
+            if state["route"].route == "LIANGPIAO":
+                try:
+                    state["liangpiao_cost"] = self.liangpiao_stages.cost_facts(
+                        state["liangpiao_preflight"], state["liangpiao_request"],
+                    )
+                    return GateResult(gate="COST", status="COST_READY", success=True,
+                                      safety_class="RECOVERABLE", facts={"provider": "LIANGPIAO"}, provider_verified=True)
+                except (QuoteServiceError, PricingError, ValueError) as error:
+                    return GateResult(gate="COST", status="COST_UNAVAILABLE", success=False,
+                                      safety_class="RECOVERABLE", reason_code=getattr(error, "code", type(error).__name__))
             gate = self.cost.resolve_cost_gate(state["show"], state["seat"])
             if gate.success:
                 state["cost"] = WandaCostFacts.model_validate(gate.facts)
             return gate
 
         def pricing_stage(context: QuotePipelineContext) -> GateResult:
-            if state.get("liangpiao_result") is not None:
-                return GateResult(gate="PRICING", status="LIANGPIAO_SKIPPED", success=True, safety_class="RECOVERABLE")
+            if state["route"].route == "LIANGPIAO":
+                try:
+                    state["liangpiao_pricing"] = self.liangpiao_stages.price(state["liangpiao_cost"])
+                    return GateResult(gate="PRICING", status="PRICED", success=True,
+                                      safety_class="RECOVERABLE", facts={"provider": "LIANGPIAO"}, provider_verified=True)
+                except (QuoteServiceError, PricingError, ValueError) as error:
+                    return GateResult(gate="PRICING", status="PRICING_FAILED", success=False,
+                                      safety_class="RECOVERABLE", reason_code=getattr(error, "code", type(error).__name__))
             gate = self.pricing.price_gate(state["cost"], state["show"], state["seat"], self.rules_provider(), ticket_count=state.get("ticket_count"))
             if gate.success:
                 state["pricing"] = WandaPricingResult.model_validate(gate.facts)
             return gate
 
         def quote_stage(context: QuotePipelineContext) -> GateResult:
-            if state.get("liangpiao_result") is not None:
+            if state["route"].route == "LIANGPIAO":
+                try:
+                    record = self.liangpiao_stages.persist(
+                        state["liangpiao_pricing"], state["liangpiao_preflight"], state["liangpiao_request"],
+                        state["recognition"], identity,
+                    )
+                except Exception as error:
+                    state["quote_persist_status"] = "QUOTE_PERSIST_FAILED"
+                    return GateResult(gate="QUOTE", status="QUOTE_PERSIST_FAILED", success=False,
+                                      safety_class="RECOVERABLE", reason_code=type(error).__name__)
+                if not record:
+                    state["quote_persist_status"] = "QUOTE_PERSIST_FAILED"
+                    return GateResult(gate="QUOTE", status="QUOTE_PERSIST_FAILED", success=False,
+                                      safety_class="RECOVERABLE", reason_code="LIANGPIAO_QUOTE_NOT_PERSISTED")
+                state["quote"] = record
+                state["quote_persist_status"] = "QUOTE_PERSISTED"
+                context.quote_generation = record.get("generation") if isinstance(record, dict) else None
                 return GateResult(gate="QUOTE", status="QUOTE_PERSISTED", success=True, safety_class="RECOVERABLE",
-                                  facts={"quote_record": state.get("quote")}, provider_verified=True)
+                                  facts={"quote_record": record}, provider_verified=True)
             route, recognition = state["route"], state["recognition"]
             gate = self.quotes.persist_gate(state["pricing"], state["show"], tenant_id=identity["tenant_id"],
                 shop_id=identity["shop_id"], buyer_id=identity["buyer_id"], chat_id=identity["chat_id"],
@@ -228,7 +312,7 @@ class RecoveryQuoteRuntime:
             return gate
 
         def reply_stage(context: QuotePipelineContext) -> GateResult:
-            if state.get("liangpiao_result") is not None:
+            if state["route"].route == "LIANGPIAO":
                 return reply_eligibility_gate({"status": "QUOTED", "quote": state.get("quote"),
                     "quote_persist_status": state.get("quote_persist_status"), "identity": identity,
                     "pipeline_generation": context.quote_generation})
