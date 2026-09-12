@@ -294,9 +294,6 @@ class ConversationFactStore:
         facts = merge_conversation_facts(facts, updates)
         if not facts:
             return None
-        invalidated = result.get("invalidated_fields", [])
-        if not isinstance(invalidated, (list, tuple, set)):
-            invalidated = []
         return self.save(
             tenant_id=str(identity.get("tenant_id") or ""), shop_id=str(identity.get("shop_id") or ""),
             buyer_id=str(identity.get("buyer_id") or ""), chat_id=str(identity.get("chat_id") or ""),
@@ -332,6 +329,9 @@ class ConversationFactStore:
             facts.pop(str(field), None)
         if not facts or not all(identity.get(key) for key in ("tenant_id", "shop_id", "buyer_id", "chat_id")):
             return None
+        invalidated = result.get("invalidated_fields", [])
+        if not isinstance(invalidated, (list, tuple, set)):
+            invalidated = []
         return self.save(
             tenant_id=identity["tenant_id"], shop_id=identity["shop_id"], buyer_id=identity["buyer_id"],
             chat_id=identity["chat_id"], purchase_context_id=identity.get("purchase_context_id") or f"chat:{identity['chat_id']}",
