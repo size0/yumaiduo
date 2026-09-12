@@ -306,3 +306,16 @@ async def test_orchestrator_stops_repeated_gate_fingerprint():
     _, result, decision = await QuoteRecoveryOrchestrator([repeated_stage, repeated_stage]).run(QuotePipelineContext())
     assert result.status == "RECOVERY_LOOP_DETECTED"
     assert decision.action is RecoveryAction.STOP
+
+@pytest.mark.asyncio
+async def test_first_failed_gate_is_preserved_and_trace_is_safe():
+    def stage(context):
+        return GateResult(gate="COST", status="PROBE_REQUIRED", success=False,
+                          reason_code="COST_NEEDS_PROBE", retryable=True,
+                          safety_class=SafetyClass.RECOVERABLE)
+    context, result, _ = await QuoteRecoveryOrchestrator([stage]).run(QuotePipelineContext())
+    assert result.status == "PROBE_REQUIRED"
+    assert (context.first_failed_gate, context.first_failed_status, context.first_failed_reason_code) == ("COST", "PROBE_REQUIRED", "COST_NEEDS_PROBE")
+    assert context.gate_trace[0]["missing_fields_count"] == 0
+    assert "url" not in context.gate_trace[0]
+    assert "raw_provider_payload" not in context.gate_trace[0]

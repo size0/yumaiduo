@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 import json
+import logging
+from time import perf_counter
 from .context import QuotePipelineContext
 from .models import GateResult, RecoveryAction, RecoveryDecision
 from .policy import RecoveryPolicy
+LOGGER = logging.getLogger(__name__)
 
 GateRunner = Callable[[QuotePipelineContext], GateResult | Awaitable[GateResult]]
 RecoveryHandler = Callable[[QuotePipelineContext, GateResult], GateResult | Awaitable[GateResult]]
@@ -29,6 +32,17 @@ class QuoteRecoveryOrchestrator:
         self._fallback_handlers = dict(fallback_handlers or {})
 
     async def run(self, context: QuotePipelineContext) -> tuple[QuotePipelineContext, GateResult, RecoveryDecision]:
+        def record(result: GateResult, duration_ms: float) -> None:
+            trace = {"gate": result.gate, "status": result.status, "success": result.success,
+                     "reason_code": result.reason_code, "missing_fields_count": len(result.missing_fields),
+                     "retryable": result.retryable, "provider_verified": result.provider_verified,
+                     "amount_safe": result.metadata.get("amount_safe") if isinstance(result.metadata, dict) else None,
+                     "quote_record_created": result.status == "QUOTE_PERSISTED", "duration_ms": round(duration_ms, 2)}
+            context.gate_trace.append(trace)
+            if not result.success and context.first_failed_gate is None:
+                context.first_failed_gate, context.first_failed_status, context.first_failed_reason_code = result.gate, result.status, result.reason_code
+            try: LOGGER.info("canonical_quote_gate_trace %s", trace)
+            except Exception: pass
         last_result = GateResult(gate="PIPELINE", status="EMPTY", success=False, safety_class="RECOVERABLE")
         last_decision = self._policy.evaluate(last_result)
         recovery_attempts = self._max_recovery_attempts
@@ -41,6 +55,7 @@ class QuoteRecoveryOrchestrator:
                     action=RecoveryAction.STOP, reason="MAX_RECOVERY_STEPS", stop_scope="STOP_QUOTE_PIPELINE",
                 )
             stage = self._stages[step]
+            started = perf_counter()
             try:
                 result = stage(context)
                 if hasattr(result, "__await__"):
@@ -54,6 +69,7 @@ class QuoteRecoveryOrchestrator:
                 raise TypeError(f"stage returned {type(result).__name__}, expected GateResult")
             context.current_gate = result.gate
             context.generation += 1
+            record(result, (perf_counter() - started) * 1000)
             last_result = result
             fingerprint = json.dumps({"gate": result.gate, "status": result.status,
                                       "facts": result.facts, "missing": result.missing_fields,
@@ -84,6 +100,7 @@ class QuoteRecoveryOrchestrator:
                             stop_scope="STOP_QUOTE_PIPELINE",
                         )
                     if isinstance(retry_result, GateResult):
+                        record(retry_result, 0)
                         last_result = retry_result
                         last_decision = self._policy.evaluate(retry_result)
                         if last_decision.action is RecoveryAction.CONTINUE:
@@ -108,6 +125,7 @@ class QuoteRecoveryOrchestrator:
                             stop_scope="STOP_QUOTE_PIPELINE",
                         )
                     if isinstance(fallback_result, GateResult):
+                        record(fallback_result, 0)
                         last_result = fallback_result
                         last_decision = self._policy.evaluate(fallback_result)
                         if last_decision.action is RecoveryAction.CONTINUE:
