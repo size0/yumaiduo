@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+import json
 from .context import QuotePipelineContext
 from .models import GateResult, RecoveryAction, RecoveryDecision
 from .policy import RecoveryPolicy
@@ -32,6 +33,7 @@ class QuoteRecoveryOrchestrator:
         last_decision = self._policy.evaluate(last_result)
         recovery_attempts = self._max_recovery_attempts
         step = 0
+        seen_states: set[str] = set()
         while step < len(self._stages):
             if step >= self._max_steps:
                 return context, last_result.model_copy(update={"status": "RECOVERY_LIMIT"}), RecoveryDecision(
@@ -47,6 +49,15 @@ class QuoteRecoveryOrchestrator:
             context.current_gate = result.gate
             context.generation += 1
             last_result = result
+            fingerprint = json.dumps({"step": step, "gate": result.gate, "status": result.status,
+                                      "facts": result.facts, "missing": result.missing_fields,
+                                      "candidates": result.candidates}, sort_keys=True, default=str)
+            if fingerprint in seen_states:
+                return context, result.model_copy(update={"status": "RECOVERY_LOOP_DETECTED"}), RecoveryDecision(
+                    gate="PIPELINE", status="RECOVERY_LOOP_DETECTED", safety_class="RECOVERABLE",
+                    action=RecoveryAction.STOP, reason="REPEATED_GATE_STATE", stop_scope="STOP_QUOTE_PIPELINE",
+                )
+            seen_states.add(fingerprint)
             last_decision = self._policy.evaluate(result)
             if last_decision.action is RecoveryAction.RETRY:
                 handler = self._retry_handlers.get(result.gate)

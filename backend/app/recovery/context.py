@@ -35,6 +35,13 @@ class QuotePipelineContext(BaseModel):
         aliases = {"city": "city", "cinema": "cinema", "quote_date": "date", "showtime_start": "show",
                    "show_id": "show", "selected_seats": "seat", "ticket_count": "ticket_count"}
         changed.update(aliases[key] for key in tuple(changed) if key in aliases)
+        # A new cinema/movie/date/show selection invalidates downstream facts,
+        # including the old seat selection persisted in Conversation Facts.
+        if changed.intersection({"city", "cinema", "movie", "date", "show"}):
+            for stale in ("show_id", "showtime_start", "selected_seats", "hall", "candidate_shows"):
+                if stale not in current and stale in merged:
+                    merged.pop(stale, None)
+                    changed.add(stale)
         self.conversation_facts = merged
         for field in changed:
             for dependent in invalidated_fields(field):

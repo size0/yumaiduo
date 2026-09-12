@@ -40,10 +40,13 @@ class RecoveryQuoteRuntime:
         self.reply_renderer = reply_renderer
 
     async def process_image_event(self, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._process_image_event(body)
+
+    async def _process_image_event(self, body: dict[str, Any], *, recognition_override: GateResult | None = None) -> dict[str, Any]:
         envelope = body.get("envelope") if isinstance(body.get("envelope"), Mapping) else {}
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
         urls = payload.get("imageUrls", payload.get("image_urls"))
-        if not isinstance(urls, list) or not urls or not isinstance(urls[0], str):
+        if (not isinstance(urls, list) or not urls or not isinstance(urls[0], str)) and recognition_override is None:
             return {"status": "NO_IMAGE"}
         identity = self._identity(body)
         if not identity["event_id"] or not identity["shop_id"] or not identity["buyer_id"]:
@@ -55,8 +58,8 @@ class RecoveryQuoteRuntime:
         except Exception:
             stored = None
         stored_facts = stored.get("facts", {}) if isinstance(stored, Mapping) and stored.get("available") else {}
-        state: dict[str, Any] = {"identity": identity, "url": urls[0].strip(), "stored": stored_facts,
-                                 "recognition_gate": body.get("_recovery_recognition_gate"),
+        state: dict[str, Any] = {"identity": identity, "url": (urls[0].strip() if isinstance(urls, list) and urls else ""), "stored": stored_facts,
+                                 "recognition_gate": recognition_override,
                                  "ticket_count": body.get("_recovery_ticket_count"),
                                  "showtime_ordinal": body.get("_recovery_showtime_ordinal"),
                                  "candidate_shows": body.get("_recovery_candidate_shows") or []}
@@ -72,7 +75,16 @@ class RecoveryQuoteRuntime:
                              "dimension": recognition.dimension, "selected_seats": recognition.selected_seats}
             context.merge_facts({key: value for key, value in current_facts.items() if value not in (None, "", [])}, stored=stored_facts)
             mapping = {"city_text": "city", "cinema_text": "cinema", "show_date": "quote_date", "start_time": "showtime_start"}
+            stored_compare = {"cinema": stored_facts.get("cinema"), "movie": stored_facts.get("movie"),
+                              "quote_date": stored_facts.get("quote_date", stored_facts.get("date")),
+                              "showtime_start": stored_facts.get("showtime_start", stored_facts.get("show"))}
+            changed_selection = any(current_facts.get(key) not in (None, "", []) and
+                                    stored_compare.get(key) not in (None, "", []) and
+                                    current_facts.get(key) != stored_compare.get(key)
+                                    for key in stored_compare)
             for key in ("city_text", "cinema_text", "movie", "show_date", "start_time", "hall", "dimension", "selected_seats"):
+                if changed_selection and key in {"hall", "selected_seats"}:
+                    continue
                 source_key = mapping.get(key, key)
                 if source_key in stored_facts and not getattr(recognition, key, None):
                     recognition = recognition.model_copy(update={key: stored_facts[source_key]})
@@ -189,14 +201,17 @@ class RecoveryQuoteRuntime:
             show_date=quote_date, start_time=start_time,
             hall=facts.get("hall"), dimension=dimension, selected_seats=list(facts.get("selected_seats") or []),
             has_selected_seats=bool(facts.get("selected_seats")))
-        synthetic = {"envelope": {"id": identity["event_id"], "tenantId": identity["tenant_id"], "payload": {"imageUrls": ["about:blank"]}},
+        # Re-enter the same orchestration directly with a recognition patch;
+        # text follow-ups are not fabricated as image events.
+        followup = {"envelope": {"id": identity["event_id"], "tenantId": identity["tenant_id"], "payload": {"itemId": identity["purchase_context_id"]}},
                      "session": {"accountUnb": identity["shop_id"], "peerUnb": identity["buyer_id"], "chatId": identity["chat_id"]},
-                     "_recovery_recognition_gate": GateResult(gate="RECOGNITION", status="PARTIAL", success=True,
-                         safety_class="RECOVERABLE", facts=recognition.model_dump(mode="json")),
                      "_recovery_ticket_count": (count_words.get(count_match.group(1)) if count_match else facts.get("ticket_count")),
                      "_recovery_showtime_ordinal": showtime_ordinal,
                      "_recovery_candidate_shows": facts.get("candidate_shows") or []}
-        return await self.process_image_event(synthetic)
+        return await self._process_image_event(followup, recognition_override=GateResult(
+            gate="RECOGNITION", status="PARTIAL", success=True,
+            safety_class="RECOVERABLE", facts=recognition.model_dump(mode="json"),
+        ))
 
     def _safe(self, gate: GateResult) -> dict[str, Any]:
         result = {"status": gate.status, "reason": gate.reason_code, "gate": gate.gate,
