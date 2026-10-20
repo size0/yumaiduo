@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>票务运营工作台 · 订单管理</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="config.css">
+<link rel="stylesheet" href="rules.css">
+<link rel="stylesheet" href="orders.css">
+</head>
+<body>
+
+<div class="theme-picker" id="theme-picker"></div>
+
+
+<div class="orb" aria-hidden="true"></div>
+
+<div class="app-shell">
+<aside class="ticket-sidebar" aria-label="主导航">
+  <div class="ticket-sidebar-brand">
+    <div class="brand-icon" role="img" aria-label="电影票务"><svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 1 1-1Z"/><path d="M8 5v2m0 3v4m0 3v2"/><path d="m12 9 5 3-5 3Z"/></svg></div>
+  </div>
+  <nav class="ticket-sidebar-nav sidebar-scroll" aria-label="页面">
+<a class="ticket-nav-item" href="shops"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 2.5-4h15L22 7"></path><path d="M2 7h20v3a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"></path><path d="M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"></path><path d="M10 21v-5h4v5"></path></svg><span class="nav-text"><span class="nav-title">店铺管理</span><span class="nav-sub">本店授权 · 平台状态</span></span></a>
+<a class="ticket-nav-item" href="assistant"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg><span class="nav-text"><span class="nav-title">AI助理</span><span class="nav-sub">接管时机 · 人设 · 记忆</span></span></a>
+<a class="ticket-nav-item" href="replies"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="nav-text"><span class="nav-title">回复文案</span><span class="nav-sub">按阶段管理话术</span></span></a>
+<a class="ticket-nav-item" href="qa"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><span class="nav-text"><span class="nav-title">关键词回复</span><span class="nav-sub">逐字可控的话术</span></span></a>
+<a class="ticket-nav-item" href="rules"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg><span class="nav-text"><span class="nav-title">报价规则</span><span class="nav-sub">卖多少钱 · 分工规则</span></span></a>
+<a class="ticket-nav-item" href="quotes"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M9 15h6"></path><path d="M9 11h2"></path></svg><span class="nav-text"><span class="nav-title">报价记录</span><span class="nav-sub">报过哪些价 · 毛利</span></span></a>
+<a class="ticket-nav-item active" href="orders" aria-current="page"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"></circle><circle cx="19" cy="21" r="1"></circle><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path></svg><span class="nav-text"><span class="nav-title">订单管理</span><span class="nav-sub">出票记录与追踪</span></span></a>
+<a class="ticket-nav-item" href="features"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="nav-text"><span class="nav-title">功能设置</span><span class="nav-sub">机器怎么运转</span></span></a>
+  </nav>
+  <div class="ticket-sidebar-foot">
+    <span>2026.10.14</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="dot-online"></span>在线</span>
+  </div>
+</aside>
+<div class="app-main"><main>
+
+  <div class="page-header">
+    <div>
+      <h1>订单管理</h1>
+      <p class="sub">订单、万达出票 —— 每一笔钱和每一张票都留了痕迹</p>
+    </div>
+    <div class="header-right">
+      <div class="plat-tabs" role="group" aria-label="刷新">
+        <button class="plat-tab active" id="btn-reload" type="button">刷新</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert-warn" id="store-warn" hidden></div>
+
+  <!-- ============================================================ 标签页 -->
+  <!-- ★ 这里【没有】报价记录标签 —— 它已经提到顶部菜单做独立页了（/quotes）。
+       同一份数据给两个入口会让人不知道该看哪个，
+       而且两个页面的判据容易各写一套。 -->
+  <div class="tabs" role="tablist">
+    <!-- ★★ 2026-10-14 店主明确：「订单管理和报价记录要分为两个菜单栏」
+         + 「不要订单关联，只叫订单」。
+         我中间一度把它们合并成一个页的两个 tab（看到 V5 截图里是 tab
+         就以为要合并）—— 那是理解反了。
+         ★ 教训：店主说"抄 V5"时抄的是【内容与列】；
+           页面组织结构（菜单几项、谁和谁一页）要单独确认，
+           截图里的 tab 不等于我们的菜单结构。 -->
+    <button class="tab active" data-tab="orders" role="tab">
+      订单 <span class="pill" id="n-orders">0</span>
+    </button>
+    <button class="tab" data-tab="deliver" role="tab">
+      万达出票
+    </button>
+  </div>
+  <!-- ============================================================ 报价记录 -->
+  <!-- ★ 并进订单页的第一个 tab（照 V5）。数据仍走 /api/orders ——
+       不另开 API：那样"能不能下单/算不算有效"的判据会各写一套。 -->
+  
+
+  <!-- ============================================================ 订单 -->
+  <!-- ★ 默认显示的标签必须带 active —— 删掉报价记录标签时漏了，
+       结果订单内容一片空白（踩过）。 -->
+  <section class="tabpane active" id="pane-orders">
+    <div class="card">
+      <div class="card-head">
+        <i class="bar" style="background:#13c2c2"></i><span>订单状态</span>
+        <span class="card-note">按订单当前状态查看</span>
+      </div>
+      <div class="card-body">
+        <div class="buckets" id="buckets"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <i class="bar" style="background:#52c41a"></i><span>订单</span>
+        <span class="card-note" id="orders-note"></span>
+      </div>
+      <div class="card-body">
+        <div class="record-filters">
+<label>搜索<input id="record-query" name="order_record_search" type="search" autocomplete="off" data-1p-ignore data-lpignore="true" placeholder="买家昵称、订单号、报价编号、影院、影片"></label>
+<label>所属店铺<select id="record-shop" aria-label="所属店铺"><option value="">全部店铺</option></select></label>
+<details class="record-date-picker" id="record-date-picker"><summary id="record-date-label">全部日期</summary>
+<div class="record-date-panel"><strong>选择日期范围</strong><p>按北京时间的记录创建日期筛选</p>
+<div class="record-date-presets"><button type="button" data-days="1">今天</button><button type="button" data-days="2">昨天</button><button type="button" data-days="7">近7天</button><button type="button" data-days="30">近30天</button><button type="button" data-days="month">本月</button><button type="button" data-days="all">全部日期</button></div>
+<div class="record-date-inputs"><label>开始日期<input id="record-start" type="date" aria-label="开始日期"></label><label>结束日期<input id="record-end" type="date" aria-label="结束日期"></label></div>
+<p id="record-date-error" role="status"></p><div class="record-date-actions"><button type="button" id="record-date-clear" class="btn-ghost">清除日期</button><button type="button" id="record-date-apply" class="btn-primary">应用日期</button></div></div></details>
+<button id="record-search" class="btn-primary" type="button">查询</button>
+<button id="record-reset" class="btn-ghost" type="button">清除</button>
+<small id="record-shop-status" role="status"></small><span id="record-error" role="status"></span>
+</div><div class="record-table-scroll"><table class="od-table">
+<thead><tr><th>创建时间 / 闲鱼订单号</th><th>买家 / 出票路线</th><th>关联报价编号</th><th>影院 / 影片 / 场次</th><th>座位 / 张数</th><th>订单金额 / 预估毛利</th><th>订单 / 付款状态</th><th>改价状态</th><th>取票码 / 发货状态</th><th>供应商订单号</th></tr></thead>
+          <tbody id="orders-body"></tbody>
+        </table></div><div class="record-pager"><button id="record-prev" class="btn-ghost">上一页</button><span id="record-page"></span><button id="record-next" class="btn-ghost">下一页</button></div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ 万达出票 -->
+  <section class="tabpane" id="pane-deliver">
+    <div class="card">
+      <div class="card-head">
+        <i class="bar" style="background:#eb2f96"></i><span>万达出票</span>
+        <span class="card-note">出票系统自动回传 · 也可手工上传二维码</span>
+      </div>
+      <div class="card-body">
+        <p class="hint"><b>在出票系统关联买家订单，出票成功后自动回传取票二维码。</b></p>
+        <ol class="hint"><li>买家付款后，在你使用的出票后台买好票。</li><li>在出票系统中选择对应买家订单并关联，出票后会自动回传。手工补交时，在下方上传二维码。</li><li>手工上传后点击「发送二维码并发货」。操作人和上游订单号可以留空。</li></ol>
+        <p class="hint">没有可选订单：目前没有符合条件的万达待出票订单。良票订单不在这里处理。同一订单重复提交相同图片不会重复发送。请先核对二维码、影片和场次。</p>
+
+        <div class="deliver-form">
+          <div class="df-row">
+            <div class="df-item grow">
+              <label>订单号 <i class="tip" title="下拉里列出的是【待出票】的订单。">i</i></label>
+              <select id="df-order"></select>
+            </div>
+            <div class="df-item grow">
+              <label>取票二维码</label>
+              <div id="df-drop" class="qr-drop" tabindex="0" role="button" aria-label="选择、拖拽或粘贴取票二维码">
+                <span>点击选择 / 拖拽图片到这里<br>也可点击这里后 Ctrl+V 粘贴</span>
+                <img id="df-preview" alt="待发送的取票二维码" hidden>
+              </div>
+              <input type="file" id="df-image" accept="image/png,image/jpeg,image/webp" hidden>
+              <small id="df-image-note">PNG、JPG、WEBP，最大 5MB</small>
+              <button type="button" id="df-clear-image" class="btn-ghost" hidden>移除图片</button>
+            </div>
+          </div>
+          <div class="df-row">
+            <div class="df-item">
+              <label>上游订单号 <i class="tip" title="仅供记录，可留空。不会覆盖闲鱼订单号。">i</i></label>
+              <input type="text" id="df-provider" placeholder="例如：1493664033">
+            </div>
+            <div class="df-item">
+              <label>操作人 <i class="tip" title="可留空，仅用于内部记录。">i</i></label>
+              <input type="text" id="df-operator" placeholder="选填">
+            </div>
+            <div class="df-item">
+              <label>来源</label>
+              <select id="df-source">
+                <option value="MANUAL">人工（我在后台出的）</option>
+                <option value="AUTO">自动（后台自动交来的）</option>
+              </select>
+            </div>
+            <div class="df-item">
+              <span class="spacer"></span>
+              <button class="btn-primary" id="btn-deliver">发送二维码并发货</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-warn" id="deliver-msg" hidden></div>
+        <pre class="od-pre" id="deliver-out" hidden></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <i class="bar" style="background:#fa541c"></i><span>二维码交付连接</span>
+        <span class="card-note" id="auth-note"></span>
+      </div>
+      <div class="card-body">
+        <p class="hint">这是「上传取票二维码」功能的连接设置，<b>不是购票供应商的 AppKey / AppSecret</b>。未启用时不能在这里交付二维码，不影响识图报价和闲鱼改价。</p>
+        <details><summary>展开交付二维码的连接设置</summary>
+        <p class="hint">需要接入时，由维护人员填写店铺编号和专用口令。你已有的供应商 AppKey / AppSecret 不填在这里。</p>
+        <div class="deliver-form">
+          <div class="df-row">
+            <div class="df-item">
+              <label>租户 ID</label>
+              <input type="text" id="auth-tenant" placeholder="例如：107">
+            </div>
+            <div class="df-item grow">
+              <label>店铺白名单 <i class="tip" title="逗号分隔。只有这些店的订单能被这个密钥出票。">i</i></label>
+              <input type="text" id="auth-shops" placeholder="例如：2313315754,2313315755">
+            </div>
+            <div class="df-item grow">
+              <label>交付二维码专用口令 <i class="tip" title="只写不读 —— 保存后不回显明文，只显示掩码。留空表示不改。">i</i></label>
+              <input type="password" id="auth-key" name="ticket_delivery_api_secret" autocomplete="new-password" data-1p-ignore data-lpignore="true" placeholder="粘贴密钥">
+            </div>
+          </div>
+          <div class="df-row">
+            <div class="df-item">
+              <label>写开关 <i class="tip" title="默认关。关着的时候出票接口一律拒绝（503）。">i</i></label>
+              <label class="delivery-switch">
+                <input type="checkbox" id="auth-enabled">
+                <span class="nowrap">允许出票</span>
+              </label>
+            </div>
+            <div class="df-item grow">
+              <span class="dim" id="auth-missing"></span>
+            </div>
+            <div class="df-item">
+              <button class="btn-primary" id="btn-save-auth">保存连接设置</button>
+            </div>
+          </div>
+          <div class="alert-ok" id="auth-msg" hidden></div>
+        </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <i class="bar" style="background:#2f54eb"></i><span>鱼麦多插件连接</span>
+        <span class="card-note" id="plug-note"></span>
+      </div>
+      <div class="card-body">
+        <p class="hint">鱼麦多插件通常自动配置。右上角显示「已配置」时，通常无需修改，也不需要在这里填写供应商 AppKey / AppSecret。</p>
+        <details><summary>展开连接维护设置（通常不用修改）</summary>
+        <div class="deliver-form">
+          <div class="df-row">
+            <div class="df-item grow">
+              <label>插件后端地址 <i class="tip" title="插件要连的后端。默认指向 127.0.0.1:8000，我们的是 8801 —— 不改插件连不上。">i</i></label>
+              <input type="text" id="plug-url" placeholder="http://127.0.0.1:8801">
+            </div>
+            <div class="df-item grow">
+              <label>插件密钥（手动兜底） <i class="tip" title="正常路径是插件自注册后写交接文件、我们自动读。这个框只在拿不到自注册时用。只写不读：保存后只显示掩码，留空表示不改。">i</i></label>
+              <input type="password" id="plug-secret" name="ticket_plugin_api_secret" autocomplete="new-password" data-1p-ignore data-lpignore="true" placeholder="粘贴密钥">
+            </div>
+            <div class="df-item">
+              <button class="btn-primary" id="btn-save-plug">保存</button>
+            </div>
+          </div>
+          <p class="hint" id="plug-hint"></p>
+          <div class="alert-ok" id="plug-msg" hidden></div>
+        </div>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+</div><!-- /app-main -->
+</div><!-- /app-shell -->
+
+<script src="record-filters.js"></script>
+<script src="orders.js"></script>
+<script src="theme.js"></script>
+</body>
+</html>

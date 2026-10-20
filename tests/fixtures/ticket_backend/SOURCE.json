@@ -1,0 +1,11 @@
+{
+  "source": "E:\\票务系统-worktrees\\seat-shot-cinema-id-20261015\\backend\\app",
+  "purpose": "Frozen integration-test dependency, never imported by production runtime",
+  "sha256": {
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ticket_agent_handoff.py": "08cb1e5a9ec3dbeea347c6bd7b838a3ad082020c35cee2749ce69dbb8e1960a0",
+    "store.py": "efedec0cf54f99581aac8e13c58efbaa144e17753537aa541538036977261c4a",
+    "app_credentials.py": "03e48bd6c9b3234afa3366c53c36b8f2d879e75873851e386a0fd378255dcde0",
+    "cinema_identity_store.py": "e975457d57617e9bbb80030a69ade3acb288fd9196019344f0dda35bc94f418d"
+  }
+}

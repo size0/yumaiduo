@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>票务运营工作台 · 功能设置</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="config.css">
+</head>
+<body data-config-page>
+
+<div class="theme-picker" id="theme-picker"></div>
+
+
+<!-- 底层光斑：玻璃"背后必须有东西"才看得出来 -->
+<div class="orb" aria-hidden="true"></div>
+
+<div class="app-shell">
+<aside class="ticket-sidebar" aria-label="主导航">
+  <div class="ticket-sidebar-brand">
+    <div class="brand-icon" role="img" aria-label="电影票务"><svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 1 1-1Z"/><path d="M8 5v2m0 3v4m0 3v2"/><path d="m12 9 5 3-5 3Z"/></svg></div>
+  </div>
+  <nav class="ticket-sidebar-nav sidebar-scroll" aria-label="页面">
+<a class="ticket-nav-item" href="shops"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 2.5-4h15L22 7"></path><path d="M2 7h20v3a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"></path><path d="M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"></path><path d="M10 21v-5h4v5"></path></svg><span class="nav-text"><span class="nav-title">店铺管理</span><span class="nav-sub">本店授权 · 平台状态</span></span></a>
+<a class="ticket-nav-item" href="assistant"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg><span class="nav-text"><span class="nav-title">AI助理</span><span class="nav-sub">接管时机 · 人设 · 记忆</span></span></a>
+<a class="ticket-nav-item" href="replies"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="nav-text"><span class="nav-title">回复文案</span><span class="nav-sub">按阶段管理话术</span></span></a>
+<a class="ticket-nav-item" href="qa"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><span class="nav-text"><span class="nav-title">关键词回复</span><span class="nav-sub">逐字可控的话术</span></span></a>
+<a class="ticket-nav-item" href="rules"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg><span class="nav-text"><span class="nav-title">报价规则</span><span class="nav-sub">卖多少钱 · 分工规则</span></span></a>
+<a class="ticket-nav-item" href="quotes"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M9 15h6"></path><path d="M9 11h2"></path></svg><span class="nav-text"><span class="nav-title">报价记录</span><span class="nav-sub">报过哪些价 · 毛利</span></span></a>
+<a class="ticket-nav-item" href="orders"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"></circle><circle cx="19" cy="21" r="1"></circle><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path></svg><span class="nav-text"><span class="nav-title">订单管理</span><span class="nav-sub">出票记录与追踪</span></span></a>
+<a class="ticket-nav-item active" href="features" aria-current="page"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="nav-text"><span class="nav-title">功能设置</span><span class="nav-sub">机器怎么运转</span></span></a>
+  </nav>
+  <div class="ticket-sidebar-foot">
+    <span>2026.10.14</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="dot-online"></span>在线</span>
+  </div>
+</aside>
+<div class="app-main"><main>
+
+  <div class="page-header">
+    <div>
+      <h1>功能设置</h1>
+      <p class="sub">配置项由后端字段元数据生成 —— 加一个配置，界面自动多一行</p>
+    </div>
+    <div class="header-right">
+      <div class="account-pick">
+        <span class="pick-label">当前店铺：</span>
+        <select id="account"><option>代买w位置</option><option>万达w位置代买</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert-warn" id="problems" hidden></div>
+
+  <!-- ============================================================ 凭证 -->
+  <!-- ★ 为什么放在最上面：tel 是【下单必填】，缺了下单直接中止。
+       原来这张卡不存在（后端有 PUT /api/credentials，但前端一次都没调），
+       所以界面上根本没有填手机号的入口 —— 反馈"我没看到"就是这个原因。 -->
+  <div class="card">
+    <div class="card-head">
+      <i class="bar" style="background:#eb2f96"></i><span>良票凭证</span>
+      <span class="card-note" id="cred-note"></span>
+    </div>
+    <div class="card-body">
+      <p class="hint">
+        <b>购票手机号（tel）是下单必填</b> —— 良票文档要求。没填的话，
+        买家走到「下单」那一步会被中止，<b>订单表永远是空的</b>。
+      </p>
+      <p class="hint">
+        应用标识（AppKey）／应用密钥（AppSecret）从良票开放平台拿。
+        <b>密钥只写不读</b>：保存后这里只显示掩码，不回显明文。
+      </p>
+      <div class="cred-form">
+        <div class="cred-row">
+          <div class="cred-item grow">
+            <!-- ★★ 2026-10-14 店主定的：操作台上不许出现"光秃秃的英文"。
+                 AppKey / AppSecret 是良票的字段名，不能改，
+                 所以中文名写在前面，英文原词放括号里对照。 -->
+            <label>应用标识（AppKey）</label>
+            <input type="text" id="cred-key" placeholder="lp_xxxxxxxx">
+          </div>
+          <div class="cred-item grow">
+            <label>应用密钥（AppSecret） <i class="tip" title="只写不读：保存后只显示掩码。留空表示不改。">i</i></label>
+            <input type="password" id="cred-secret" placeholder="留空表示不改">
+          </div>
+        </div>
+        <div class="cred-row">
+          <div class="cred-item grow">
+            <label>购票手机号 <i class="tip" title="下单必填。良票下单时要传手机号（tel）。">i</i></label>
+            <input type="text" id="cred-tel" placeholder="例如：13800000000">
+          </div>
+          <div class="cred-item grow">
+            <label>接口地址 <i class="tip" title="留空用默认 https://portal-web-v3.liangpiao.net.cn">i</i></label>
+            <input type="text" id="cred-base" placeholder="留空用默认">
+          </div>
+          <div class="cred-item">
+            <span class="spacer"></span>
+            <button class="btn primary" id="btn-save-cred">保存凭证</button>
+          </div>
+        </div>
+        <div class="alert-ok" id="cred-msg" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="setting-shell">
+    <aside class="cfg-nav" id="cfg-nav"></aside>
+    <div class="cfg-body" id="cfg-body"></div>
+  </div>
+
+  <div class="push-bar" data-shop-push="features"><span class="push-tip">所有已启用店铺共用此配置，保存后生效。</span><button class="btn primary" id="btn-save">保存配置</button><span class="save-status" id="save-status" role="status"></span></div>
+</main>
+</div><!-- /app-main -->
+</div><!-- /app-shell -->
+
+<div class="footer-text">票务运营工作台 · 学习版 · 与 V5 生产系统相互独立</div>
+
+<script src="shop-push.js"></script>
+<script src="config.js"></script>
+<script src="theme.js"></script>
+</body>
+</html>

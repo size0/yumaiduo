@@ -1,0 +1,1261 @@
+/* ============================================================
+   style.css —— iOS 26 Liquid Glass 风格（Web 实现）
+
+   这个文件把 Apple 的液态玻璃设计语言翻译成 CSS。
+   对应关系：
+     SwiftUI .glassEffect()        →  .glass / .card
+     SwiftUI .glassEffect(tint:)   →  --glass-tint 变量
+     SwiftUI .interactive()        →  :hover / :active 的位移与高光
+     GlassEffectContainer          →  body 底层的彩色光斑（玻璃要有东西可透）
+     buttonStyle(.glassProminent)  →  .btn.primary
+
+   ★ 三条铁律（来自设计规范，Web 上同样成立）：
+     1. 玻璃下面必须有内容 —— 纯色背景上的 blur 什么都看不见。
+        所以底层铺了三个彩色光斑在缓慢游动。
+     2. 不要到处用玻璃 —— 数据表格、长文本区保持实底，只有卡片/控件用玻璃。
+     3. 不要嵌套玻璃 —— 卡片里的"卡片"用浅一层的 .glass-inset，不再叠 blur。
+   ============================================================ */
+
+/* ==================================================================== L2 设计令牌
+   ★★ 2026-10-14 按《UI 架构规范》补全。
+
+   为什么要有这一层（规范 §0）：
+     **组件只写"语义"，具体颜色/阴影/模糊全部下沉到令牌**，
+     这样换主题不改组件、加主题不改代码。
+   为什么现在才做：之前没有令牌可用，组件里塞了 257 处硬编码色值
+     （border-radius 12 套、font-size 12 套含 12.5px 这种半像素），
+     眼睛能感觉到"不齐"但说不出哪条 —— 这就是店主说的"怪"。
+
+   ★ 兼容策略：旧变量名（--text-dim / --radius / --glass-*）全部保留，
+     但改成【指向新令牌】。这样已有引用不用改就跟着新令牌走，
+     新代码用新名字，之后可以逐页把旧名换掉，不必一次全换。
+   ==================================================================== */
+:root {
+  /* ---------------- 品牌（主色 + hover + active）---------------- */
+  --brand-500: #2563eb;
+  --brand-600: #1d4ed8;
+  --brand-700: #1e40af;
+  --brand-soft: rgba(37, 99, 235, 0.12);
+
+  /* ---------------- 强调（价格 / 危险 CTA）---------------- */
+  /* ★★ 2026-10-14 改：主色跟主题走，不再固定成蓝色。
+     原来 --accent 写死 #0a84ff，而主题只改 --bg-base/--bg-accent
+     ⇒ 店主在色盘选「薄荷」，只有背景变绿、按钮还是蓝的，
+       看起来像"没生效"（实测 mist→mint 主按钮底色完全不变）。
+     ★ 复用 --bg-accent 当主色：一个选择同时决定"背景光斑"和"主色"，
+       同色系天然协调；自定义色也走同一条路（theme.js 设行内 --bg-accent）。
+     ★ --accent-500/600 保留（有地方直接引它们），
+       但默认值改成引用主题色，这样它们也跟着走。 */
+  --accent: var(--bg-accent);
+  --accent-500: var(--bg-accent);
+  --accent-600: color-mix(in srgb, var(--bg-accent) 82%, black);
+  --accent-soft: color-mix(in srgb, var(--bg-accent) 14%, transparent);
+  --accent-soft-2: color-mix(in srgb, var(--bg-accent) 22%, transparent);
+
+  /* ---------------- 表面 ---------------- */
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-alt: rgba(255, 255, 255, 0.45);
+  --surface-solid: #ffffff;
+
+  /* ---------------- 文字（≥3 级层次）---------------- */
+  --text: #1c1c1e;
+  --text-muted: #6b6b70;
+  --text-subtle: #9b9ba0;
+  --text-inverse: #ffffff;
+  --text-dim: var(--text-muted);          /* 旧名 → 新令牌 */
+  --text-faint: var(--text-subtle);       /* 旧名 → 新令牌 */
+
+  /* ---------------- 描边 ---------------- */
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  /* 高光边用于玻璃：上亮下暗，模拟光从上方照过来 —— 玻璃感的关键 */
+  --border-highlight: rgba(255, 255, 255, 0.84);
+  --glass-border: 1px solid var(--border-highlight);   /* 旧名 → 新令牌 */
+
+  /* ---------------- 交互（极淡色 / 渐变，不用实色）---------------- */
+  --hover: rgba(73, 151, 149, 0.11);
+  --active: rgba(37, 99, 235, 0.14);
+
+  /* ---------------- 状态色 ---------------- */
+  --success: #34c759;
+  --warning: #b26a00;
+  --danger: #ff3b30;
+  --info: #0d7a7a;
+  /* ★ 订单状态徽标用的状态色（原来每个状态硬编码一个 rgba 底）
+     -------------------- 说明为什么分这么细：
+     订单状态有 7 个（待付款/待出票/已出票/已交付/出票失败/已取消/已退款），
+     每个一个色是有意的识别手段，不是随手挑的。
+     归成令牌后：要调整整套状态配色只需改这里。 */
+  --status-created: #1890ff;   /* 待付款 */
+  --status-paid: #fa8c16;      /* 待出票 */
+  --status-ticketed: #13c2c2;  /* 已出票 */
+  --status-delivered: #52c41a; /* 已交付 */
+  --status-failed: #ff4d4f;    /* 出票失败 */
+  --status-canceled: #8c8c8c;  /* 已取消 */
+  --status-refunded: #722ed1;  /* 已退款 */
+
+  /* ---------------- 字号（带行高）----------------
+     ★ 规范 §2：11 / 12 / 13 / 14 / 16 / 20，**带行高一起定义**。
+       原来散落着 12.5px / 13.5px / 11.5px 这种半像素 —— 12 套值，
+       既没有节奏感，也没法用令牌管。 */
+  --fs-2xs: 11px;   --lh-2xs: 1.45;
+  --fs-xs: 12px;    --lh-xs: 1.5;
+  --fs-sm: 13px;    --lh-sm: 1.55;
+  --fs-md: 14px;    --lh-md: 1.6;
+  --fs-lg: 16px;    --lh-lg: 1.5;
+  --fs-xl: 20px;    --lh-xl: 1.35;
+  --fs-2xl: 26px;   --lh-2xl: 1.25;
+
+  /* ---------------- 圆角（6 / 8 / 12 / 16 / 22 / full）----------------
+     ★ 原来 12 套值（8/9/10/11/7/6/3px…），差 1px 人眼看得出来"不齐"。 */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;      /* ★ 旧 --radius-sm 想要的档位就是它 */
+  --radius-lg: 16px;
+  --radius-xl: 22px;      /* 给"浮岛"类容器 */
+  --radius-full: 100px;
+  --radius: var(--radius-lg);   /* 旧名 → 新令牌（原 18px，归到 16） */
+
+  /* ---------------- 阴影（4 级）---------------- */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 32px rgba(31, 38, 135, 0.10),
+               0 1.5px 4px rgba(31, 38, 135, 0.06);
+  --shadow-lg: 0 20px 44px rgba(48, 94, 96, .13),
+               0 2px 8px rgba(48, 94, 96, .06);
+  --glass-shadow: var(--shadow-md);       /* 旧名 → 新令牌 */
+  --glass-edge: inset 0 1px 0 0 rgba(255, 255, 255, 0.85),
+                inset 0 -1px 0 0 rgba(255, 255, 255, 0.25);
+
+  /* ---------------- 模糊 ----------------
+     ★★ 这里有两个名字，别混（我第一版只留了一个，会把玻璃全弄坏）：
+       --glass-blur     长度值（24px）   —— 给旧写法用：
+                          backdrop-filter: blur(var(--glass-blur)) saturate(...)
+       --backdrop-glass 整段简写        —— 给新写法用：
+                          backdrop-filter: var(--backdrop-glass)
+     ⇒ 两种写法都成立，迁移可以逐页做，不必一次全换。
+        （规范 §8 第⑤步也是"先迁 1 个页面校验，再批量迁"。） */
+  --glass-blur: 24px;
+  --glass-sat: 135%;
+  --backdrop-glass: blur(24px) saturate(135%);
+  --glass-bg: var(--surface-alt);         /* 旧名 → 新令牌 */
+  --glass-bg-strong: var(--surface);      /* 旧名 → 新令牌 */
+
+  /* ---------------- 间距（4 的倍数，规范未列但组件要用）---------------- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;
+  --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
+
+
+  /* ---------------- 玻璃高光（白系）
+     ★ 原来组件里散着 44 种 rgba(255,255,255,*) 的值（0.5 附近抖），
+       人眼看不出单条差别，但整体"不齐"。归一成 4 档。 */
+  --glass-veil: rgba(255, 255, 255, 0.5);    /* 最淡：hover / 隔行 */
+  --glass-veil-2: rgba(255, 255, 255, 0.7);  /* 中：卡片面 */
+  --glass-veil-3: rgba(255, 255, 255, 0.86); /* 强：高光边 / 弹窗面 */
+  --glass-veil-4: rgba(255, 255, 255, 0.95); /* 实：选中胶囊 */
+
+  /* ---------------- 分隔线（黑系）---------------- */
+  --line-faint: rgba(0, 0, 0, 0.04);
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.14);
+
+  /* ---------------- 栏目标识色（card-head 的小竖条 / 模块色）----------------
+     ★ 这不是"随手挑的颜色"：每个栏目一个色是【有意的识别手段】。
+       原来 3 处 #722ed1 硬编码在组件里，归成令牌后：
+       要改整套配色只需改这里。 */
+  --mark-purple: #722ed1;
+  --mark-cyan: #13c2c2;
+  --mark-orange: #fa8c16;
+  --mark-green: #52c41a;
+  --mark-magenta: #eb2f96;
+  --mark-blue: #1677ff;
+  --mark-red: #ff4d4f;
+
+  /* ---------------- 状态色的浅底 / 描边 / 控件轨道 ----------------
+     ★ 这些原来是组件里手写的 rgba（例：--danger 是 #ff3b30，
+       组件里却另写一份 rgba(255,59,48,.1) 当浅底）。
+       换主题时那些手写值不会跟着 --danger 变 —— 这就是"换主题到处漏色"。
+       归成令牌后，改一处全跟着变。 */
+  --danger-soft: rgba(255, 59, 48, 0.10);
+  --danger-soft-2: rgba(255, 59, 48, 0.18);
+  --danger-faint: rgba(255, 230, 230, 0.60);
+  --warning-bg: rgba(255, 214, 130, 0.42);
+  --warning-border: rgba(255, 190, 60, 0.50);
+  --info-soft: rgba(19, 194, 194, 0.18);
+  --track: rgba(120, 120, 128, 0.16);      /* 开关/滑块的轨道 */
+  --track-2: rgba(120, 120, 128, 0.22);
+  --code-bg: rgba(28, 28, 30, 0.04);       /* 代码块底 */
+  --border-subtle: rgba(31, 38, 135, 0.06);
+
+  /* ---------------- 悬停阴影 / 滚动条 / 品牌渐变 ----------------
+     ★ 原来这些值在 .card:hover、.rc-card:hover、滚动条、品牌图标里
+       各写一遍（31,38,135,0.14 / 0.13 / 0.06…），换主题不会跟着变。
+       归成令牌后改一处全局跟着变。 */
+  --shadow-hover: 0 12px 36px rgba(31, 38, 135, 0.14),
+                  0 2px 6px rgba(31, 38, 135, 0.06);
+  --scrollbar-thumb: rgba(120, 120, 128, 0.3);
+  --brand-gradient: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  --brand-gradient-shadow: rgba(29, 78, 216, 0.28);
+  --text-strong-2: #3a3a3c;                 /* 次强正文 */
+  --divider-soft: rgba(128, 128, 140, 0.18);
+  --overlay-panel: rgba(30, 30, 34, 0.88);  /* 深色下的弹窗面 */
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+          "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font: var(--fs-md)/1.6 var(--font);
+  color: var(--text);
+  background: var(--bg-base);   /* ★ 底色走主题变量（原来硬编码 #eef1f7） */
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  position: relative;
+  /* ★★ 2026-10-14 去掉了 overflow-x: hidden。
+     为什么：悬浮侧栏要的是 backdrop-filter —— 而祖先只要有
+     overflow: hidden（哪怕是 hidden-x），玻璃就只采样到 body 的背景
+     （一个纯色），背后的光斑糊不到 ⇒ 表现就是"加了阴影但不透"。
+     ★ 去掉它安全：悬浮岛自带 20px 外边距，不会横向溢出。
+     真正会溢出的元素（宽表）都有自己那层的 overflow-x: auto。 */
+}
+
+/* ---------------------------------------------- 底层光斑
+   玻璃需要"背后有东西"。这几个缓慢游动的色球就是被透出来的内容。
+   用 fixed 定位，滚动时保持不动，像真的隔着一层玻璃窗。
+
+   ★★ 2026-10-14：具体的颜色/大小/透明度【全部移到文件下方的「主题」区】。
+     为什么不再留在这里：原来这三个球硬编码了
+     #7ac7ff+#4a7cff / #ffb3d9+#b07cff / #9dffd8+#35d6ff 三组色，
+     店主说"背景太丑"时改不动（改一处忘了另两处就不一致）。
+     现在由 --bg-accent 一个变量推出来，主题里只写一个色。
+   ★ 这里只保留一条：不要光斑的主题（plain）把它关掉。 */
+:root[data-theme="plain"] body::before,
+:root[data-theme="plain"] body::after,
+:root[data-theme="plain"] .orb { display: none; }
+
+@keyframes drift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(6vw, 8vh) scale(1.12); }
+}
+@keyframes drift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(-7vw, -6vh) scale(0.92); }
+}
+@keyframes drift3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(4vw, -9vh) scale(1.15); }
+}
+
+/* 尊重用户的"减少动态效果"系统设置 */
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after, .orb { animation: none; }
+}
+
+/* ---------------------------------------------- 玻璃基础类 */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  border-radius: var(--radius);
+}
+
+/* 卡片内的小块：不再叠 blur，只做半透明，避免玻璃套玻璃 */
+.glass-inset {
+  background: var(--glass-veil);
+  border: 1px solid var(--glass-veil-2);
+  border-radius: var(--radius-md);
+}
+
+/* ---------------------------------------------- 顶部标签栏 */
+.top-tabs {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; gap: 6px;
+  padding: 10px 20px;
+  background: var(--glass-veil-2);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-bottom: 1px solid var(--glass-veil-2);
+  box-shadow: 0 1px 0 var(--line-faint);
+}
+.top-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 7px 18px; border-radius: var(--radius-full);
+  font: 500 var(--fs-md) var(--font); cursor: pointer;
+  transition: background .2s, color .2s, transform .15s;
+}
+.top-tab:hover { background: var(--glass-veil-2); color: var(--text); }
+.top-tab:active { transform: scale(0.97); }
+.top-tab.active {
+  background: var(--glass-veil-3);
+  color: var(--accent);
+  box-shadow: 0 1px 3px var(--line-faint), var(--glass-edge);
+}
+
+main {
+  position: relative; z-index: 1;      /* 压在光斑之上 */
+  /* ★ 这两条旧的也去掉居中：万一以后有页面不套 .app-main，
+     也不该突然居中（.app-main > main 那条才是生效的，见文件后面）。 */
+  padding: 0 32px 60px;
+  margin: 0;
+}
+
+/* ---------------------------------------------- 链接基线
+   ★★ 2026-10-14 补：店主说「菜单栏的下划线还是在」。
+      查过不是缓存 —— 侧栏项是 <a> 标签，而全仓【从来没有】
+      a { text-decoration: none }，浏览器默认给链接加下划线。
+      （原来只有 config.css 里一条 a.top-tab 单独去掉了，
+        那条规则已经随 top-tabs 一起没了。）
+   ★ 为什么做成全局而不是只加在 .ticket-nav-item 上：
+     界面上还有别的 <a>（表格里的编辑/删除已经是按钮了，
+     但以后再加链接还会踩同一个坑）。全局一条解决一类问题。
+     要下划线的地方（如 .rt-link:hover）自己加回来。 */
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: none; }
+
+/* ---------------------------------------------- 分段控件（胶囊 + 里面的按钮）
+   ★★ 这套 class 现在有【两个用途】，改之前先看清楚用在哪：
+     ① 「回复文案」面板里的「全局 / 万达 / 良票」渠道切换器
+     ② 报价记录 / 订单管理 右上角的「刷新」按钮
+        （2026-10-14 店主：改成渠道切换器那个 UI）
+   ★ 历史教训：这套 class 一度还用在顶部 header-right 的「闲鱼」标签上
+     （已删）。我当时按 class 名把 .plat-tabs 的样式整块删了，
+     结果渠道切换器变成三个裸按钮。
+     ⇒ **不要再按 class 名批量删样式**；先搜这个 class 有几个用途。
+   ★ 名字里的 plat 是历史遗留（原来叫"平台切换器"），
+     现在它是通用的分段控件 —— 不改名是为了不动 HTML，
+     但语义按上面两条理解。 */
+/* ★★ 2026-10-14 两件事要分清（我第一版删错了，记下来）：
+     ① 顶部 header-right 里那个「闲鱼」标签 —— 店主说「这里的咸鱼去掉」，
+        已删。它只有闲鱼一个选项，是噪音。
+     ② 「回复文案」面板里的「全局 / 万达 / 良票」—— 那是【渠道切换器】，
+        是功能，不能删。
+     ★ 两者用的是【同一个 class `.plat-tabs`】。
+       我一开始按 class 名把 `.plat-tabs` / `.plat-tab` 的样式全删了
+       ⇒ 渠道切换器变成三个裸按钮（没样式了）。
+     ⇒ 这里把样式补回来，并把用途写清楚：现在只有渠道切换器用它。 */
+.plat-tabs {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border);
+}
+.plat-tab {
+  font: 500 var(--fs-sm) var(--font);
+  padding: 5px 16px; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--text-dim);
+  cursor: pointer;
+  transition: background .18s, color .18s;
+}
+.plat-tab:hover:not(:disabled) { color: var(--text); }
+.plat-tab.active {
+  background: var(--glass-veil-3); color: var(--text);
+  box-shadow: 0 1px 3px var(--line);
+}
+.plat-tab:disabled { opacity: .45; cursor: default; }
+
+/* ★ 2026-10-14 面包屑已删（店主：「首页 / AI助理 这里也删除一下」）。
+   原来这三条给 .breadcrumb / .sep / .crumb-cur 用；
+   现在 6 个页面都没有这个元素了，留着是死样式。
+   ★ 顶部留白已改由 .app-main > main 的 padding-top 提供（见文件后面）。 */
+
+/* ---------------------------------------------- 页头 */
+.page-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px; padding: 6px 2px 18px; flex-wrap: wrap;
+}
+.page-header h1 { margin: 0 0 4px; font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -0.3px; }
+.page-header .sub { margin: 0; color: var(--text-dim); font-size: var(--fs-sm); }
+.header-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+/* ★★ 给右上角的色盘让出位置：
+     色盘按钮是 fixed 定位在右上角 14/18px，正好压住页面自己的
+     "当前账号 / 渠道切换"那组控件（截图实测压住了）。
+     让出 52px = 按钮 34 + 两边留白。
+   ★ 不把色盘塞进 header-right 的原因：它是全站共用组件，
+     而各页 header-right 内容不一样（有的没有），塞进去有的页面会掉位。 */
+.header-right { padding-right: 52px; }
+
+/* 分段控件（iOS 的 UISegmentedControl 观感） */
+
+
+
+
+
+
+.account-pick { display: flex; align-items: center; gap: 8px; }
+.pick-label { color: var(--text-dim); font-size: var(--fs-sm); }
+
+select, input[type=text], input[type=number], input[type=password] {
+  font: var(--fs-sm) var(--font); color: var(--text);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--glass-veil-3);
+  border-radius: var(--radius-md); padding: 6px 12px;
+  box-shadow: inset 0 1px 2px var(--line-faint);
+  transition: box-shadow .2s, border-color .2s;
+}
+.account-pick select { width: 200px; }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent-soft-2);
+  box-shadow: 0 0 0 3.5px var(--accent-soft);
+}
+
+/* ---------------------------------------------- 卡片网格 */
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+.span-6 { grid-column: span 6; }
+.span-12 { grid-column: span 12; }
+@media (max-width: 1000px) { .span-6 { grid-column: span 12; } }
+
+.card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s;
+}
+/* 悬停时轻微抬起 —— 对应 SwiftUI 的 .interactive() */
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 40px rgba(31, 38, 135, 0.14),
+              0 2px 6px rgba(31, 38, 135, 0.06),
+              var(--glass-edge);
+}
+
+.card-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 20px 10px; font-weight: 600; font-size: var(--fs-lg);
+}
+.card-head .bar {
+  width: 4px; height: 16px; border-radius: var(--radius-xs); display: inline-block;
+  box-shadow: 0 0 8px currentColor;      /* 竖条自己发光，玻璃感更强 */
+}
+.card-note { margin-left: auto; font-weight: 400; font-size: var(--fs-xs); color: var(--text-faint); }
+.card-body { padding: 0 20px 20px; }
+
+/* ---------------------------------------------- 行 */
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 0;
+  border-bottom: 1px solid var(--glass-veil-2);
+}
+.row:last-child { border-bottom: none; }
+.row.col { flex-direction: column; align-items: stretch; gap: 8px; }
+
+.label { color: var(--text-dim); display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.label.block { font-weight: 600; color: var(--text); }
+.tip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--track);
+  color: var(--text-faint); font-size: var(--fs-2xs); font-style: normal; cursor: help;
+}
+
+.inline { display: flex; align-items: center; gap: 6px; }
+.inline em { font-style: normal; color: var(--text-faint); font-size: var(--fs-sm); }
+input[type=number] { width: 120px; }
+.wide { width: 300px; }
+
+/* Model connection fields share a full-height control style and one column. */
+.model-config .row { gap: 20px; }
+.model-config .row > .wide,
+.model-config .model-field { width: min(100%, 520px); min-width: 0; }
+.model-config input[type=text],
+.model-config input[type=password],
+.model-config select { min-height: 40px; padding: 9px 13px; }
+.model-config .model-field { display: grid; gap: 10px; }
+.model-config #custom-model-row { align-items: flex-start; }
+.model-config #custom-model-row > .label { padding-top: 9px; }
+.model-input-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.model-config .model-input-actions input { flex: 1; width: 0; min-width: 0; }
+.model-config .model-input-actions .btn { flex-shrink: 0; white-space: nowrap; min-height: 40px; }
+.model-config .model-field select { width: 100%; }
+.model-field-hint { color: var(--text-faint); font-size: var(--fs-sm); line-height: 1.6; }
+.model-config #test-result { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .model-config .row { flex-wrap: wrap; gap: 10px; }
+  .model-config .row > .label { flex-basis: 100%; }
+  .model-config #custom-model-row > .label { padding-top: 0; }
+  .model-config .row > .wide,
+  .model-config .model-field { width: 100%; }
+  .model-config .model-input-actions { flex-wrap: wrap; }
+  .model-config .model-input-actions input { flex-basis: 100%; width: 100%; }
+}
+/* .wide-220 已删（2026-10-14）：推送栏删掉「分组」下拉后没人用了。
+   ★ 留着不报错，但会让人以为还有 220px 宽的下拉。 */
+.wide-300 { width: 300px; }
+
+.checks { display: flex; gap: 18px; }
+.checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-dim); }
+.checks input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+
+/* ---------------------------------------------- 开关（iOS Switch） */
+.switch {
+  width: 42px; height: 24px; border-radius: var(--radius-full);
+  background: var(--track-2);
+  border: none; padding: 0; position: relative; cursor: pointer;
+  transition: background .25s; flex-shrink: 0;
+  box-shadow: inset 0 1px 2px var(--line-faint);
+}
+.switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--text-inverse);
+  box-shadow: 0 2px 6px var(--line), 0 1px 1px var(--line-faint);
+  transition: left .25s cubic-bezier(.3,1.4,.5,1);
+}
+.switch.on { background: var(--success); }
+.switch.on::after { left: 20px; }
+
+/* ---------------------------------------------- 文本域 */
+.ta-wrap { position: relative; }
+.ta-wrap textarea {
+  width: 100%; resize: vertical; min-height: 96px;
+  font: var(--fs-sm)/1.75 var(--font); color: var(--text);
+  background: var(--glass-veil-2);
+  border: 1px solid var(--glass-veil-3);
+  border-radius: var(--radius-md);
+  padding: 12px 14px 26px;
+  box-shadow: inset 0 1px 3px var(--line-faint);
+}
+.ta-wrap .count {
+  position: absolute; right: 14px; bottom: 8px;
+  font-size: var(--fs-xs); color: var(--text-faint);
+  background: var(--glass-veil-3);
+  padding: 0 6px; border-radius: var(--radius-xs);
+}
+
+.prompt-box { margin-top: 14px; }
+.prompt-box summary {
+  cursor: pointer; color: var(--accent); font-size: var(--fs-sm); font-weight: 500;
+  list-style: none; padding: 6px 0;
+}
+.prompt-box summary::-webkit-details-marker { display: none; }
+.prompt-box summary::before { content: '▸ '; display: inline-block; transition: transform .2s; }
+.prompt-box[open] summary::before { transform: rotate(90deg); }
+.prompt-box pre {
+  background: var(--code-bg);
+  border: 1px solid var(--glass-veil-2);
+  border-radius: var(--radius-md);
+  padding: 14px; font: var(--fs-xs)/1.75 ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 400px; overflow: auto; margin: 8px 0 0;
+}
+
+/* ---------------------------------------------- 滑块 */
+.slider {
+  width: 100%; height: 4px; border-radius: var(--radius-xs); appearance: none;
+  background: var(--track-2); outline: none;
+}
+.slider::-webkit-slider-thumb {
+  appearance: none; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--text-inverse); cursor: pointer;
+  box-shadow: 0 2px 8px var(--line), 0 0 0 0.5px var(--line-faint);
+  transition: transform .15s;
+}
+.slider::-webkit-slider-thumb:active { transform: scale(1.1); }
+.slider-marks {
+  display: flex; justify-content: space-between;
+  font-size: var(--fs-xs); color: var(--text-faint); margin-top: 6px;
+}
+.slider-marks span.active { color: var(--accent); font-weight: 600; }
+.hint { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--text-faint); }
+
+/* ---------------------------------------------- 按钮 */
+.btn {
+  font: 500 var(--fs-sm) var(--font);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--glass-veil-3);
+  border-radius: var(--radius-full); padding: 6px 18px;
+  color: var(--text); cursor: pointer;
+  box-shadow: 0 1px 3px var(--line-faint), var(--glass-edge);
+  transition: transform .15s, background .2s, box-shadow .2s;
+}
+.btn:hover { background: var(--text-inverse); }
+.btn:active { transform: scale(0.96); }        /* 对应 .interactive() 的按压反馈 */
+.btn.primary {
+  background: var(--accent); border-color: transparent; color: var(--text-inverse);
+  box-shadow: 0 4px 14px var(--accent-soft-2);
+}
+.btn.primary:hover { background: var(--accent-600); }
+.test-result { font-size: var(--fs-xs); color: var(--success); font-weight: 500; }
+.test-result.error { color: var(--danger); }
+
+/* ---------------------------------------------- 底部推送条 */
+.push-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 18px; padding: 16px 20px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border); border-radius: var(--radius);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+}
+.push-tip { color: var(--text-faint); font-size: var(--fs-sm); margin-left: auto; }
+
+/* ============================================================
+   回复文案页
+   ============================================================ */
+.stage-nav { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 14px; }
+.stage-nav::-webkit-scrollbar { height: 6px; }
+.stage-nav::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb); border-radius: var(--radius-xs);
+}
+.stage-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-width: 136px; padding: 12px 16px; cursor: pointer; text-align: left;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: var(--glass-border); border-radius: var(--radius);
+  box-shadow: var(--glass-edge);
+  transition: transform .2s, box-shadow .2s, background .2s;
+}
+.stage-btn:hover { transform: translateY(-2px); background: var(--glass-veil-3); }
+.stage-btn small { color: var(--text-faint); font-size: var(--fs-2xs); letter-spacing: .5px; }
+.stage-btn span { font-size: var(--fs-md); color: var(--text); font-weight: 500; }
+.stage-btn b { color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
+.stage-btn.active {
+  background: var(--glass-veil-3);
+  border-color: var(--accent-soft-2);
+  box-shadow: 0 8px 24px var(--accent-soft),
+              0 0 0 3px var(--accent-soft), var(--glass-edge);
+}
+
+.rc-layout { display: grid; grid-template-columns: 1fr 370px; gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .rc-layout { grid-template-columns: 1fr; } }
+
+.rc-cards { display: flex; flex-direction: column; gap: 14px; }
+.rc-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border); border-radius: var(--radius);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  padding: 16px 20px;
+  transition: transform .2s, box-shadow .2s;
+}
+.rc-card:hover { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(31,38,135,.13), var(--glass-edge); }
+.rc-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rc-card-head h4 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.rc-chip {
+  font-size: var(--fs-2xs); padding: 2px 10px; border-radius: 100px;
+  background: var(--divider-soft); color: var(--text-dim);
+}
+.rc-chip.shared { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.rc-card-head .btn { margin-left: auto; padding: 3px 14px; }
+/* 长文案区保持可读性：不叠 blur，用浅实底 */
+.rc-text {
+  font-size: var(--fs-sm); color: var(--text-strong-2); white-space: pre-wrap; line-height: 1.85;
+  background: var(--glass-veil-2);
+  border: 1px solid var(--glass-veil-2);
+  border-radius: var(--radius-md); padding: 10px 14px;
+}
+.rc-bubble-ref { font-size: var(--fs-2xs); color: var(--text-faint); margin-top: 8px; }
+
+.rc-preview {
+  position: sticky; top: 84px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  border: var(--glass-border); border-radius: var(--radius);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  padding: 18px 20px;
+}
+.rc-preview h3 { margin: 0 0 4px; font-size: var(--fs-lg); font-weight: 600; }
+.preview-note { margin: 0 0 14px; font-size: var(--fs-xs); color: var(--text-faint); }
+#preview-bubbles .bubble {
+  /* 模拟闲鱼聊天气泡的观感 */
+  background: var(--text-inverse); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-xs);
+  padding: 12px 14px; margin-bottom: 10px; font-size: var(--fs-sm);
+  white-space: pre-wrap; line-height: 1.75; word-break: break-word;
+  box-shadow: 0 2px 8px var(--line-faint);
+}
+#preview-bubbles .empty { color: var(--text-faint); font-size: var(--fs-sm); }
+
+/* ============================================================
+   弹窗
+   ============================================================ */
+.modal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--line-strong);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
+}
+.modal[hidden] { display: none; }
+.modal-panel {
+  width: min(780px, 92vw); max-height: 88vh; display: flex; flex-direction: column;
+  background: var(--glass-veil-3);
+  backdrop-filter: blur(34px) saturate(190%);
+  -webkit-backdrop-filter: blur(34px) saturate(190%);
+  border: var(--glass-border); border-radius: var(--radius-xl);
+  box-shadow: 0 24px 70px var(--line-strong), var(--glass-edge);
+  animation: pop .28s cubic-bezier(.2,1.1,.3,1);
+}
+/* ★ 起始 opacity 用 .35 而不是 0 —— 这不是审美选择，是健壮性：
+     如果动画因为任何原因没跑（虚拟时间、性能降级、动画被禁用、
+     截图工具停在首帧），从 0 开始的元素会【永久不可见】，
+     用户看到的就是一个盖住页面、点不动的空壳。
+     从 .35 开始，最坏情况只是淡入感弱一点，内容照样能看见。 */
+@keyframes pop {
+  from { opacity: .35; transform: scale(.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--glass-veil-2);
+}
+.modal-head h3 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
+.modal-body { padding: 18px 22px 22px; overflow: auto; }
+.m-trigger {
+  background: var(--glass-veil-2);
+  border: 1px solid var(--glass-veil-2);
+  border-radius: var(--radius-md); padding: 12px 14px;
+  font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.7;
+}
+.m-notes { margin: 12px 0 0; font-size: var(--fs-xs); color: var(--warning); line-height: 1.7; }
+.m-notes p { margin: 4px 0; }
+.m-field { margin-top: 18px; }
+.m-field label { display: block; margin-bottom: 8px; font-weight: 600; }
+.m-field textarea {
+  width: 100%; min-height: 170px; resize: vertical;
+  font: var(--fs-sm)/1.85 var(--font); color: var(--text);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--glass-veil-3);
+  border-radius: var(--radius-md); padding: 12px 14px;
+  box-shadow: inset 0 1px 3px var(--line-faint);
+}
+.m-tokens { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.m-tokens button {
+  background: var(--glass-veil-3);
+  border: 1px solid var(--glass-veil-3);
+  border-radius: var(--radius-full); padding: 4px 12px;
+  font: var(--fs-xs) var(--font); color: var(--text-dim); cursor: pointer;
+  transition: transform .15s, color .2s, background .2s;
+}
+.m-tokens button:hover { color: var(--accent); background: var(--text-inverse); transform: translateY(-1px); }
+.m-tokens button:active { transform: scale(.95); }
+.m-tokens code { color: var(--accent); font-size: var(--fs-2xs); }
+.m-actions { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+.m-status { font-size: var(--fs-sm); color: var(--success); font-weight: 500; }
+.m-status.error { color: var(--danger); }
+
+.placeholder-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border); border-radius: var(--radius);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  padding: 48px 40px; text-align: center; color: var(--text-dim);
+}
+.placeholder-card h2 { margin: 0 0 10px; font-size: var(--fs-xl); color: var(--text); }
+
+.panel { display: none; }
+.panel.active { display: block; animation: fade .3s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.footer-text {
+  position: relative; z-index: 1;
+  text-align: center; color: var(--text-faint); font-size: var(--fs-xs);
+  padding: 30px 0 44px;
+}
+
+/* ==================================================================== 侧栏
+   ★ 2026-10-14：顶部横向菜单改成【左侧栏】。
+   ★★ 2026-10-14 二次改：从"贴左边缘通到底"改成【悬浮玻璃岛】
+      （店主给了完整规格：离边 20px、圆角 22px、半透明毛玻璃、双层落影）。
+
+   ★ 类名沿用店主给的那套（ticket-sidebar / ticket-nav-item /
+     sidebar-scroll / sidebar-muted …）—— 那是他线上在用的命名，
+     保持同名以后对照线上样式时不会对不上。
+
+   ★★ 「悬浮」的关键不是阴影，是【不满高 + 外边距 + 背后真的有东西可模糊】。
+      只加阴影不缩进去，那只是"带阴影的普通侧栏"。
+   ============================================================ */
+
+.app-shell { display: flex; align-items: stretch; min-height: 100vh; }
+
+.ticket-sidebar {
+  /* ---- 主题变量（深色模式在文件末尾覆盖这一组）---- */
+  --glass-blur: blur(24px) saturate(135%);
+  --sidebar-bg: var(--glass-veil-2);
+  --sidebar-border: var(--glass-veil-3);
+  --sidebar-text: var(--text);
+  /* ★ 菜单文字单独一个变量：深色下要比全局 --text-dim 亮，
+     否则压在玻璃底上只有 3.15:1（验收标准第 3 条要求过 AA） */
+  --sidebar-text-dim: var(--text-dim);
+  --sidebar-text-faint: var(--text-faint);
+  --sidebar-hover: rgba(73, 151, 149, .11);
+  --sidebar-active: linear-gradient(105deg, #276866, #245e5d);
+  --sidebar-active-shadow: 0 9px 18px rgba(35, 93, 91, .18);
+  --sidebar-shadow: 0 20px 44px rgba(48, 94, 96, .13), 0 2px 8px rgba(48, 94, 96, .06);
+
+  width: 258px; flex-shrink: 0;
+  display: flex; flex-direction: column;
+  /* ★ 不满高 + 离边 20px —— 这两条是"浮岛"和"贴边侧栏"的分界 */
+  position: sticky; top: 20px;
+  height: calc(100vh - 40px);
+  margin: 20px 0 20px 20px;
+  z-index: 30;
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius-xl);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  box-shadow: var(--sidebar-shadow);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  /* ★ overflow: hidden 是为了圆角裁切；滚动条必须放【内层】
+     （.sidebar-scroll），否则会被这条裁掉或破坏圆角 */
+  overflow: hidden;
+  transition: width .2s ease-out;
+}
+/* 折叠态：只动宽度，圆角与阴影不变形 */
+.ticket-sidebar.is-collapsed { width: 78px; }
+
+/* 导航区滚动、品牌区与底部状态区固定 —— 菜单变长时只有中间滚 */
+.sidebar-scroll { overflow-y: auto; overflow-x: hidden; }
+
+.ticket-sidebar-brand {
+  display: flex; align-items: center;
+  /* ★ 2026-10-14 文字去掉后只剩一个图标：
+     居中 + 上多下少的内边距，让它看着是"品牌位"而不是"挤在左上角的孤儿图标"，
+     同时和下面的菜单拉开一点距离。 */
+  justify-content: center;
+  padding: 22px 16px 14px;
+  /* ★★ 2026-10-14 店主：「下划线还在」。
+     就是这条 border-bottom（品牌区和菜单之间的横线）。
+     上一次我删的是【底栏】的 border-top，不是这条。
+     ★ 深色模式那条 border-bottom-color 也一并对齐（见文件末尾）。 */
+  border-bottom: 0;
+}
+.ticket-sidebar-brand .brand-icon {
+  width: 36px; height: 36px; border-radius: var(--radius-md); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--brand-gradient);
+  box-shadow: 0 2px 8px var(--brand-gradient-shadow);
+  color: var(--text-inverse);
+}
+.ticket-sidebar-brand .brand-name {
+  font: 700 var(--fs-md) var(--font); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ticket-sidebar-brand .brand-ver {
+  font-size: var(--fs-2xs); color: var(--text-faint); margin-top: 2px;
+}
+
+.ticket-sidebar-nav {
+  flex: 1; padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 3px;
+}
+.ticket-nav-item {
+  position: relative; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--sidebar-text-dim);
+  font: 500 var(--fs-md) var(--font); cursor: pointer;
+  transition: background .18s, color .18s;
+}
+/* 悬停用极淡色 —— 用实色会盖住玻璃质感 */
+.ticket-nav-item:hover { background: var(--sidebar-hover); color: var(--text); }
+/* 选中：渐变填充块 + 自己的阴影 + 左侧 2px 竖条（"块"感来自前两者） */
+.ticket-nav-item.active {
+  background: var(--sidebar-active);
+  color: var(--text-inverse);
+  box-shadow: var(--sidebar-active-shadow);
+}
+.ticket-nav-item.active .nav-sub { color: var(--glass-veil-3); opacity: 1; }
+.ticket-nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 2px; height: 20px; border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: var(--text-inverse);
+}
+.ticket-nav-item .nav-text { flex: 1; min-width: 0; }
+/* ★ 这两个必须 display:block —— 它们是 <span>，默认 inline 会挤在一行。
+   我第一版漏了这行，截图里看到的是「AI助理接管时机·人设·记忆」连成一串。 */
+.ticket-nav-item .nav-title {
+  display: block;
+  font-size: var(--fs-md); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ticket-nav-item .nav-sub {
+  display: block;
+  font-size: var(--fs-2xs); margin-top: 2px; color: var(--sidebar-text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ticket-nav-item svg { flex-shrink: 0; }
+
+.ticket-sidebar-foot {
+  padding: 12px 16px;
+  /* ★ 2026-10-14 店主：「底部下横线去掉」。
+     原来这里是 border-top: 1px solid（把状态区和菜单切开）。
+     ★ 深色模式那条 border-top-color 也一并对齐（见文件末尾）——
+       只删这里不改那里，深色下还会漏出一条线。 */
+  border-top: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-2xs); color: var(--sidebar-text-faint);
+}
+.ticket-sidebar-foot .dot-online {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--success); display: inline-block;
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+@keyframes pulse-soft { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* 内容区：原来 main 是 max-width 居中，放进 flex 后要让它自己撑开 */
+.app-main { flex: 1; min-width: 0; }
+/* ★★ 2026-10-14：padding-top 从 0 改成 34px。
+   为什么：删掉面包屑后，标题距视口顶只剩 6px（.page-header 自己的 padding-top），
+   实测"标题上边距 = 0px"、截图里标题是顶着边的。
+   那 20px 的留白原来由面包屑的 padding-top 提供（.breadcrumb { padding: 16px 2px 4px }），
+   面包屑一走就没人给了。
+   ★ 取 34px 而不是 20px：悬浮岛顶边在 20px，标题文字顶边落在
+     20(岛) + 26 = 46px 附近，和玻璃岛看着在同一水平线上。 */
+/* ★★ 2026-10-14 店主：「把所有内容页面全部靠左，并左间距设置为 32px」
+   ⇒ 去掉 max-width 与 margin:auto（这两样就是"居中"的全部原因），
+     左内边距改成 32px。右侧也留 32px —— 不然表格会顶到视口边，
+     横向滚动条贴边很难看。
+   ★ 原来靠左会在宽屏上留出大片空白：这是店主明确要的效果，
+     不是疏漏。以后看到右侧空一片不要"顺手"加回居中。 */
+.app-main > main { margin: 0; padding: 34px 32px 60px; }
+
+/* 窄屏：侧栏收成图标条（保留可点，不隐藏 —— 隐藏了就没导航了）
+   ★ 与规格里的 78px 折叠宽度对齐 */
+@media (max-width: 900px) {
+  .ticket-sidebar { width: 78px; }
+  .ticket-sidebar-brand .brand-name,
+  .ticket-sidebar-brand .brand-ver,
+  .ticket-nav-item .nav-title,
+  .ticket-nav-item .nav-sub,
+  .ticket-sidebar-foot span { display: none; }
+  .ticket-nav-item { justify-content: center; padding: 10px 0; }
+  .ticket-sidebar-brand { justify-content: center; padding: 20px 0 12px; }
+  .ticket-sidebar-foot { justify-content: center; }
+}
+
+/* ==================================================================== 主题
+   ★ 2026-10-14：店主说「背景色太丑了」，要可换 + 右上角色盘自己选。
+
+   老做法的问题：光斑硬编码成 #7ac7ff/#4a7cff + #ffb3d9/#b07cff，
+   再用 blur(60px) 糊开 ⇒ 整片偏紫粉，而且【改不了】。
+   新做法：每个主题只定两个变量
+     --bg-base    页面底色
+     --bg-accent  光斑取色（用 color-mix 自动调淡，不用手写四组）
+   ⇒ 加/改主题只动这两个值，不会出现"改了底色忘了改光斑"的不一致。
+
+   ★ <html data-theme="..."> 切换；没设就用下面第一条的默认值。
+
+   ★★ 我在这里踩过一个坑（留个记录）：
+     第一版把这段连同说明一起写进了注释里，却在末尾用了 HTML 的
+     结束标记（CSS 注释要用 星号加斜杠 收尾，不是尖括号那种）。
+     ⇒ 注释一直没结束，把 ":root 默认块" 和 "html{background}" 全吞了。
+     表现：light 模式下所有主题都是默认白，dark 模式却正常
+           （dark 那段在注释之后，没被吞）。
+     ★ 这种错语法检查发现不了 —— 是【截图 + 实测】才看出来的。
+     ★ 而且我在写这条记录时又踩了一次：注释正文里出现了
+       "星号加斜杠"的符号写法，直接把注释提前关掉了。
+       ⇒ 注释里不要出现闭合符号本身。
+*/
+:root,
+:root[data-theme="mist"] {
+  --bg-base: #f4f6fb;
+  --bg-accent: #5b7cfa;        /* 雾蓝（默认：干净、不抢内容） */
+}
+/* ★ 底色铺在 html 上，不只 body：
+     玻璃面板是半透明的，body 背景一旦没铺满（或被元素盖住），
+     透出来的就是浏览器默认白 —— 换主题时看着"没生效"。
+     铺在 html 上最稳，滚到最底下也不露白。 */
+html { background: var(--bg-base); }
+:root[data-theme="paper"] { --bg-base: #f7f4ef; --bg-accent: #c99a5b; }
+:root[data-theme="mint"]  { --bg-base: #f0f7f4; --bg-accent: #2fae86; }
+:root[data-theme="rose"]  { --bg-base: #fbf3f6; --bg-accent: #e8749e; }
+:root[data-theme="sky"]   { --bg-base: #eff6fc; --bg-accent: #2f9bd4; }
+:root[data-theme="ink"]   { --bg-base: #eef1f6; --bg-accent: #2b3a4a; }
+:root[data-theme="plain"] { --bg-base: #ececef; --bg-accent: transparent; }
+
+/* 深色模式：底色压暗，光斑调淡（浅色底在暗色下会糊成一片灰） */
+@media (prefers-color-scheme: dark) {
+  :root,
+  :root[data-theme="mist"] { --bg-base: #0f1218; --bg-accent: #4a6cf0; }
+  :root[data-theme="paper"] { --bg-base: #16130f; --bg-accent: #b98a4a; }
+  :root[data-theme="mint"]  { --bg-base: #0d1613; --bg-accent: #2a9c78; }
+  :root[data-theme="rose"]  { --bg-base: #170f13; --bg-accent: #d2648c; }
+  :root[data-theme="sky"]   { --bg-base: #0d141a; --bg-accent: #2989bb; }
+  :root[data-theme="ink"]   { --bg-base: #0c0f14; --bg-accent: #3a4d60; }
+  :root[data-theme="plain"] { --bg-base: #0b0b0f; --bg-accent: transparent; }
+}
+
+/* 光斑：颜色从 --bg-accent 推出来。
+   ★ color-mix 让"换主题只要改一个色"成立 —— 否则每加一个主题
+     都得手写两组渐变色，迟早有主题忘了配对。 */
+body::before,
+body::after,
+.orb {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.30;               /* 比原来的 0.55 淡很多 —— 原来太抢眼 */
+  pointer-events: none;
+  z-index: 0;
+}
+body::before {
+  width: 42vw; height: 42vw; top: -14vw; left: -10vw;
+  background: radial-gradient(circle at 30% 30%,
+    color-mix(in oklab, var(--bg-accent) 55%, white), var(--bg-accent) 72%);
+  animation: none;
+}
+body::after {
+  width: 36vw; height: 36vw; top: 34vh; right: -12vw;
+  background: radial-gradient(circle at 60% 40%,
+    color-mix(in oklab, var(--bg-accent) 30%, white), var(--bg-accent) 75%);
+  animation: none;
+}
+.orb {
+  width: 26vw; height: 26vw; bottom: -8vw; left: 28vw;
+  background: radial-gradient(circle at 50% 50%,
+    color-mix(in oklab, var(--bg-accent) 40%, white), var(--bg-accent) 80%);
+  animation: none;
+}
+/* plain：不要光斑（有些人不喜欢"有颜色"，只要干净底） */
+/* 自定义色：光斑用店主选的色，底色也跟着它调淡（色盘里选"自定义"时） */
+:root[data-theme="custom"] body::before {
+  background: radial-gradient(circle at 30% 30%,
+    color-mix(in oklab, var(--bg-accent) 55%, white), var(--bg-accent) 72%);
+}
+:root[data-theme="custom"] body::after {
+  background: radial-gradient(circle at 60% 40%,
+    color-mix(in oklab, var(--bg-accent) 30%, white), var(--bg-accent) 75%);
+}
+:root[data-theme="custom"] .orb {
+  background: radial-gradient(circle at 50% 50%,
+    color-mix(in oklab, var(--bg-accent) 40%, white), var(--bg-accent) 80%);
+}
+
+/* ============================================================ 右上角色盘
+   ★ 放右上角而不是顶栏里：那里正好是 header-right（渠道切换/账号选择）
+     的地盘，插进去会把已有的东西挤位；固定定位也不受页面结构影响。 */
+.theme-picker {
+  position: fixed; top: 14px; right: 18px; z-index: 60;
+}
+.theme-btn {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: 0 4px 14px rgba(31, 38, 135, 0.14);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); padding: 0;
+  transition: transform .16s, color .16s;
+}
+.theme-btn:hover { transform: scale(1.06); color: var(--text); }
+.theme-panel {
+  position: absolute; top: 42px; right: 0; width: 216px;
+  padding: 12px; border-radius: var(--radius-lg);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  display: none;
+}
+/* ★ 展开时往【左】展开：右对齐会让面板压住页面右上角的
+   "当前账号 / 渠道切换"那组控件（实测截图里确实压住了）。 */
+.theme-panel.open { display: block; right: -4px; }
+.theme-panel .tp-title {
+  font-size: var(--fs-xs); color: var(--text-faint); margin: 0 0 8px 2px;
+}
+.theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.theme-swatch {
+  width: 100%; aspect-ratio: 1; border-radius: var(--radius-md); cursor: pointer;
+  border: 2px solid transparent; padding: 0;
+  box-shadow: inset 0 0 0 1px var(--line-faint);
+}
+.theme-swatch.active { border-color: var(--accent); }
+.theme-custom-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--divider-soft);
+}
+.theme-custom-row input[type=color] {
+  width: 34px; height: 28px; padding: 0; border: 0; background: none;
+  cursor: pointer; border-radius: var(--radius-xs);
+}
+.theme-custom-row span { font-size: var(--fs-xs); color: var(--text-dim); }
+
+
+/* ============================================================ 按钮（统一）
+   ★★ 2026-10-14：表格里原来混着三种样子 ——
+       ↑↓ 是浏览器默认的灰色小方框（难看、还不统一）
+       「编辑」是 .btn-primary
+       「删除/编辑」在报价规则页又是裸文字链接
+     ⇒ 补上 .btn-ghost / .btn-primary 两档，并统一尺寸，
+       让次要操作主要操作一眼能分。
+   ★ 注意 .btn-ghost 在 rules.css 里已有一条 { white-space: nowrap }，
+     这里补的是外观；两条不冲突。 */
+.btn-ghost,
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 500 var(--fs-sm) var(--font);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+/* 次要：图标/箭头这类小动作，方形、无底色、hover 才显形 */
+.btn-ghost {
+  width: 26px; height: 26px; padding: 0;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.btn-ghost:hover { background: var(--line-faint); color: var(--text); }
+/* 主要：编辑/保存这类，淡蓝底 */
+.btn-primary {
+  padding: 5px 14px;
+  color: var(--text-inverse);
+  background: var(--accent);
+  border: 0;
+  box-shadow: 0 1px 3px var(--accent-soft-2);
+}
+.btn-primary:hover { filter: brightness(1.06); }
+
+/* 深色模式：把按钮的 hover/底色换到深色下可读 */
+@media (prefers-color-scheme: dark) {
+  .btn-ghost:hover { background: var(--glass-veil-4); }
+}
+
+/* 深色模式：玻璃参数整体调暗 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass-bg: rgba(40, 40, 45, 0.55);
+    --glass-bg-strong: rgba(40, 40, 45, 0.75);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.12);
+    --glass-edge: inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+                  inset 0 -1px 0 0 rgba(255, 255, 255, 0.04);
+    --text: #f2f2f7;
+    --text-dim: #a1a1a8;
+    --text-faint: #6e6e76;
+  }
+  body { background: var(--bg-base); }
+  body::before, body::after, .orb { opacity: 0.35; }
+  .rc-text { background: var(--glass-veil); border-color: var(--glass-veil); color: #e5e5ea; }
+  .m-trigger, .m-field textarea, .ta-wrap textarea, select,
+  input[type=text], input[type=number], input[type=password] {
+    background: var(--glass-veil); border-color: var(--glass-veil); color: var(--text);
+  }
+  .prompt-box pre { background: var(--glass-veil); border-color: var(--glass-veil); }
+  .modal-panel { background: var(--overlay-panel); }
+
+  .top-tab.active { background: var(--glass-veil); }
+  /* ★ 侧栏在深色下的玻璃边与 hover */
+  /* ★★ 深色模式必须单独覆盖这一组变量，否则侧栏发白、文字看不清 */
+  .ticket-sidebar {
+    --sidebar-bg: rgba(35, 44, 50, .76);
+    /* ★ 深色下把菜单文字调亮：实测原来 3.15:1，达不到验收要求。
+       #c8c8ce 在合成后的玻璃底上约 5.5:1，过 WCAG AA。 */
+    --sidebar-text-dim: #d0d0d6;
+    --sidebar-text-faint: #a4a4ac;
+    --sidebar-border: var(--glass-veil);
+    --sidebar-hover: var(--glass-veil);
+    --sidebar-shadow: 0 20px 44px rgba(18, 28, 32, .3), 0 2px 8px rgba(18, 28, 32, .2);
+  }
+  .ticket-sidebar-brand { border-bottom-color: transparent; }
+  /* ★ 底部横线已去掉（店主 2026-10-14），深色这里也不再有 border-top */
+  .ticket-nav-item:hover { background: var(--glass-veil); }
+  /* .ticket-nav-item.active 用变量里的渐变，深色下不用另写 */
+  .stage-btn.active { background: var(--glass-veil); }
+  .rc-chip { background: var(--glass-veil-4); }
+}
+
+
+/* ==================================================================== 弹窗共用件
+   ★★ 2026-10-14 店主：「新增关键词的回复内容框和回复文案中文案输入框做成一样的」
+                          「关闭按钮也和回复文案中的关闭按钮做成一样」
+
+   ★ 为什么抽成共用规则，而不是在两处各写一套：
+     量出来它们本来是【两套完全不同的东西】——
+       回复文案：#m-text     padding 12px 14px / 圆角 12px / 背景 glass-veil-3 / 13px
+       关键词：  #qf-content padding 2px      / 圆角 0     / 背景纯白         / 13.33px
+     后者那组全是【浏览器默认值】—— 说明它从来没被设计过。
+     ⇒ 抽成一条，两处都用。
+
+   ★ 选择器用类名而不是 id：以后再加弹窗自动就有这套样式。 */
+.modal-body .m-field textarea,
+.modal-body .qf-item > textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  line-height: 1.85;
+  color: var(--text);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  min-height: 170px;
+}
+.modal-body .m-field textarea:focus,
+.modal-body .qf-item > textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 关闭按钮：用文字「关闭」，沿用 .btn 的胶囊样式（不再用 ×）。
+   ★ 我上一轮把它改成了 × —— 那是我自己的偏好，不是店主的要求。
+     店主说「和回复文案中的关闭按钮做成一样」，而那个本来就是文字「关闭」。
+     ⇒ 现在两个弹窗统一成文字「关闭」。 */
+.modal-head .btn {
+  flex: 0 0 auto;
+  padding: 6px 16px;
+  font-size: var(--fs-sm);
+}
+
+/* 弹窗底部按钮条（保存放右下角）——
+   ★ 照「关键词回复」弹窗原来那条写的，现在两个弹窗共用。
+   已经存在的 .modal-foot 规则在 qa.css 里，这里补一条通用兜底，
+   让不引 qa.css 的页面也有同样的按钮条。 */
+.modal-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+}
+.modal-foot .spacer { flex: 1; }
+
+/* Sidebar ticket mark follows the selected theme. */
+.ticket-sidebar-brand .brand-icon {
+  width: 44px; height: 44px; border-radius: 15px;
+  background: var(--accent, #256660);
+  color: #fff;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent, #256660) 22%, transparent);
+}
+
+#apikey { flex:1; min-width:180px; width:100%; max-width:520px; min-height:38px; border-radius:12px; }
+#apikey::placeholder { color:var(--text-dim); font-size:12px; }
+#btn-save-key { flex-shrink:0; }
+#stage-slider:disabled { opacity:.4; cursor:not-allowed; }
+.assistant-save-status { margin-left:auto; font-size:12px; color:var(--text-dim); }
+
+/* Shared floating save/push actions; the page keeps room below its final field. */
+body:has(.floating-actions) .app-main > main { padding-bottom:190px; }
+body:has(.floating-actions) > .footer-text { display:none; }
+.floating-actions { position:fixed; left:var(--action-left,280px); right:24px; bottom:16px; z-index:40; margin:0; padding:14px 18px; border:1px solid var(--glass-edge, #ffffff); border-radius:18px; background:var(--card-bg,rgba(255,252,246,.96)); backdrop-filter:blur(20px); box-shadow:0 8px 30px #30261b24; display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; }
+.shop-push-tools { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-left:auto; }
+.shop-push-caption,.push-feedback { font-size:12px; color:var(--muted,#777); }
+.shop-source-label { display:flex; align-items:center; gap:10px; margin-left:auto; font-size:13px; }
+.shop-source,.shop-push-tools select { min-width:170px; max-width:250px; height:36px; border:1px solid #ddd6cf; border-radius:10px; padding:0 12px; color:inherit; background:var(--card-bg,#fff); }
+.panel:not(.active) > .floating-actions { display:none; }
+@media(max-width:760px) { .floating-actions {left:12px!important;right:12px;bottom:10px;padding:12px;gap:8px;} .shop-push-caption {display:none;} .shop-push-tools {margin-left:0;} .shop-source-label {margin-left:0;} }

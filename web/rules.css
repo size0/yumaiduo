@@ -1,0 +1,358 @@
+/* ============================================================
+   rules.css —— 报价规则页
+
+   复用 style.css 的玻璃变量与控件（.switch / .radio-group / .btn / .card），
+   复用 config.css 的 .alert-warn / .save-status / .text-input / .num-input。
+
+   这里只加规则表格与规则表单这两块。
+   ============================================================ */
+
+/* ---------------------------------------------- 工具栏 */
+.rules-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.rules-hint { font-size: var(--fs-sm); color: var(--text-faint); }
+
+/* Rule summaries: identity, scope, pricing, status and actions. */
+.rules-table-wrap { overflow: visible; border: 1px solid var(--line-faint); border-radius: 16px; }
+.rules-table { width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: var(--fs-sm); }
+.rules-table col.c-name { width: 22%; }
+.rules-table col.c-scope { width: 22%; }
+.rules-table col.c-pricing { width: 26%; }
+.rules-table col.c-state { width: 16%; }
+.rules-table col.c-ops { width: 14%; }
+.rules-table thead th { padding: 13px 18px; text-align: left; font-size: 12px; font-weight: 500; color: var(--text-dim); background: var(--glass-veil-2); border-bottom: 1px solid var(--line-faint); }
+.rules-table thead th:first-child { border-top-left-radius: 16px; }
+.rules-table thead th:last-child { border-top-right-radius: 16px; text-align: right; }
+.rules-table tbody td { padding: 20px 18px; vertical-align: top; border-bottom: 1px solid var(--line-faint); background: var(--glass-veil-2); overflow-wrap: anywhere; line-height: 1.65; }
+.rules-table tbody tr:last-child td { border-bottom: 0; }
+.rules-table tbody tr:last-child td:first-child { border-bottom-left-radius: 16px; }
+.rules-table tbody tr:last-child td:last-child { border-bottom-right-radius: 16px; }
+.rules-table tbody tr:hover td { background: var(--glass-veil-3); }
+.rules-table .rule-off td { color: var(--text-dim); }
+.rules-table .rule-bad td { background: var(--danger-faint); }
+.rule-name { display: block; margin: 0 0 10px; font-size: 15px; line-height: 1.5; font-weight: 600; color: var(--text); }
+.rule-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rule-route { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 6px; font-size: 11px; background: var(--line-faint); color: var(--text-dim); }
+.route-wanda { color: #80601f; background: #b18c3214; }
+.route-liangpiao { color: #50639b; background: #687db014; }
+.rule-weight { color: var(--text-faint); font-size: 11px; }
+.rule-main { color: var(--text); margin-bottom: 4px; }
+.rule-muted { color: var(--text-dim); font-size: 12px; line-height: 1.7; }
+.rule-exclusions { margin-top: 4px; }
+.rule-price { font-size: 14px; color: var(--text); font-weight: 600; margin-bottom: 3px; }
+.rule-mode { display: inline-block; margin-top: 8px; font-size: 11px; color: var(--text-faint); }
+.rule-status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); margin: 0 0 6px; font-size: 12px; }
+.rule-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.rule-status.is-enabled { color: #24784e; }
+.rule-status.is-enabled i { background: #38a56e; }
+.rule-scope-more { color: var(--text-dim); font-size: 12px; }
+.rule-scope-more summary { cursor: pointer; line-height: 1.7; }
+.rule-scope-more summary span { display: inline-block; margin-left: 3px; padding: 0 5px; font-size: 10px; border-radius: 4px; background: var(--line-faint); }
+.rule-scope-more[open] > div { margin-top: 7px; max-height: 150px; overflow-y: auto; line-height: 1.8; }
+.rules-table .rule-actions { text-align: right; white-space: normal; }
+.rules-table .rule-actions .rt-link { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; margin: 0 0 6px 6px; padding: 4px 10px; border: 1px solid var(--accent-soft-2); border-radius: 8px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.rules-table .rule-actions .rt-link.danger { color: var(--text-dim); border-color: var(--line); background: transparent; }
+.rules-table .rule-actions .rt-link.danger:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-faint); }
+.rules-table .rt-link:focus-visible, .rule-scope-more summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.rt-bad { color: var(--danger); font-weight: 600; }
+.rules-table .rules-empty { text-align: center; padding: 48px 20px; color: var(--text-dim); }
+@media (max-width: 1050px) {
+  .rules-table thead th, .rules-table tbody td { padding: 16px 12px; }
+}
+@media (max-width: 820px) {
+  body:has(#rules-table) .app-main > main { padding: 24px 16px 230px; }
+  body:has(#rules-table) .page-header { flex-direction: column; align-items: stretch; gap: 16px; }
+  body:has(#rules-table) .header-right { width: 100%; flex-wrap: wrap; gap: 8px; }
+  body:has(#rules-table) .account-pick { width: 100%; min-width: 0; }
+  body:has(#rules-table) .account-pick select { min-width: 0; width: 0; flex: 1; }
+  .rules-table-wrap { border: 0; border-radius: 0; }
+  .rules-table, .rules-table tbody { display: block; width: 100%; }
+  .rules-table colgroup, .rules-table thead { display: none; }
+  .rules-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 20px; padding: 20px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--glass-veil-2); }
+  .rules-table tbody td { display: block; min-width: 0; padding: 0; border: 0; background: transparent !important; border-radius: 0 !important; }
+  .rules-table tbody td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 5px; color: var(--text-faint); font-size: 11px; }
+  .rules-table .rule-identity { grid-column: 1 / -1; padding-bottom: 14px; border-bottom: 1px solid var(--line-faint); }
+  .rules-table .rule-actions { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; }
+  .rules-table .rule-actions .rt-link { margin: 0; min-height: 36px; padding: 5px 13px; }
+  .rules-table .rules-empty { grid-column: 1 / -1; padding: 24px 0; }
+  .rules-table .rule-bad { border-color: var(--danger); }
+}
+@media (max-width: 420px) {
+  .rules-table tbody tr { grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 16px; }
+  .rule-name { font-size: 14px; }
+  .rule-price { font-size: 13px; }
+  .rules-table .rule-actions { justify-content: flex-start; gap: 8px; }
+  .rules-table .rule-actions .rt-link { padding: 5px 10px; }
+}
+
+/* 非表格处（弹窗里的"添加一层"之类）保持原来的文字链接样式 */
+.rt-link {
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  cursor: pointer;
+}
+.rt-link:hover { text-decoration: underline; }
+.rt-link.danger { color: var(--danger); }
+
+/* 小开关（表格里用的） */
+.switch.sm { width: 38px; height: 21px; }
+.switch.sm::after { top: 3px; left: 3px; width: 15px; height: 15px; }
+.switch.sm.on::after { left: 20px; }
+
+/* ---------------------------------------------- 规则表单弹窗 */
+.rules-modal { width: 760px; max-width: 96vw; }
+
+.rf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 22px;
+  margin-bottom: 16px;
+}
+.rf-span2 { grid-column: 1 / -1; }
+
+.rf-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+.rf-label {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rf-label.required::before {
+  content: '*';
+  color: var(--danger);
+  font-weight: 700;
+}
+.rf-label .info {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  cursor: help;
+  font-style: normal;
+}
+
+.rf-wide { width: 100% !important; max-width: 100%; }
+.rf-help { font-size: var(--fs-2xs); color: var(--text-faint); line-height: 1.5; }
+.rf-help.bad { color: var(--danger); font-weight: 600; }
+
+.text-input.narrow { width: 96px; }
+
+/* 院线 / 排除影院 的标签容器 */
+.chips-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 10px;
+  min-height: 42px;
+  max-height: 128px;
+  overflow-y: auto;
+  background: var(--glass-veil-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-sm);
+}
+.chips-box:empty::before {
+  content: '未选择';
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: var(--fs-2xs);
+  color: var(--brand-600);
+  background: var(--brand-soft);
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+.chip.off { color: var(--text-faint); background: var(--line-faint); }
+.chip button {
+  border: none; background: none; padding: 0;
+  color: inherit; cursor: pointer; font-size: var(--fs-sm); line-height: 1;
+}
+.chip button:hover { color: var(--danger); }
+
+/* 「预估成本 + N 元」组合输入框 */
+.input-group {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--glass-veil-3);
+}
+.group-addon {
+  flex: none;
+  padding: 7px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  background: var(--line-faint);
+  border-right: 1px solid var(--line-faint);
+  white-space: nowrap;
+}
+.group-addon .plus { color: var(--danger); font-weight: 700; margin-left: 3px; }
+.group-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: var(--fs-md);
+  border: none;
+  outline: none;
+  background: transparent;
+}
+.group-suffix {
+  flex: none;
+  padding: 7px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  background: var(--line-faint);
+  border-left: 1px solid var(--line-faint);
+}
+
+/* ---------------------------------------------- 实时预览
+   规则看数字不直观，这里把它翻成人话 */
+.rule-preview {
+  padding: 11px 14px;
+  margin-bottom: 14px;
+  font-size: var(--fs-sm);
+  line-height: 1.85;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-md);
+}
+.rule-preview .hl { color: var(--accent); font-weight: 600; }
+.rule-preview .bad { color: var(--danger); font-weight: 600; }
+.rule-preview .dim { color: var(--text-faint); }
+
+@media (max-width: 760px) {
+  .rf-grid { grid-template-columns: 1fr; }
+}
+
+/* ============================================================ 分档报价表 */
+/* 对应票达人弹窗里的「动态报价加法」那张表 */
+/* ★★ 必须显式声明，否则 `hidden` 属性【不生效】。
+ *
+ *   浏览器的 `[hidden]{display:none}` 来自 UA 样式表，
+ *   而任何作者样式（哪怕只是 `.rf-item{display:flex}`）优先级都更高，
+ *   会把它覆盖掉 —— 属性设了、元素还在。
+ *   踩过：报价方式=加法时，分档表本该隐藏，结果照样显示。
+ *   （这也是为什么用 `hidden` 属性做显隐时必须配这一条。） */
+[hidden] { display: none !important; }
+
+/* 分档区块：内部布局沿用 .rf-item，这里只标记一下，
+   ★ 不要再写 display —— 会盖掉上面的 [hidden] */
+.rf-tier-block { min-width: 0; }
+
+.tier-basis-row { display: flex; align-items: center; gap: 10px;
+  margin: 4px 0 10px; flex-wrap: wrap; }
+.tier-basis-label { font-size: var(--fs-sm); opacity: .8; }
+.tier-basis-row select { width: auto; min-width: 150px; }
+.tier-basis-help { font-size: var(--fs-xs); opacity: .62; }
+.tier-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm);
+  /* ★ 弹窗只有 650px 宽、这张表有 5 列 —— 必须按内容分配宽度。
+     我原来写死 table-layout:fixed，浏览器平均分，
+     结果「比例」列只剩约 30px，% 和 ± 按钮直接叠在一起（截图里就是那样）。
+     ⇒ 改成 auto 让它按内容分，并显式收紧各列。 */
+  table-layout: auto; }
+.tier-table th { text-align: left; font-weight: 500; opacity: .72;
+  padding: 6px 4px; border-bottom: 1px solid var(--glass-veil);
+  white-space: normal; line-height: 1.3; font-size: var(--fs-xs); }
+/* 后两列表头（+ / − 和 操作）不许折行 —— 折成「+ /」换行「−」很难看 */
+.tier-table th:nth-child(4), .tier-table th:nth-child(5) { white-space: nowrap; }
+.tier-table td { padding: 5px 4px; border-bottom: 1px solid var(--glass-veil);
+  /* ★ 单位和输入框必须同行 —— 否则 % 会掉到下一行。 */
+  white-space: nowrap; }
+/* ★ 折扣率两列：只要放得下输入框就行，不给多余宽度。
+   表头已经写了"折扣率大于等于/小于"，所以单元格里【不再重复显示 %】。 */
+.tier-table td:nth-child(1), .tier-table td:nth-child(2) { width: 1%; }
+.tier-table th:nth-child(1), .tier-table th:nth-child(2) { white-space: normal; }
+.tier-table th:nth-child(4), .tier-table td:nth-child(4) { width: 1%; }
+.tier-table th:nth-child(5), .tier-table td:nth-child(5) { width: 1%; }
+.tier-num { width: 66px; padding: 6px 5px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-veil); background: var(--line-strong);
+  color: inherit; font: inherit; font-size: var(--fs-sm);
+  display: inline-block; vertical-align: middle; }
+.tier-num:focus { outline: none; border-color: var(--mark-magenta); }
+.tier-unit { margin-left: 3px; opacity: .6; font-size: var(--fs-xs);
+  display: inline-block; vertical-align: middle; }
+.tier-na { opacity: .45; }
+/* ★ 对齐票达人：+ 在上、− 在下，竖着叠两个小方块。
+   我原来是左右并排 —— 票达人那张表里是上下叠的，照它来。 */
+.tier-sign { display: inline-flex; flex-direction: row; gap: 6px; }
+.tier-sign-btn { width: 32px; height: 32px; border-radius: var(--radius-xs); cursor: pointer;
+  border: 1px solid var(--glass-veil); background: var(--line-faint);
+  color: inherit; font-size: var(--fs-xs); line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center; }
+.tier-sign-btn:hover { border-color: var(--glass-veil); }
+.tier-sign-btn.on { background: var(--mark-blue); border-color: var(--mark-blue); color: var(--text-inverse); }
+.tier-del { cursor: pointer; border: none; background: none; color: var(--danger);
+  font-size: var(--fs-md); padding: 4px 6px; }
+.tier-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 8px; width:100%; }
+.tier-actions #f-tier-add { width:auto; height:auto; min-width:104px; flex-shrink:0; padding:8px 16px; min-height:36px; color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent-soft-2); border-radius:10px; cursor:pointer; font:inherit; }
+.tier-actions .tier-help { flex:1 1 280px; min-width:0; }
+.tier-table input.tier-num { width:96px; max-width:100%; min-height:36px; }
+@media(max-width:600px) {
+  .tier-table input.tier-num { width:64px; }
+  .tier-sign { gap:3px; }
+  .tier-sign-btn { width:28px; height:32px; }
+}
+.tier-help { font-size: var(--fs-xs); opacity: .62; }
+
+/* V5 弹窗里那个红色 ? 图标（必读说明） */
+.tip-required { display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-left: 4px; border-radius: 50%;
+  background: var(--mark-red); color: var(--text-inverse); font-size: var(--fs-2xs); font-style: normal;
+  cursor: help; vertical-align: middle; }
+
+/* 「添加一档」按钮不许换行（原来添加一档被挤成两行） */
+.tier-actions .btn-ghost { white-space: nowrap; }
+/* Rules page: room around actions, clear state, and a separate shop push area. */
+.card:has(.rules-toolbar) > .card-body { padding: 24px 22px 20px; }
+.rules-toolbar { padding: 2px 0 4px; margin-bottom: 18px; gap: 12px; }
+.rules-hint { margin-left: 4px; line-height: 1.7; color: var(--text-dim); }
+.rules-push-bar { display: block; padding: 0; overflow: hidden; }
+.rules-save-row, .rules-push-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 18px 22px; }
+.rules-save-row > div, .rules-push-copy { flex: 1 1 280px; }
+.rules-save-row strong, .rules-push-copy strong { font-size: var(--fs-sm); font-weight: 600; }
+.rules-save-row p, .rules-push-copy p { margin: 5px 0 0; font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.6; }
+.rules-push-row { border-top: 1px solid var(--line-faint); background: var(--glass-veil-2); }
+.rules-target { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); color: var(--text-dim); }
+.rules-target select, .account-pick select { min-height: 38px; min-width: 200px; padding: 8px 32px 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--glass-veil-3); color: var(--text); font: inherit; }
+.rules-target select:focus-visible, .account-pick select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rules-push-bar button { min-height: 36px; white-space: nowrap; }
+.rules-push-bar button:disabled { opacity: .5; cursor: not-allowed; }
+.rules-push-bar .save-status:empty { display: none; }
+#push-status:not(:empty) { flex-basis: 100%; text-align: right; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .card:has(.rules-toolbar) > .card-body { padding: 20px 12px 12px; }
+  .rules-hint { flex-basis: 100%; margin-left: 0; }
+  .rules-save-row, .rules-push-row { padding: 16px; }
+  .rules-target { flex: 1 1 100%; }
+  .rules-target select { flex: 1; min-width: 0; }
+  #push-status:not(:empty) { text-align: left; }
+}
+/* Whole cinema-name chips are clickable, including their text. */
+#f-brands .chip, #f-brands .chip button, #f-excluded .chip, #f-excluded .chip button { cursor: pointer; }
+#f-brands .chip:hover { box-shadow: 0 0 0 1px var(--accent); }
+.brand-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.brand-actions .btn { padding: 6px 12px; min-height: 30px; }
+#brands-count { margin-left: auto; font-size: var(--fs-xs); color: var(--text-dim); }

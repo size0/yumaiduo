@@ -1,35 +1,25 @@
-# V4 Production Canonical Baseline
+from pathlib import Path
+from shutil import copy2, copytree
+src = Path(r"E:\200行的agent\ticket-agent")
+dst = Path(r"E:\200行的agent\.repo-upload-yumaiduo-20261020")
+exclude = {"data", "audits", "output", "__pycache__", ".pytest_cache", ".ruff_cache", ".playwright-cli", "demos"}
+for child in src.iterdir():
+    if child.name in exclude or child.name.startswith("release-") or child.name.startswith(".audit-"):
+        continue
+    target = dst / child.name
+    if child.is_dir():
+        copytree(child, target, dirs_exist_ok=True, ignore=lambda d,n: {x for x in n if x in exclude or x.startswith("release-") or x.startswith(".audit-") or x in {"__pycache__", ".pytest_cache", ".ruff_cache", ".playwright-cli"}})
+    elif child.suffix in {".py", ".md", ".txt"} and child.name not in {"buyer_texts.json", "live-model-replies.json"}:
+        copy2(child, target)
+''@; $script | python -; @'
+# yumaiduo新版票务客服插件
 
-This repository is the canonical Git source of truth reconstructed from the source that was running in production on 2026-09-11.
+这是新版 `ticket-agent` 插件源码，包含图片识别报价、万达核价、订单事实同步、客服 Agent 和配置界面。
 
-## Components
+## 本地验证
 
-- `backend/app/` — Wanda V4 Backend production application source.
-- `plugin-runtime/wanda-seat-autoquote/` — production `wanda-seat-autoquote` plugin runtime and UI.
-- `docs/` — production-baseline evidence and repository notes.
-- `deploy/` — retained historical/supporting deployment material from the repository; it is not evidence of the currently running release.
-- `BUSINESS_RULES.md` — business and safety boundaries retained from the repository.
-
-The `ticket-system` is intentionally not included. The target repository's pre-existing structure contained the V3/V4 gateway and plugin, but no `ticket-system` component. Ticket-system is deployed as a separate service and was excluded rather than adding an unverified or unrelated component to this baseline.
-
-## Production baseline
-
-See [`docs/PRODUCTION_BASELINE_20260911.md`](docs/PRODUCTION_BASELINE_20260911.md) for release identifiers, source mappings, hash-verification scope, and the known ticket-system boundary.
-
-## Local development
-
-Backend:
-
-```bash
-cd backend
-python -m pytest
+```powershell
+python run_checks.py --current
 ```
 
-Plugin:
-
-```bash
-cd plugin-runtime/wanda-seat-autoquote
-npm test
-```
-
-Do not run tests or development commands against production credentials or production write APIs. Runtime configuration, secrets, user data, databases, logs, dependencies, and generated artifacts are excluded by `.gitignore`.
+当前测试不得连接生产支付、出票或发货接口。

@@ -1,0 +1,206 @@
+/* ==================================================================== 原子组件层
+   ★★ 2026-10-14 按《UI 架构规范》§3 建。
+
+   规范 §3 要求 7 个原子组件：
+     Button / Card / Input / Tag / PageHeader / Empty / cn
+
+   ★★ 我们是原生 HTML+CSS（不是 React/Vue），所以"组件"落地成：
+     · 一套【语义类名】+ CSS（本文件）
+     · 变体只认类名（.ui-btn--primary），**不接受行内色值**
+     · cn() 用 JS 提供（web/ui.js）—— 类名合并去重
+
+   ★★★ 本文件最重要的一条纪律（规范 §1 禁令 1）：
+     **这里不许出现任何具体色值**（#fff / rgba(...) / 颜色名）。
+     只用 L3 语义令牌。理由：换主题时组件不用改。
+     ⇒ 有一条断言专门扫这个文件（tests/_check_orders_ui.py）。
+
+   ★ 与既有 class 的关系：
+     老页面用的是 .btn / .btn-primary / .card / .tag-xxx 等（散在各文件里）。
+     本文件是【新的一套】.ui-*；迁移是逐页做的（规范 §8 第⑤步：
+     先迁 1 个页面校验，再批量迁）。
+     两套并存期间不会互相影响 —— 类名不重叠。
+   ==================================================================== */
+
+/* ============================================================ Button
+   规则：只认 variant × size，不接受自定义色值。
+   variant: primary / secondary / outline / ghost / danger / link
+   size:    xs / sm / md / lg  */
+.ui-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-2);
+  font-family: var(--font); font-weight: 500;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s, opacity .15s;
+}
+.ui-btn:disabled,
+.ui-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+/* 尺寸（只改字号/内边距/圆角，不改颜色） */
+.ui-btn--xs { font-size: var(--fs-2xs); line-height: var(--lh-2xs);
+              padding: 3px var(--sp-2); border-radius: var(--radius-xs); }
+.ui-btn--sm { font-size: var(--fs-xs); line-height: var(--lh-xs);
+              padding: 5px var(--sp-3); }
+.ui-btn--md { font-size: var(--fs-sm); line-height: var(--lh-sm);
+              padding: 7px var(--sp-4); }
+.ui-btn--lg { font-size: var(--fs-md); line-height: var(--lh-md);
+              padding: 10px var(--sp-5); border-radius: var(--radius-lg); }
+
+/* 变体（只用令牌） */
+.ui-btn--primary {
+  color: var(--text-inverse);
+  background: var(--accent);
+  box-shadow: var(--shadow-xs);
+}
+.ui-btn--primary:hover:not(:disabled) { background: var(--accent-600); }
+
+.ui-btn--secondary {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+.ui-btn--secondary:hover:not(:disabled) { background: var(--hover); }
+
+.ui-btn--outline {
+  color: var(--text);
+  background: transparent;
+  border-color: var(--border-strong);
+}
+.ui-btn--outline:hover:not(:disabled) { background: var(--hover); }
+
+.ui-btn--ghost {
+  color: var(--text-muted);
+  background: transparent;
+}
+.ui-btn--ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+
+.ui-btn--danger {
+  color: var(--text-inverse);
+  background: var(--danger);
+}
+.ui-btn--danger:hover:not(:disabled) { filter: brightness(.94); }
+
+.ui-btn--link {
+  color: var(--accent);
+  background: transparent;
+  padding: 0; border-radius: 0;
+}
+.ui-btn--link:hover:not(:disabled) { text-decoration: underline; }
+
+/* loading：不用图片/GIF，用一个转圈 + 降低可点性 */
+.ui-btn--loading { position: relative; pointer-events: none; }
+.ui-btn--loading::before {
+  content: "";
+  width: 1em; height: 1em; border-radius: var(--radius-full);
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: ui-spin .7s linear infinite;
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+
+/* ============================================================ Card */
+.ui-card {
+  background: var(--surface);
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: var(--backdrop-glass);
+  -webkit-backdrop-filter: var(--backdrop-glass);
+}
+.ui-card--pad-sm { padding: var(--sp-3); }
+.ui-card--pad-md { padding: var(--sp-4); }
+.ui-card--pad-lg { padding: var(--sp-6); }
+
+.ui-card__head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm); font-weight: 600;
+}
+.ui-card__body { padding-top: var(--sp-3); font-size: var(--fs-sm); }
+
+/* ============================================================ Input */
+.ui-input {
+  font-family: var(--font); font-size: var(--fs-sm); line-height: var(--lh-sm);
+  color: var(--text);
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px var(--sp-3);
+  width: 100%;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ui-input::placeholder { color: var(--text-subtle); }
+.ui-input:hover { border-color: var(--border-strong); }
+.ui-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* error 态：颜色来自 danger 令牌，不是写死的红 */
+.ui-input--error { border-color: var(--danger); }
+.ui-input--error:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
+.ui-input:disabled { background: var(--glass-veil); cursor: not-allowed; }
+
+.ui-field__msg { font-size: var(--fs-2xs); color: var(--text-subtle); margin-top: var(--sp-1); }
+.ui-field__msg--error { color: var(--danger); }
+
+/* ============================================================ Tag */
+.ui-tag {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  font-size: var(--fs-2xs); line-height: var(--lh-2xs);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: var(--glass-veil);
+}
+.ui-tag--sm { font-size: var(--fs-2xs); padding: 1px 6px; }
+.ui-tag--md { font-size: var(--fs-xs); padding: 3px var(--sp-3); }
+
+/* 变体：底色用 color-mix 从基色令牌算 —— 不另写 rgba（规范 §1） */
+.ui-tag--brand   { color: var(--brand-600);
+                   background: color-mix(in srgb, var(--brand-600) 14%, transparent); }
+.ui-tag--success { color: var(--success);
+                   background: color-mix(in srgb, var(--success) 16%, transparent); }
+.ui-tag--warning { color: var(--warning);
+                   background: color-mix(in srgb, var(--warning) 18%, transparent); }
+.ui-tag--danger  { color: var(--danger);
+                   background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.ui-tag--info    { color: var(--info);
+                   background: color-mix(in srgb, var(--info) 14%, transparent); }
+
+.ui-tag__dot {
+  width: 6px; height: 6px; border-radius: var(--radius-full);
+  background: currentColor; flex-shrink: 0;
+}
+
+/* ============================================================ PageHeader */
+.ui-page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--sp-6); flex-wrap: wrap;
+  padding: var(--sp-1) var(--sp-1) var(--sp-4);
+}
+.ui-page-header__title {
+  margin: 0 0 var(--sp-1); font-size: var(--fs-2xl); line-height: var(--lh-2xl);
+  font-weight: 700; letter-spacing: -0.3px;
+}
+.ui-page-header__sub {
+  margin: 0; color: var(--text-muted); font-size: var(--fs-sm);
+}
+.ui-page-header__actions { display: flex; align-items: center; gap: var(--sp-4); }
+
+/* ============================================================ Empty */
+.ui-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+  color: var(--text-subtle);
+}
+.ui-empty__icon { color: var(--text-subtle); opacity: .8; }
+.ui-empty__title { color: var(--text); font-size: var(--fs-md); font-weight: 500; }
+.ui-empty__desc { font-size: var(--fs-sm); max-width: 42ch; }
+.ui-empty__action { margin-top: var(--sp-2); }

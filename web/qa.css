@@ -1,0 +1,192 @@
+/* ============================================================ 关键词回复页
+   ★★ 2026-10-14 重写。
+   为什么整份重写而不是局部改：
+     原来这份 CSS 的【颜色全部是深色模式的硬编码值】——
+       .qa-keyword color:#69b1ff   （深色专用亮蓝）
+       .qa-ref     color:#d3adf7   （深色专用亮紫）
+       .qa-badge   color:var(--status-ticketed)   （亮青）
+       var(--text, #e6e6e6)        （兜底是深色模式的浅色文字）
+     而我们的主题是【浅色底】（#f4f6fb）。亮蓝/亮紫铺在浅底上几乎看不清，
+     店主截图里那一片"淡得看不见的字"就是它。
+     逐行 replace 又对不上（原文件是多行展开写的），所以整份重写：
+     颜色统一走主题变量，不再写死任何一端的色板。
+
+   ★ 另一处实质问题：
+     .qa-content 原来有 max-height:96px + overflow:hidden
+     ⇒ 长回复被【静默截断】，用户看不到全文也不知道被截了。
+     现在改成"默认收起 5 行 + 点一下展开"，收起的边界看得见。
+   ============================================================ */
+
+.qa-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+
+.qa-table th {
+  text-align: left;
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+  white-space: nowrap;
+  /* ★ 分隔线用中性黑而不是玻璃内边 —— 玻璃内边是给深色准备的，
+     在浅底上等于没有线。 */
+  border-bottom: 1px solid var(--line);
+}
+
+.qa-table td {
+  padding: 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.qa-table tr:last-child td { border-bottom: none; }
+.qa-table tr:hover td { background: var(--glass-veil-2); }
+.qa-table td:last-child { white-space: nowrap; }
+.qa-delete { margin-left: 6px; }
+
+/* 触发关键字：加粗 + 主题色 */
+.qa-keyword {
+  font-weight: 600;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+/* 回复内容：默认收起 5 行，可展开看全 */
+.qa-content {
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  position: relative;
+}
+.qa-content.open { display: block; -webkit-line-clamp: unset; }
+
+/* 展开/收起按钮：只在真的超行时才由 JS 加上 */
+.qa-more {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 10px;
+  font-size: var(--fs-2xs);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.qa-more:hover { background: var(--accent-soft); }
+
+/* 全局标识 ID：等宽字体，方便一眼分辨 */
+.qa-id {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+/* 回复里引用的 [全局标识] */
+.qa-ref { color: var(--accent); cursor: help; }
+
+/* 触发类型徽章：浅底上要能看清（原来是深色专用的亮青） */
+.qa-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--status-ticketed) 22%, transparent);
+  color: var(--info);              /* 深青：白底上对比度够，又不刺眼 */
+}
+.qa-badge.once { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--warning); }
+
+/* 空态 */
+.qa-empty { text-align: center; padding: 36px 0; color: var(--text-faint); }
+
+/* ---------------------------------------------- 编辑弹窗里的表单 */
+.qf-item { margin-bottom: 16px; }
+.qf-item > label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.qf-item textarea { resize: vertical; line-height: 1.6; }
+.qf-item select:focus { outline: none; border-color: var(--accent); }
+
+.qf-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line-faint);
+}
+.modal-foot .spacer { flex: 1; }
+
+@media (max-width: 900px) {
+  .qf-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 深色模式：把上面那几个"浅底可读"的颜色换回深底可读的 */
+@media (prefers-color-scheme: dark) {
+  .qa-table th { border-bottom-color: var(--glass-veil); }
+  .qa-table td { border-bottom-color: var(--glass-veil); }
+  .qa-table tr:hover td { background: var(--glass-veil); }
+  .qa-badge { background: var(--info-soft); color: var(--status-ticketed); }
+  .qa-badge.once { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--warning); }
+  .modal-foot { border-top-color: var(--glass-veil-4); }
+  .qa-more { background: var(--accent-soft-2); }
+}
+
+
+/* ==================================================================== 弹窗表单
+   ★★ 2026-10-14 修（店主：「回复内容和下方四个下拉框的 UI 优化一下」）
+
+   根因：这些控件【从来没有人给它们设过宽度】。
+   实测 qf-keyword 宽 173px、qf-content 168px，而弹窗有 780px ——
+   173px 就是 <input> 的浏览器默认宽度（size=20 × 字符宽）。
+   父容器 .qf-item 是 block、宽 734px，控件本该撑满却没撑。
+   ★ 这类"看起来没设计过"的界面，根因常常是【从来没写过宽度】，
+     而不是"宽度写错了"。 */
+
+.modal-body .qf-item > input,
+.modal-body .qf-item > textarea,
+.modal-body .qf-item > select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ★ 2026-10-14：这里原来单独给 .qf-item > textarea 写了
+   min-height/line-height/font-family。
+   现在【搬到 style.css 的"弹窗共用件"】，和「回复文案」的输入框共用一条规则 ——
+   避免"改一处另一处不跟"。 */
+
+/* ★ 2026-10-14 顺手删掉一条没用的旧规则：
+   `.qf-item textarea { resize: vertical; line-height: 1.6; }` ——
+   它被上面那条覆盖，而且 line-height 现在统一在共用规则里。 */
+
+/* 计数贴在右下角，不占一整行 */
+.qf-item > .count { display: block; text-align: right; }
+
+/* 四个下拉框：撑满之后 4 列才整齐。
+   ★ 原来 select 只有 98px 而每格 174.5px ⇒ 左边一个小下拉、右边一大片空。 */
+.qf-row { align-items: end; margin-bottom: 16px; }
+/* ★ .qf-row 自己留外边距（跟别的 .qf-item 一致），
+   行内各格不要再各留一份 —— 否则双份间距。
+   ★ 我第一版只写了"行内 margin 0"，忘了给 .qf-row 留，
+     结果下拉框和下面「展开后实际发送的内容」贴在一起（截图才看出来）。 */
+.qf-row .qf-item { margin-bottom: 0; }
+.qf-row .qf-item > select { min-width: 0; }
+
+/* 窄屏改 2 列（4 列时 select 会被挤得看不出选了什么） */
+@media (max-width: 620px) {
+  .qf-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 弹窗再宽一点：780px 里放两列文字 + 4 个下拉有点挤 */
+.modal-panel { width: min(860px, 92vw); }

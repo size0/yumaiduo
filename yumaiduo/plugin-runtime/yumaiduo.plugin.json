@@ -1,0 +1,46 @@
+{
+  "id": "wanda-seat-autoquote",
+  "name": "万达电影票 AI 客服",
+  "version": "0.3.0",
+  "type": "plugin",
+  "vendor": "xdl",
+  "engines": {
+    "yumaiduoCore": ">=0.1.0"
+  },
+  "entrypoint": {
+    "server": "src/server.mjs",
+    "web": "/ui",
+    "webhookPath": "/__plugin__/webhook",
+    "crossOriginUi": true
+  },
+  "runtime": {
+    "port": 4015,
+    "baseUrl": "http://127.0.0.1:4015"
+  },
+  "entitlement": {
+    "feature": "plugin.wanda-seat-autoquote",
+    "trialEligible": true
+  },
+  "permissions": [
+    "im.message.send",
+    "im.message.read",
+    "order.read",
+    "order.write.price_change",
+    "order.write.cancel",
+    "im.session.read",
+    "account.read",
+    "order.write.ship",
+    "order.rate.write",
+    "product.write.publish"
+  ],
+  "extensionPoints": {
+    "subscribes": [
+      "im.message.received",
+      "order.paid",
+      "order.shipped",
+      "order.finished",
+      "order.refund.applied"
+    ],
+    "routes": []
+  }
+}

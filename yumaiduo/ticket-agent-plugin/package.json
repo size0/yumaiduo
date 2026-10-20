@@ -1,0 +1,17 @@
+{
+  "name": "@xdl/ticket-agent-plugin",
+  "private": true,
+  "type": "module",
+  "version": "0.4.0",
+  "description": "电影票 AI 客服的鱼麦多插件（自注册 + 收事件转发给 ticket-agent 后端 + 执行命令）",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "json-bigint": "1.0.0"
+  }
+}

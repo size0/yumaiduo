@@ -1,0 +1,1045 @@
+[
+  {
+    "parameter": "recognize_quote.auto_recognize",
+    "references": [
+      "application\\buyer_assistant.py:345",
+      "application\\service.py:324"
+    ]
+  },
+  {
+    "parameter": "recognize_quote.quote_priority",
+    "references": [
+      "application\\service.py:997"
+    ]
+  },
+  {
+    "parameter": "recognize_quote.quote_priority_enabled",
+    "references": []
+  },
+  {
+    "parameter": "recognize_quote.quote_ttl_minutes",
+    "references": [
+      "domain\\conversation.py:400",
+      "domain\\conversation.py:427",
+      "server.py:217",
+      "server.py:818",
+      "templates.py:362",
+      "templates.py:77"
+    ]
+  },
+  {
+    "parameter": "recognize_quote.keyword_cinema",
+    "references": [
+      "application\\service.py:394",
+      "application\\ticket_flow.py:591"
+    ]
+  },
+  {
+    "parameter": "recognize_quote.keyword_movie",
+    "references": [
+      "application\\service.py:395",
+      "application\\ticket_flow.py:592"
+    ]
+  },
+  {
+    "parameter": "recognize_quote.keyword_show",
+    "references": [
+      "application\\service.py:396",
+      "application\\ticket_flow.py:593"
+    ]
+  },
+  {
+    "parameter": "fallback_quote.enabled",
+    "references": [
+      "application\\conversation_ai.py:123",
+      "application\\conversation_ai.py:167",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:280",
+      "application\\plugin_api.py:288",
+      "application\\service.py:446",
+      "application\\service.py:570",
+      "application\\ticket_flow.py:2236",
+      "application\\ticket_flow.py:2890",
+      "application\\ticket_flow.py:2916",
+      "application\\ticket_flow.py:2974",
+      "application\\ticket_flow.py:2994",
+      "application\\ticket_image.py:132",
+      "domain\\quote_rules.py:1464",
+      "domain\\quote_rules.py:1476",
+      "domain\\quote_rules.py:1564",
+      "domain\\quote_rules.py:259",
+      "domain\\quote_rules.py:402",
+      "integrations\\model\\client.py:186"
+    ]
+  },
+  {
+    "parameter": "fallback_quote.mode",
+    "references": [
+      "application\\service.py:1045",
+      "application\\ticket_flow.py:2851",
+      "application\\ticket_flow.py:2933"
+    ]
+  },
+  {
+    "parameter": "fallback_quote.price_capped",
+    "references": [
+      "application\\ticket_flow.py:2860"
+    ]
+  },
+  {
+    "parameter": "second_quote.enabled",
+    "references": [
+      "application\\conversation_ai.py:123",
+      "application\\conversation_ai.py:167",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:280",
+      "application\\plugin_api.py:288",
+      "application\\service.py:446",
+      "application\\service.py:570",
+      "application\\ticket_flow.py:2236",
+      "application\\ticket_flow.py:2890",
+      "application\\ticket_flow.py:2916",
+      "application\\ticket_flow.py:2974",
+      "application\\ticket_flow.py:2994",
+      "application\\ticket_image.py:132",
+      "domain\\quote_rules.py:1464",
+      "domain\\quote_rules.py:1476",
+      "domain\\quote_rules.py:1564",
+      "domain\\quote_rules.py:259",
+      "domain\\quote_rules.py:402",
+      "integrations\\model\\client.py:186"
+    ]
+  },
+  {
+    "parameter": "second_quote.wait_seconds",
+    "references": [
+      "application\\ticket_flow.py:2976"
+    ]
+  },
+  {
+    "parameter": "second_quote.discount_percent",
+    "references": [
+      "application\\ticket_flow.py:1417",
+      "application\\ticket_flow.py:1436",
+      "templates.py:145",
+      "templates.py:72",
+      "templates.py:73"
+    ]
+  },
+  {
+    "parameter": "showtime_limit.remaining_minutes",
+    "references": [
+      "application\\ticket_flow.py:832",
+      "templates.py:83"
+    ]
+  },
+  {
+    "parameter": "showtime_limit.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "night_recognize.start",
+    "references": [
+      "application\\record_view.py:84",
+      "application\\ticket_flow.py:3081"
+    ]
+  },
+  {
+    "parameter": "night_recognize.end",
+    "references": [
+      "application\\record_view.py:84",
+      "application\\ticket_flow.py:3082"
+    ]
+  },
+  {
+    "parameter": "night_recognize.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "urge_order.delay_minutes",
+    "references": [
+      "application\\reminders.py:145",
+      "application\\reminders.py:168",
+      "application\\reminders.py:186"
+    ]
+  },
+  {
+    "parameter": "urge_order.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "fish_reprice.auto_reprice",
+    "references": [
+      "application\\plugin_runtime.py:435",
+      "application\\plugin_runtime.py:583",
+      "application\\purchase_actions.py:69"
+    ]
+  },
+  {
+    "parameter": "fish_reprice.need_user_confirm",
+    "references": []
+  },
+  {
+    "parameter": "fish_reprice.unique_command",
+    "references": []
+  },
+  {
+    "parameter": "fish_reprice.confirm_keyword",
+    "references": [
+      "application\\service.py:774",
+      "server.py:218",
+      "server.py:819",
+      "templates.py:76"
+    ]
+  },
+  {
+    "parameter": "fish_reprice.confirm_aliases",
+    "references": [
+      "application\\service.py:774"
+    ]
+  },
+  {
+    "parameter": "amount_check.verify_amount",
+    "references": [
+      "application\\ledger.py:406"
+    ]
+  },
+  {
+    "parameter": "amount_check.offshelf_reply",
+    "references": []
+  },
+  {
+    "parameter": "ticket_release.mode",
+    "references": [
+      "application\\service.py:1045",
+      "application\\ticket_flow.py:2851",
+      "application\\ticket_flow.py:2933"
+    ]
+  },
+  {
+    "parameter": "ticket_release.allow_seat_change",
+    "references": [
+      "application\\ticket_flow.py:2957"
+    ]
+  },
+  {
+    "parameter": "ticket_release.speed_flash",
+    "references": []
+  },
+  {
+    "parameter": "ticket_release.speed_fast",
+    "references": []
+  },
+  {
+    "parameter": "ticket_release.speed_slow",
+    "references": []
+  },
+  {
+    "parameter": "ticket_premium.enabled",
+    "references": [
+      "application\\conversation_ai.py:123",
+      "application\\conversation_ai.py:167",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:280",
+      "application\\plugin_api.py:288",
+      "application\\service.py:446",
+      "application\\service.py:570",
+      "application\\ticket_flow.py:2236",
+      "application\\ticket_flow.py:2890",
+      "application\\ticket_flow.py:2916",
+      "application\\ticket_flow.py:2974",
+      "application\\ticket_flow.py:2994",
+      "application\\ticket_image.py:132",
+      "domain\\quote_rules.py:1464",
+      "domain\\quote_rules.py:1476",
+      "domain\\quote_rules.py:1564",
+      "domain\\quote_rules.py:259",
+      "domain\\quote_rules.py:402",
+      "integrations\\model\\client.py:186"
+    ]
+  },
+  {
+    "parameter": "ticket_premium.cap_yuan",
+    "references": [
+      "application\\ticket_flow.py:2892"
+    ]
+  },
+  {
+    "parameter": "reorder.max_retries",
+    "references": []
+  },
+  {
+    "parameter": "reorder.add_limit_percent",
+    "references": []
+  },
+  {
+    "parameter": "order_intercept.keyword",
+    "references": [
+      "application\\conversation_ai.py:275",
+      "application\\service.py:1230",
+      "application\\service.py:635",
+      "application\\service.py:831",
+      "application\\service.py:846",
+      "application\\tools.py:196",
+      "application\\tools.py:89",
+      "application\\tools.py:92",
+      "chat.py:312",
+      "chatex.py:191",
+      "integrations\\liangpiao\\api.py:562",
+      "integrations\\liangpiao\\api.py:579",
+      "integrations\\liangpiao\\api.py:603",
+      "integrations\\liangpiao\\api.py:621",
+      "qa.py:218",
+      "qa.py:236",
+      "qa.py:279",
+      "qa.py:327",
+      "qa.py:334",
+      "qa.py:358",
+      "server.py:284",
+      "server.py:288"
+    ]
+  },
+  {
+    "parameter": "order_intercept.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "order_auto_intercept.enabled",
+    "references": [
+      "application\\conversation_ai.py:123",
+      "application\\conversation_ai.py:167",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:280",
+      "application\\plugin_api.py:288",
+      "application\\service.py:446",
+      "application\\service.py:570",
+      "application\\ticket_flow.py:2236",
+      "application\\ticket_flow.py:2890",
+      "application\\ticket_flow.py:2916",
+      "application\\ticket_flow.py:2974",
+      "application\\ticket_flow.py:2994",
+      "application\\ticket_image.py:132",
+      "domain\\quote_rules.py:1464",
+      "domain\\quote_rules.py:1476",
+      "domain\\quote_rules.py:1564",
+      "domain\\quote_rules.py:259",
+      "domain\\quote_rules.py:402",
+      "integrations\\model\\client.py:186"
+    ]
+  },
+  {
+    "parameter": "order_auto_intercept.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "order_ship.auto_ship",
+    "references": [
+      "application\\plugin_runtime.py:1089"
+    ]
+  },
+  {
+    "parameter": "order_ship.force_ship",
+    "references": [
+      "application\\ticket_flow.py:2611"
+    ]
+  },
+  {
+    "parameter": "order_ship.force_ship_reply",
+    "references": [
+      "application\\ticket_flow.py:2612"
+    ]
+  },
+  {
+    "parameter": "order_refund.auto_refund_on",
+    "references": [
+      "application\\ticket_flow.py:2447"
+    ]
+  },
+  {
+    "parameter": "order_refund.weekdays",
+    "references": [
+      "application\\refund_schedule.py:72",
+      "application\\refund_schedule.py:95"
+    ]
+  },
+  {
+    "parameter": "order_refund.time_start",
+    "references": [
+      "application\\refund_schedule.py:73",
+      "application\\refund_schedule.py:96",
+      "domain\\quote_rules.py:263"
+    ]
+  },
+  {
+    "parameter": "order_refund.time_end",
+    "references": [
+      "application\\refund_schedule.py:74",
+      "domain\\quote_rules.py:263"
+    ]
+  },
+  {
+    "parameter": "order_refund.delay_seconds",
+    "references": [
+      "application\\service.py:746"
+    ]
+  },
+  {
+    "parameter": "order_refund.return_info",
+    "references": []
+  },
+  {
+    "parameter": "ticket_image.enabled",
+    "references": [
+      "application\\conversation_ai.py:123",
+      "application\\conversation_ai.py:167",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:280",
+      "application\\plugin_api.py:288",
+      "application\\service.py:446",
+      "application\\service.py:570",
+      "application\\ticket_flow.py:2236",
+      "application\\ticket_flow.py:2890",
+      "application\\ticket_flow.py:2916",
+      "application\\ticket_flow.py:2974",
+      "application\\ticket_flow.py:2994",
+      "application\\ticket_image.py:132",
+      "domain\\quote_rules.py:1464",
+      "domain\\quote_rules.py:1476",
+      "domain\\quote_rules.py:1564",
+      "domain\\quote_rules.py:259",
+      "domain\\quote_rules.py:402",
+      "integrations\\model\\client.py:186"
+    ]
+  },
+  {
+    "parameter": "ticket_image.template",
+    "references": [
+      "application\\buyer_assistant.py:281",
+      "server.py:793",
+      "server.py:794"
+    ]
+  },
+  {
+    "parameter": "get_ticket_code.keyword",
+    "references": [
+      "application\\conversation_ai.py:275",
+      "application\\service.py:1230",
+      "application\\service.py:635",
+      "application\\service.py:831",
+      "application\\service.py:846",
+      "application\\tools.py:196",
+      "application\\tools.py:89",
+      "application\\tools.py:92",
+      "chat.py:312",
+      "chatex.py:191",
+      "integrations\\liangpiao\\api.py:562",
+      "integrations\\liangpiao\\api.py:579",
+      "integrations\\liangpiao\\api.py:603",
+      "integrations\\liangpiao\\api.py:621",
+      "qa.py:218",
+      "qa.py:236",
+      "qa.py:279",
+      "qa.py:327",
+      "qa.py:334",
+      "qa.py:358",
+      "server.py:284",
+      "server.py:288"
+    ]
+  },
+  {
+    "parameter": "get_ticket_code.no_ticket_reply",
+    "references": [
+      "application\\service.py:427"
+    ]
+  },
+  {
+    "parameter": "movie_remind.advance_minutes",
+    "references": [
+      "application\\reminders.py:120"
+    ]
+  },
+  {
+    "parameter": "movie_remind.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "urge_receive.delay_minutes",
+    "references": [
+      "application\\reminders.py:145",
+      "application\\reminders.py:168",
+      "application\\reminders.py:186"
+    ]
+  },
+  {
+    "parameter": "urge_receive.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "urge_review.delay_minutes",
+    "references": [
+      "application\\reminders.py:145",
+      "application\\reminders.py:168",
+      "application\\reminders.py:186"
+    ]
+  },
+  {
+    "parameter": "urge_review.message",
+    "references": [
+      "application\\agent.py:1080",
+      "application\\ledger.py:506",
+      "application\\ledger.py:515",
+      "application\\plugin_runtime.py:166",
+      "application\\reminders.py:129",
+      "application\\reminders.py:155",
+      "application\\reminders.py:175",
+      "application\\reminders.py:193",
+      "application\\ticket_flow.py:1470",
+      "application\\ticket_flow.py:2237",
+      "application\\ticket_flow.py:3083",
+      "application\\wanda_delivery.py:87",
+      "chat.py:84",
+      "chat.py:97",
+      "integrations\\liangpiao\\callbacks.py:326",
+      "integrations\\liangpiao\\callbacks.py:332",
+      "integrations\\liangpiao\\client.py:253",
+      "integrations\\liangpiao\\client.py:260",
+      "integrations\\liangpiao\\client.py:298",
+      "integrations\\liangpiao\\client.py:62",
+      "integrations\\model\\client.py:257",
+      "integrations\\model\\client.py:263",
+      "integrations\\model\\client.py:278",
+      "integrations\\model\\client.py:279",
+      "server.py:1244",
+      "server.py:1253",
+      "server.py:1279",
+      "server.py:1302",
+      "server.py:1318",
+      "server.py:467",
+      "server.py:557"
+    ]
+  },
+  {
+    "parameter": "blacklist.reply",
+    "references": [
+      "application\\agent.py:1085",
+      "application\\agent.py:368",
+      "application\\agent.py:369",
+      "application\\agent.py:763",
+      "application\\agent.py:768",
+      "application\\conversation_ai.py:272",
+      "application\\conversation_ai.py:273",
+      "application\\plugin_runtime.py:595",
+      "application\\plugin_runtime.py:602",
+      "application\\service.py:1223",
+      "application\\service.py:397",
+      "application\\service.py:451",
+      "application\\service.py:452",
+      "application\\service.py:631",
+      "application\\service.py:633",
+      "application\\service.py:694",
+      "application\\service.py:805",
+      "application\\service.py:953",
+      "domain\\conversation.py:213",
+      "domain\\conversation.py:217",
+      "domain\\conversation.py:222",
+      "domain\\conversation.py:227",
+      "domain\\conversation.py:232",
+      "domain\\conversation.py:237",
+      "domain\\conversation.py:241",
+      "domain\\conversation.py:246",
+      "domain\\conversation.py:441"
+    ]
+  },
+  {
+    "parameter": "reply.greeting_configured",
+    "references": [
+      "application\\service.py:954"
+    ]
+  },
+  {
+    "parameter": "reply.greeting_message_types",
+    "references": [
+      "application\\service.py:956"
+    ]
+  },
+  {
+    "parameter": "reply.greeting_interval_hours",
+    "references": [
+      "application\\service.py:963"
+    ]
+  },
+  {
+    "parameter": "reply.intelligent_qa_enabled",
+    "references": [
+      "application\\conversation_ai.py:272",
+      "application\\service.py:451",
+      "application\\service.py:631",
+      "application\\service.py:633"
+    ]
+  },
+  {
+    "parameter": "message_delay.enabled",
+    "references": [
+      "application\\conversation_ai.py:123",
+      "application\\conversation_ai.py:167",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:280",
+      "application\\plugin_api.py:288",
+      "application\\service.py:446",
+      "application\\service.py:570",
+      "application\\ticket_flow.py:2236",
+      "application\\ticket_flow.py:2890",
+      "application\\ticket_flow.py:2916",
+      "application\\ticket_flow.py:2974",
+      "application\\ticket_flow.py:2994",
+      "application\\ticket_image.py:132",
+      "domain\\quote_rules.py:1464",
+      "domain\\quote_rules.py:1476",
+      "domain\\quote_rules.py:1564",
+      "domain\\quote_rules.py:259",
+      "domain\\quote_rules.py:402",
+      "integrations\\model\\client.py:186"
+    ]
+  },
+  {
+    "parameter": "message_delay.min_ms",
+    "references": [
+      "application\\plugin_api.py:290"
+    ]
+  },
+  {
+    "parameter": "message_delay.max_ms",
+    "references": []
+  },
+  {
+    "parameter": "manual.close_after_hours",
+    "references": [
+      "application\\manual_control.py:56"
+    ]
+  },
+  {
+    "parameter": "manual.close_on_status",
+    "references": [
+      "application\\manual_control.py:44"
+    ]
+  },
+  {
+    "parameter": "call_manual.keyword",
+    "references": [
+      "application\\conversation_ai.py:275",
+      "application\\service.py:1230",
+      "application\\service.py:635",
+      "application\\service.py:831",
+      "application\\service.py:846",
+      "application\\tools.py:196",
+      "application\\tools.py:89",
+      "application\\tools.py:92",
+      "chat.py:312",
+      "chatex.py:191",
+      "integrations\\liangpiao\\api.py:562",
+      "integrations\\liangpiao\\api.py:579",
+      "integrations\\liangpiao\\api.py:603",
+      "integrations\\liangpiao\\api.py:621",
+      "qa.py:218",
+      "qa.py:236",
+      "qa.py:279",
+      "qa.py:327",
+      "qa.py:334",
+      "qa.py:358",
+      "server.py:284",
+      "server.py:288"
+    ]
+  },
+  {
+    "parameter": "call_manual.reply",
+    "references": [
+      "application\\agent.py:1085",
+      "application\\agent.py:368",
+      "application\\agent.py:369",
+      "application\\agent.py:763",
+      "application\\agent.py:768",
+      "application\\conversation_ai.py:272",
+      "application\\conversation_ai.py:273",
+      "application\\plugin_runtime.py:595",
+      "application\\plugin_runtime.py:602",
+      "application\\service.py:1223",
+      "application\\service.py:397",
+      "application\\service.py:451",
+      "application\\service.py:452",
+      "application\\service.py:631",
+      "application\\service.py:633",
+      "application\\service.py:694",
+      "application\\service.py:805",
+      "application\\service.py:953",
+      "domain\\conversation.py:213",
+      "domain\\conversation.py:217",
+      "domain\\conversation.py:222",
+      "domain\\conversation.py:227",
+      "domain\\conversation.py:232",
+      "domain\\conversation.py:237",
+      "domain\\conversation.py:241",
+      "domain\\conversation.py:246",
+      "domain\\conversation.py:441"
+    ]
+  },
+  {
+    "parameter": "assistant.agent_enabled",
+    "references": [
+      "application\\assistant_scope.py:29",
+      "application\\conversation_ai.py:279",
+      "application\\conversation_ai.py:281",
+      "application\\service.py:446",
+      "server.py:171"
+    ]
+  },
+  {
+    "parameter": "assistant.business_scope_options",
+    "references": [
+      "server.py:173"
+    ]
+  },
+  {
+    "parameter": "assistant.business_scope",
+    "references": [
+      "server.py:172"
+    ]
+  },
+  {
+    "parameter": "assistant.takeover_seconds",
+    "references": [
+      "server.py:174"
+    ]
+  },
+  {
+    "parameter": "assistant.human_pause_seconds",
+    "references": [
+      "server.py:175"
+    ]
+  },
+  {
+    "parameter": "assistant.memory_hours",
+    "references": [
+      "server.py:176"
+    ]
+  },
+  {
+    "parameter": "assistant.memory_messages",
+    "references": [
+      "application\\service.py:700",
+      "server.py:177"
+    ]
+  },
+  {
+    "parameter": "assistant.model_options",
+    "references": [
+      "server.py:179"
+    ]
+  },
+  {
+    "parameter": "assistant.model_name",
+    "references": [
+      "application\\conversation_ai.py:454",
+      "application\\model_config.py:29",
+      "application\\model_config.py:38",
+      "application\\model_config.py:43",
+      "application\\service.py:1068",
+      "server.py:178"
+    ]
+  },
+  {
+    "parameter": "assistant.model_labels",
+    "references": [
+      "server.py:183"
+    ]
+  },
+  {
+    "parameter": "assistant.api_key_tail",
+    "references": [
+      "application\\model_config.py:11"
+    ]
+  },
+  {
+    "parameter": "assistant.style_presets",
+    "references": [
+      "server.py:197"
+    ]
+  },
+  {
+    "parameter": "assistant.persona",
+    "references": [
+      "application\\conversation_ai.py:389",
+      "prompts\\persona.py:115",
+      "prompts\\persona.py:87",
+      "server.py:185"
+    ]
+  },
+  {
+    "parameter": "assistant.precautions",
+    "references": [
+      "application\\conversation_ai.py:390",
+      "prompts\\persona.py:115",
+      "prompts\\persona.py:88",
+      "server.py:186"
+    ]
+  },
+  {
+    "parameter": "assistant.reply_style",
+    "references": [
+      "application\\conversation_ai.py:391",
+      "prompts\\persona.py:115",
+      "prompts\\persona.py:89",
+      "server.py:187"
+    ]
+  },
+  {
+    "parameter": "assistant.experience",
+    "references": [
+      "application\\conversation_ai.py:403",
+      "server.py:192"
+    ]
+  },
+  {
+    "parameter": "assistant.stage_filter_enabled",
+    "references": [
+      "application\\assistant_scope.py:30",
+      "server.py:199"
+    ]
+  },
+  {
+    "parameter": "assistant.stage_labels",
+    "references": [
+      "server.py:200"
+    ]
+  },
+  {
+    "parameter": "assistant.allowed_stages",
+    "references": [
+      "application\\assistant_scope.py:31",
+      "server.py:202"
+    ]
+  }
+]

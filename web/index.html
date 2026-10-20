@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>票务运营工作台 · AI助理</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="theme-picker" id="theme-picker"></div>
+
+
+<!-- 底层光斑：玻璃必须"背后有东西"才看得出来。
+     前两个由 CSS 的 body::before/::after 生成，这一个是真元素。
+     它们配合毛玻璃背景，就是 iOS 液态玻璃的观感来源。 -->
+<div class="orb" aria-hidden="true"></div>
+
+<div class="app-shell">
+<aside class="ticket-sidebar" aria-label="主导航">
+  <div class="ticket-sidebar-brand">
+    <div class="brand-icon" role="img" aria-label="电影票务"><svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 1 1-1Z"/><path d="M8 5v2m0 3v4m0 3v2"/><path d="m12 9 5 3-5 3Z"/></svg></div>
+  </div>
+  <nav class="ticket-sidebar-nav sidebar-scroll" aria-label="页面">
+<a class="ticket-nav-item" href="shops"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 2.5-4h15L22 7"></path><path d="M2 7h20v3a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"></path><path d="M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"></path><path d="M10 21v-5h4v5"></path></svg><span class="nav-text"><span class="nav-title">店铺管理</span><span class="nav-sub">本店授权 · 平台状态</span></span></a>
+<a class="ticket-nav-item active" href="assistant" data-tab="assistant" aria-current="page"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg><span class="nav-text"><span class="nav-title">AI助理</span><span class="nav-sub">接管时机 · 人设 · 记忆</span></span></a>
+<a class="ticket-nav-item" href="replies" data-tab="replies"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="nav-text"><span class="nav-title">回复文案</span><span class="nav-sub">按阶段管理话术</span></span></a>
+<a class="ticket-nav-item" href="qa"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><span class="nav-text"><span class="nav-title">关键词回复</span><span class="nav-sub">逐字可控的话术</span></span></a>
+<a class="ticket-nav-item" href="rules"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg><span class="nav-text"><span class="nav-title">报价规则</span><span class="nav-sub">卖多少钱 · 分工规则</span></span></a>
+<a class="ticket-nav-item" href="quotes"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M9 15h6"></path><path d="M9 11h2"></path></svg><span class="nav-text"><span class="nav-title">报价记录</span><span class="nav-sub">报过哪些价 · 毛利</span></span></a>
+<a class="ticket-nav-item" href="orders"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"></circle><circle cx="19" cy="21" r="1"></circle><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path></svg><span class="nav-text"><span class="nav-title">订单管理</span><span class="nav-sub">出票记录与追踪</span></span></a>
+<a class="ticket-nav-item" href="features"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="nav-text"><span class="nav-title">功能设置</span><span class="nav-sub">机器怎么运转</span></span></a>
+  </nav>
+  <div class="ticket-sidebar-foot">
+    <span>2026.10.14</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="dot-online"></span>在线</span>
+  </div>
+</aside>
+<div class="app-main"><main>
+
+  <!-- ============================================ AI助理 -->
+  <section id="panel-assistant" class="panel active">
+    <div class="page-header">
+      <div>
+        <h1>AI助理</h1>
+        <p class="sub">配置接管时机、聊天记忆和客服表达</p>
+      </div>
+      <div class="header-right">
+        <div class="account-pick">
+          <span class="pick-label">当前店铺：</span>
+          <select id="account"><option>代买w位置</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card span-6">
+        <div class="card-head"><i class="bar" style="background:#1677ff"></i><span>AI基础设置</span></div>
+        <div class="card-body">
+          <div class="row">
+            <span class="label">启用AI助理<i class="tip" title="关闭后不调用会话模型，但报价、改价、出票流程继续运行">i</i></span>
+            <button class="switch on" id="sw-enabled" role="switch" aria-checked="true"></button>
+          </div>
+          <div class="row">
+            <span class="label">接管业务</span>
+            <span class="checks"><label><input type="radio" name="scope" value="不限制">不限制业务</label>
+            <label><input type="radio" name="scope" value="影票代订" checked>影票代订业务</label></span>
+          </div>
+          <div class="row">
+            <span class="label">接管等待<i class="tip" title="尚未实现消息聚合，当前不生效">i</i></span>
+            <span class="inline"><input type="number" id="takeover" disabled title="尚未接入消息聚合，当前不生效" min="0" max="300" value="20"><em>秒（暂不可用）</em></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card span-6">
+        <div class="card-head"><i class="bar" style="background:#722ed1"></i><span>AI模型配置</span></div>
+        <div class="card-body model-config">
+          <div class="row">
+            <span class="label">模型接口</span>
+            <select id="model-protocol" class="wide">
+              <option value="deepseek">DeepSeek 官方接口</option>
+              <option value="openai_chat">GPT / 中转站（OpenAI 兼容）</option>
+            </select>
+          </div>
+          <div class="row" id="model-base-row" style="display:none">
+            <span class="label">接口地址</span>
+            <input type="text" id="model-base" class="wide" autocomplete="off" spellcheck="false" aria-label="模型接口地址" placeholder="https://中转站域名/v1">
+          </div>
+          <div class="row" id="custom-model-row" style="display:none">
+            <span class="label">模型 ID</span>
+            <div class="model-field">
+              <div class="model-input-actions">
+                <input type="text" id="custom-model" class="wide" list="proxy-model-list" autocomplete="off" spellcheck="false" aria-label="模型 ID" placeholder="选择模型或手动填写 ID">
+                <button type="button" class="btn" id="btn-list-models">获取模型列表</button>
+              </div>
+              <datalist id="proxy-model-list"></datalist>
+              <small class="model-field-hint">填写地址和密钥后获取列表，选择或手动填写模型后保存。</small>
+            </div>
+          </div>
+          <div class="row">
+            <span class="label">回复模型<i class="tip" title="中文名是给运营看的；括号里的英文名是发给模型服务的真实名字，不能改">i</i></span>
+            <!-- ★★ 2026-10-14 店主定的：操作台上不许出现"光秃秃的英文"。
+                 这两行只是没加载数据前的占位，app.js 会用后端给的中文名重填成
+                 「极速版（deepseek-flash）」。模型名本身是英文标识符，
+                 改不了，所以中文名在前、英文名放括号里对照。 -->
+            <select id="model" class="wide">
+              <option value="deepseek-flash">极速版（deepseek-flash）</option>
+              <option value="deepseek-v4-pro">增强版（deepseek-v4-pro）</option>
+            </select>
+          </div>
+          <div class="row">
+            <!-- ★ API Key = 接口密钥。这串英文是行业通用叫法，保留原词，
+                 但中文写在前面对照。 -->
+            <span class="label">接口密钥（API Key）<i class="tip" title="存服务端，页面只显示末尾四位">i</i></span>
+            <input type="password" id="apikey" class="wide" value="" autocomplete="new-password" placeholder="未配置，请填写模型 API Key">
+            <button class="btn" id="btn-save-key">保存接口配置</button>
+          </div>
+          <div class="row">
+            <span class="label">连通性</span>
+            <button class="btn" id="btn-test">单次连通测试</button>
+            <span class="test-result" id="test-result"></span>
+          </div>
+          <p class="hint">接口配置所有店铺共用。中转站须支持 Chat Completions 和工具调用；地址通常以 /v1 结尾。保存不调用模型，手动测试可能计费（一次请求，最多256输出token）。</p>
+        </div>
+      </div>
+
+      <div class="card span-12">
+        <div class="card-head"><i class="bar" style="background:#13c2c2"></i><span>AI人设</span>
+          <span class="card-note">这三段是发给模型的系统提示词（system prompt），改完立即生效</span></div>
+        <div class="card-body">
+          <div class="row col">
+            <span class="label block">店铺人设<i class="tip" title="模型靠它知道自己是什么店的客服">i</i></span>
+            <div class="ta-wrap"><textarea id="persona" maxlength="2000" rows="6"></textarea><span class="count" id="c-persona"></span></div>
+          </div>
+          <div class="row col">
+            <span class="label block">注意事项<i class="tip" title="店铺层的硬要求，叠加在系统底线之上">i</i></span>
+            <div class="ta-wrap"><textarea id="precautions" maxlength="2000" rows="8"></textarea><span class="count" id="c-precautions"></span></div>
+          </div>
+          <div class="row col">
+            <span class="label block">回复风格</span>
+            <div class="ta-wrap"><textarea id="reply_style" maxlength="2000" rows="4"></textarea><span class="count" id="c-reply_style"></span></div>
+          </div>
+          <div class="row col">
+            <span class="label block">本店经验<i class="tip" title="这门生意里你知道什么。★ 默认是空的 —— 我不知道你店里哪些问法最多、哪些坑踩过。作为回答问题的参考；不会自动学习，也不能覆盖订单、支付和报价的真实结果。">i</i></span>
+            <div class="ta-wrap"><textarea id="experience" maxlength="4000" rows="10" placeholder="★ 这里默认是空的，没有替你填任何内容。&#10;&#10;一条一行，用「问法 → 怎么答」的形式：&#10;    你们家能选座吗 → 不能选座，以截图上的座位为准&#10;    能开发票吗 → 转人工&#10;&#10;拿不准的就写「转人工」，别留空让模型自己发挥。"></textarea><span class="count" id="c-experience"></span></div>
+          </div>
+          <details class="prompt-box">
+            <summary>查看实际发给模型的完整系统提示词（system prompt）</summary>
+            <pre id="effective-prompt"></pre>
+          </details>
+        </div>
+      </div>
+
+      <div class="card span-6">
+        <div class="card-head"><i class="bar" style="background:#fa8c16"></i><span>记忆配置</span></div>
+        <div class="card-body">
+          <div class="row">
+            <span class="label">记忆时长<i class="tip" title="只控制聊天记录范围，不清理订单和报价">i</i></span>
+            <span class="inline"><input type="number" id="memory_hours" min="1" max="24" value="24"><em>小时</em></span>
+          </div>
+          <div class="row">
+            <span class="label">记忆深度<i class="tip" title="最多读取最近多少条双方记录">i</i></span>
+            <span class="inline"><input type="number" id="memory_messages" min="5" max="100" value="50"><em>条</em></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card span-6">
+        <div class="card-head"><i class="bar" style="background:#52c41a"></i><span>AI 回复阶段</span></div>
+        <div class="card-body">
+          <div class="row">
+            <span class="label">限制回复阶段<i class="tip" title="关闭：不限制 AI 回复阶段。停止 AI 回复请关闭上方「启用AI助理」。">i</i></span>
+            <button class="switch" id="sw-stage" role="switch" aria-checked="false"></button>
+          </div>
+          <div class="row col">
+            <span class="label block">允许回复到</span>
+            <input type="range" id="stage-slider" min="0" max="3" step="1" value="2" class="slider">
+            <div class="slider-marks"><span>咨询</span><span>拍下</span><span>付款</span><span>发货/退款</span></div>
+            <p class="hint" id="stage-hint"></p><p class="hint">仅限制 AI 文字咨询。截图报价、付款回调、出票通知按各自功能设置执行。</p>
+          </div>
+          <div class="row">
+            <span class="label">人工后等待<i class="tip" title="尚未实现人工消息辨识，当前不生效">i</i></span>
+            <span class="inline"><input type="number" id="human_pause" disabled title="尚未接入人工消息辨识，当前不生效" min="0" max="300" value="20"><em>秒（暂不可用）</em></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="push-bar" data-shop-push="assistant"><span class="push-tip">所有已启用店铺共用此配置；修改后自动保存，也可点击保存全部。</span><span id="assistant-save-status" class="assistant-save-status" role="status"></span><button class="btn primary" id="btn-save-assistant" type="button">保存全部设置</button></div>
+  </section>
+
+  <!-- ============================================ 回复文案 -->
+  <section id="panel-replies" class="panel">
+    <div class="page-header">
+      <div>
+        <h1>回复文案</h1>
+        <p class="sub">按业务阶段管理回复模板。左侧选阶段，点卡片改文案</p>
+      </div>
+      <div class="header-right">
+        <span class="pick-label">渠道</span>
+        <div class="plat-tabs">
+          <!-- ★★ 2026-10-14 店主：「回复文案只区分万达和良票，没有全局」
+               原来的三项是 全局 / 万达 / 良票，去掉了「全局」。
+               ★ 数据层仍然是两层（text 基准 + channel_text 覆盖），
+                 只是界面上不再单独给"基准"一个页签。
+                 保存逻辑见 app.js 的 saveTemplate：第一条渠道的编辑
+                 会同时写基准（这样"两条渠道一样时改一次就够"），
+                 已有渠道覆盖时只改该渠道（不静默越权改另一条）。 -->
+          <button class="plat-tab active" data-channel="wanda">万达</button>
+          <button class="plat-tab" data-channel="liangpiao">良票</button>
+        </div>
+      </div>
+    </div>
+
+    <nav class="stage-nav" id="stage-nav"></nav>
+
+    <div class="rc-layout">
+      <div class="rc-cards" id="rc-cards"></div>
+      <aside class="rc-preview">
+        <h3>买家看到的消息</h3>
+        <p class="preview-note">示例数据 · 不会发送给买家</p>
+        <div id="preview-bubbles"></div>
+      </aside>
+    </div>
+    <div class="push-bar" data-shop-push="templates"><span class="push-tip">文案在编辑框保存后立即生效。</span><span>万达、良票文案一起推送；留空不发的设置会保留。</span></div>
+  </section>
+
+  <section id="panel-placeholder" class="panel">
+    <div class="placeholder-card">
+      <h2>这个页签还没有实现</h2>
+      <p>已实现五个页面：<b>AI助理</b>（对话层怎么说话）、<b>回复文案</b>（发了什么话）、
+         <b>关键词回复</b>（逐字可控的话术）、<b>功能设置</b>（机器怎么运转）、
+         <b>报价规则</b>（卖多少钱）、<b>报价记录</b>（报过哪些价）、
+         <b>订单管理</b>（订单 / 万达出票）。</p>
+    </div>
+  </section>
+</main>
+</div><!-- /app-main -->
+</div><!-- /app-shell -->
+
+<div class="footer-text">票务运营工作台 · 学习版 · 与 V5 生产系统相互独立</div>
+
+<!-- 模板编辑弹窗 -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-panel">
+    <div class="modal-head"><h3 id="m-title"></h3><button class="btn" id="m-close">关闭</button></div>
+    <div class="modal-body">
+      <div class="m-trigger" id="m-trigger"></div>
+      <div class="m-notes" id="m-notes"></div>
+      <div class="m-field">
+        <label id="m-label">文案</label>
+        <textarea id="m-text" rows="8"></textarea>
+        <p class="hint">可以留空：保存空文案后，此步骤不发送消息。只修改当前渠道。</p>
+        <div class="m-tokens" id="m-tokens"></div>
+      </div>
+      <div class="m-field" id="m-variants" hidden>
+        <label>场景变体</label>
+        <div id="m-variant-fields"></div>
+        <p class="hint">变体由系统事实选择，例如“已标记座位”和“未标记座位”。</p>
+      </div>
+      <!-- ★★ 2026-10-14 店主：「点击修改后的预览消息删除，
+           点击文案对应的卡片 右侧即显示预览消息」
+           ⇒ 原来是"点这里按钮 → 往弹窗里塞预览"；
+             现在是"点卡片 → 右侧常驻预览栏刷新"。
+           ⇒ 删掉这个预览按钮，并把保存挪到右下角的按钮条。 -->
+
+    </div>
+    <!-- ★★ 保存放右下角（店主指定）。
+         照「关键词回复」弹窗的底部按钮条结构写，两处保持一致：
+         左侧留出说明位（.spacer 把它推右边），右侧才是动作按钮。 -->
+    <div class="modal-foot">
+      <span class="m-status" id="m-status"></span>
+      <span class="spacer"></span>
+      <!-- ★ 同上：去掉"取消"（和右上角「关闭」重复），
+           底部只留【保存】在右下角。 -->
+      <button class="btn" id="m-inherit">使用默认文案</button>
+      <button class="btn primary" id="m-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="shop-push.js"></script>
+<script src="app.js"></script>
+<script src="theme.js"></script>
+</body>
+</html>

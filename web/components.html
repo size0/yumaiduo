@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>票务运营工作台 · 组件预览</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+
+<div class="theme-picker" id="theme-picker"></div>
+
+<div class="orb" aria-hidden="true"></div>
+
+<div class="app-shell">
+<aside class="ticket-sidebar" aria-label="主导航">
+  <div class="ticket-sidebar-brand">
+    <div class="brand-icon" role="img" aria-label="电影票务"><svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 1 1-1Z"/><path d="M8 5v2m0 3v4m0 3v2"/><path d="m12 9 5 3-5 3Z"/></svg></div>
+  </div>
+  <nav class="ticket-sidebar-nav sidebar-scroll" aria-label="页面">
+<a class="ticket-nav-item" href="shops"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 2.5-4h15L22 7"></path><path d="M2 7h20v3a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"></path><path d="M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"></path><path d="M10 21v-5h4v5"></path></svg><span class="nav-text"><span class="nav-title">店铺管理</span><span class="nav-sub">本店授权 · 平台状态</span></span></a>
+<a class="ticket-nav-item" href="assistant"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg><span class="nav-text"><span class="nav-title">AI助理</span><span class="nav-sub">接管时机 · 人设 · 记忆</span></span></a>
+<a class="ticket-nav-item" href="replies"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="nav-text"><span class="nav-title">回复文案</span><span class="nav-sub">按阶段管理话术</span></span></a>
+<a class="ticket-nav-item" href="qa"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><span class="nav-text"><span class="nav-title">关键词回复</span><span class="nav-sub">逐字可控的话术</span></span></a>
+<a class="ticket-nav-item" href="rules"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg><span class="nav-text"><span class="nav-title">报价规则</span><span class="nav-sub">卖多少钱 · 分工规则</span></span></a>
+<a class="ticket-nav-item" href="quotes"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M9 15h6"></path><path d="M9 11h2"></path></svg><span class="nav-text"><span class="nav-title">报价记录</span><span class="nav-sub">报过哪些价 · 毛利</span></span></a>
+<a class="ticket-nav-item" href="orders"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"></circle><circle cx="19" cy="21" r="1"></circle><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path></svg><span class="nav-text"><span class="nav-title">订单管理</span><span class="nav-sub">出票记录与追踪</span></span></a>
+<a class="ticket-nav-item" href="features"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span class="nav-text"><span class="nav-title">功能设置</span><span class="nav-sub">机器怎么运转</span></span></a>
+  </nav>
+  <div class="ticket-sidebar-foot">
+    <span>2026.10.14</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="dot-online"></span>在线</span>
+  </div>
+</aside>
+<div class="app-main"><main>
+
+  <div class="ui-page-header">
+    <div>
+      <h1 class="ui-page-header__title">组件预览</h1>
+      <p class="ui-page-header__sub">
+        原子组件层（规范 §3 的 7 个）。<b>这一页里没有一个具体色值</b> ——
+        全部走 L3 语义令牌，所以换主题不用改组件。
+      </p>
+    </div>
+    <div class="ui-page-header__actions">
+      <label style="font-size:var(--fs-sm);color:var(--text-muted)">主题</label>
+      <select id="theme-select" class="ui-input" style="width:auto"></select>
+    </div>
+  </div>
+
+  <div id="preview"></div>
+
+</main></div><!-- /app-main -->
+</div><!-- /app-shell -->
+
+<div class="footer-text">票务运营工作台 · 学习版 · 与 V5 生产系统相互独立</div>
+
+<script src="ui.js"></script>
+<script src="theme.js"></script>
+<script>
+/* 预览页：把每个组件的每个变体排一遍。
+   ★ 规范 §8 第②步的验收就是"预览页里把每个变体排一遍，不出现色值"。
+   ★ 这一整段里也没有色值 —— 只用 UI.* 工厂和语义类名。 */
+(function () {
+  const { el, Card, Button, Input, Tag, PageHeader, Empty } = UI;
+
+  function section(title, note, kids) {
+    const card = Card({ padding: 'lg', className: 'ui-preview-card' });
+    card.appendChild(el('div', { class: 'ui-card__head' }, [
+      el('span', { text: title }),
+      note ? el('span', {
+        class: 'ui-page-header__sub',
+        style: { marginLeft: 'var(--sp-2)', fontSize: 'var(--fs-2xs)' },
+        text: note,
+      }) : null,
+    ]));
+    const body = el('div', {
+      class: 'ui-card__body',
+      style: { display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)',
+               alignItems: 'center' },
+    }, kids);
+    card.appendChild(body);
+    return card;
+  }
+
+  const box = document.getElementById('preview');
+  box.style.display = 'flex';
+  box.style.flexDirection = 'column';
+  box.style.gap = 'var(--sp-4)';
+
+  // ---- Button：variant × size ----
+  const VARIANTS = ['primary', 'secondary', 'outline', 'ghost', 'danger', 'link'];
+  const SIZES = ['xs', 'sm', 'md', 'lg'];
+  VARIANTS.forEach(v => {
+    box.appendChild(section('Button · ' + v,
+      'variant=' + v + '，四种 size', SIZES.map(s =>
+        Button({ variant: v, size: s, text: '按钮 ' + s }))));
+  });
+  box.appendChild(section('Button · loading / disabled',
+    'loading 用 CSS 转圈（不引图片）', [
+      Button({ variant: 'primary', loading: true, text: '提交中' }),
+      Button({ variant: 'secondary', disabled: true, text: '已禁用' }),
+      Button({ variant: 'primary', leftIcon: el('span', { text: '＋' }),
+               text: '带左图标' }),
+    ]));
+
+  // ---- Card ----
+  box.appendChild(section('Card · padding',
+    'sm / md / lg 三档内边距', ['sm', 'md', 'lg'].map(p =>
+      Card({ padding: p, title: 'padding=' + p, body: '内容区域' }))));
+
+  // ---- Input ----
+  box.appendChild(section('Input',
+    '默认 / 带说明 / error 态 / disabled', [
+      Input({ placeholder: '普通输入框' }),
+      Input({ placeholder: '带说明', value: '' }),
+      Input({ placeholder: '出错了', error: '这个字段必填' }),
+      Input({ placeholder: '不可编辑', disabled: true }),
+    ]));
+
+  // ---- Tag ----
+  box.appendChild(section('Tag · variant',
+    '底色用 color-mix 从基色令牌算，不另写 rgba', [
+      Tag({ text: '默认' }),
+      Tag({ variant: 'brand', text: '品牌' }),
+      Tag({ variant: 'success', text: '成功', dot: true }),
+      Tag({ variant: 'warning', text: '警告', dot: true }),
+      Tag({ variant: 'danger', text: '危险', dot: true }),
+      Tag({ variant: 'info', text: '信息', dot: true }),
+      Tag({ variant: 'brand', size: 'sm', text: '小号' }),
+    ]));
+
+  // ---- PageHeader ----
+  box.appendChild(section('PageHeader', '每页统一头部（标题 + 副标题 + 右侧动作）', [
+    el('div', { style: { width: '100%' } }, [
+      PageHeader({
+        title: '页面标题',
+        subtitle: '这是副标题，说明这一页在干什么',
+        actions: Button({ variant: 'primary', size: 'sm', text: '主要动作' }),
+      }),
+    ]),
+  ]));
+
+  // ---- Empty ----
+  box.appendChild(section('Empty', '空态统一（图标 + 标题 + 说明 + 动作）', [
+    el('div', { style: { width: '100%' } }, [
+      Empty({
+        icon: el('span', { text: '☐', style: { fontSize: 'var(--fs-2xl)' } }),
+        title: '还没有数据',
+        description: '走过一次流程之后，这里就会出现记录。',
+        action: Button({ variant: 'secondary', size: 'sm', text: '去做点什么' }),
+      }),
+    ]),
+  ]));
+
+  // ---- cn() ----
+  box.appendChild(section('cn() · 类名合并', '去重 + 过滤假值 + 后者覆盖', [
+    el('code', { class: 'ui-input', style: { width: '100%' },
+                 text: "cn('ui-btn', size && 'ui-btn--' + size, { 'ui-btn--loading': true }, 'ui-btn')" }),
+    el('code', { class: 'ui-input', style: { width: '100%' },
+                 text: '=> ' + UI.cn('ui-btn', 'ui-btn--sm',
+                                     { 'ui-btn--loading': true }, 'ui-btn') }),
+  ]));
+
+  // ---- 主题下拉（用色盘那套主题名）----
+  const sel = document.getElementById('theme-select');
+  const THEMES = [['mist', '雾蓝'], ['sky', '天青'], ['mint', '薄荷'],
+                  ['rose', '藕荷'], ['paper', '暖纸'], ['ink', '墨灰'],
+                  ['plain', '无光斑']];
+  sel.innerHTML = THEMES.map(([k, n]) =>
+    '<option value="' + k + '">' + n + '</option>').join('');
+  sel.value = document.documentElement.getAttribute('data-theme') || 'mist';
+  sel.onchange = () => {
+    document.documentElement.setAttribute('data-theme', sel.value);
+    try { localStorage.setItem('ticket-theme', sel.value); } catch (e) {}
+  };
+})();
+</script>
+</body>
+</html>

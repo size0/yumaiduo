@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>票务运营工作台 · 报价规则</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="config.css">
+<link rel="stylesheet" href="rules.css">
+</head>
+<body>
+
+<div class="theme-picker" id="theme-picker"></div>
+
+
+<div class="orb" aria-hidden="true"></div>
+
+<div class="app-shell">
+<aside class="ticket-sidebar" aria-label="主导航">
+  <div class="ticket-sidebar-brand">
+    <div class="brand-icon" role="img" aria-label="电影票务"><svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6V6a1 1 0 0 1 1-1Z"/><path d="M8 5v2m0 3v4m0 3v2"/><path d="m12 9 5 3-5 3Z"/></svg></div>
+  </div>
+  <nav class="ticket-sidebar-nav sidebar-scroll" aria-label="页面">
+<a class="ticket-nav-item" href="shops"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 2.5-4h15L22 7"></path><path d="M2 7h20v3a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"></path><path d="M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"></path><path d="M10 21v-5h4v5"></path></svg><span class="nav-text"><span class="nav-title">店铺管理</span><span class="nav-sub">本店授权 · 平台状态</span></span></a>
+<a class="ticket-nav-item" href="assistant"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg><span class="nav-text"><span class="nav-title">AI助理</span><span class="nav-sub">接管时机 · 人设 · 记忆</span></span></a>
+<a class="ticket-nav-item" href="replies"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="nav-text"><span class="nav-title">回复文案</span><span class="nav-sub">按阶段管理话术</span></span></a>
+<a class="ticket-nav-item" href="qa"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><span class="nav-text"><span class="nav-title">关键词回复</span><span class="nav-sub">逐字可控的话术</span></span></a>
+<a class="ticket-nav-item active" href="rules" aria-current="page"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg><span class="nav-text"><span class="nav-title">报价规则</span><span class="nav-sub">卖多少钱 · 分工规则</span></span></a>
+<a class="ticket-nav-item" href="quotes"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M9 15h6"></path><path d="M9 11h2"></path></svg><span class="nav-text"><span class="nav-title">报价记录</span><span class="nav-sub">报过哪些价 · 毛利</span></span></a>
+<a class="ticket-nav-item" href="orders"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"></circle><circle cx="19" cy="21" r="1"></circle><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path></svg><span class="nav-text"><span class="nav-title">订单管理</span><span class="nav-sub">出票记录与追踪</span></span></a>
+<a class="ticket-nav-item" href="features"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="nav-text"><span class="nav-title">功能设置</span><span class="nav-sub">机器怎么运转</span></span></a>
+  </nav>
+  <div class="ticket-sidebar-foot">
+    <span>2026.10.14</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="dot-online"></span>在线</span>
+  </div>
+</aside>
+<div class="app-main"><main>
+
+  <div class="page-header">
+    <div>
+      <h1>报价规则</h1>
+      <p class="sub">规则决定这一单报给买家多少钱、走一口价还是预估价、给上游的出价上限</p>
+    </div>
+    <div class="header-right">
+      <div class="account-pick">
+        <span class="pick-label">当前店铺：</span>
+        <select id="account" disabled><option>正在读取店铺…</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert-warn" id="problems" hidden></div>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="rules-toolbar">
+        <button class="btn primary" id="btn-new">新增规则</button>
+        <button class="btn" id="btn-reload">重新加载</button>
+        <span class="rules-hint" id="rules-hint"></span>
+      </div>
+
+      <div class="rules-table-wrap">
+        <table class="rules-table" id="rules-table">
+          <colgroup>
+            <col class="c-name"><col class="c-scope"><col class="c-pricing"><col class="c-state"><col class="c-ops">
+          </colgroup>
+          <thead><tr><th>规则与路线</th><th>适用范围</th><th>报价计算</th><th>状态与限制</th><th>操作</th></tr></thead>
+          <tbody id="rules-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="push-bar rules-push-bar floating-actions">
+    <div class="rules-save-row"><div><strong>当前店铺规则</strong><p class="push-tip">请选择店铺后编辑规则。</p></div>
+      <button class="btn" id="btn-save" type="button">保存当前店铺</button>
+      <span class="save-status" id="save-status" role="status"></span></div>
+    <div class="rules-push-row"><div class="rules-push-copy"><strong>推送到其他店铺</strong><p id="push-hint">复制当前整套规则，覆盖目标店铺的原规则并立即生效。</p></div>
+      <label class="rules-target" for="push-shop"><span>目标店铺</span><select id="push-shop" disabled><option value="">请选择店铺</option></select></label>
+      <button class="btn primary" id="btn-push" type="button" disabled>推送并覆盖</button>
+      <span id="push-status" class="save-status" role="status" aria-live="polite"></span></div>
+  </div>
+</main>
+</div><!-- /app-main -->
+</div><!-- /app-shell -->
+
+<div class="footer-text">票务运营工作台 · 学习版 · 与 V5 生产系统相互独立</div>
+
+<!-- ============================================ 新增 / 编辑规则 -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-panel rules-modal">
+    <div class="modal-head">
+      <h3 id="m-title">新增规则</h3>
+      <button class="btn" id="m-close">关闭</button>
+    </div>
+    <div class="modal-body">
+      <div class="rf-grid">
+
+        <div class="rf-item">
+          <label class="rf-label required">规则名称</label>
+          <input type="text" id="f-name" class="text-input rf-wide" maxlength="50" placeholder="规则名称">
+        </div>
+
+        <div class="rf-item">
+          <label class="rf-label required">规则权重</label>
+          <input type="number" id="f-weight" class="num-input rf-wide" step="1" value="0" placeholder="规则权重">
+          <div class="rf-help">数字越大越优先，相同权重时优先使用最新添加的规则</div>
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label">报价路线</label>
+          <select id="f-channel" class="text-input rf-wide">
+            <option value="">通用规则（两条路线均可匹配）</option>
+            <option value="WANDA">万达路线</option>
+            <option value="LIANGPIAO">良票路线（排除万达路线）</option>
+          </select>
+          <div class="rf-help" id="route-help"></div>
+        </div>
+
+        <div class="rf-item">
+          <label class="rf-label">包含影厅关键词</label>
+          <input type="text" id="f-halls" class="text-input rf-wide" placeholder="如 VIP，多个用逗号分隔">
+          <div class="rf-help">匹配接口返回的厅名；多个词任意一个命中即可，不区分大小写。</div>
+        </div>
+        <div class="rf-item">
+          <label class="rf-label">排除影厅关键词</label>
+          <input type="text" id="f-excluded-halls" class="text-input rf-wide" placeholder="如 VIP">
+          <div class="rf-help">普通万达规则可排除 VIP，交由专用规则报价。</div>
+        </div>
+        <div class="rf-item">
+          <label class="rf-label">售价计算</label>
+          <select id="f-calculation" class="text-input rf-wide">
+            <option value="standard">现有加减 / 分档</option>
+            <option value="original_discount">官方原价 × 折扣</option>
+          </select>
+        </div>
+        <div class="rf-item" id="f-discount-row" hidden>
+          <label class="rf-label">原价折扣（折）</label>
+          <input type="number" id="f-original-discount" class="num-input rf-wide" min="0.001" max="10" step="0.001" placeholder="如 8.9">
+        </div>
+        <div class="rf-item">
+          <label class="rf-label">固定预估成本（元 / 张，可留空）</label>
+          <input type="number" id="f-fixed-cost" class="num-input rf-wide" min="0.01" step="0.01" placeholder="留空使用接口成本">
+          <div class="rf-help">仅万达路线支持；填写后仍须核实具体座位、余座与官方原价。</div>
+        </div>
+        <div class="rf-item" id="f-floor-row" hidden>
+          <label class="rf-label">最低售价（元 / 张）</label>
+          <input type="number" id="f-minimum-price" class="num-input rf-wide" min="0" step="0.01" value="0">
+          <div class="rf-help">折扣售价不低于此金额和成本。</div>
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label">包含院线（可选限制）</label>
+          <div class="brand-actions"><button type="button" class="btn" id="brands-all">全选院线</button><button type="button" class="btn" id="brands-clear">清空选择</button><span id="brands-count" role="status"></span></div>
+          <div class="chips-box" id="f-brands"></div>
+          <div class="rf-help" id="brands-help"></div>
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label">排除影院</label>
+          <div class="chips-box" id="f-excluded"></div>
+          <input type="text" id="f-exclude-input" class="text-input" placeholder="输入影院名后回车添加">
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label required">生效时间段</label>
+          <span class="inline">
+            <input type="time" id="f-time-start" class="text-input" step="1" value="00:00:00">
+            <em>—</em>
+            <input type="time" id="f-time-end" class="text-input" step="1" value="23:59:59">
+          </span>
+          <div class="rf-help">支持跨零点，例如 23:00 - 08:00</div>
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label">报价出票模式
+            <!-- ★ 对齐 V5 弹窗：这一项后面有红色 ? 图标。
+                 为什么值得有：这个选择直接决定调良票 API 时传 FIXED 还是 LIMIT。
+                 传错了，「报价即成交价」就变成「报价只是上限」——
+                 买家看到的价可能兑现不了。这句话要能随手看到。 -->
+            <i class="tip-required" title="渠道一口价 → priceMode=FIXED（一口价）：报价即成交价，确定。
+渠道预估价 → priceMode=LIMIT（限价）：报价是上限，实际由上游竞价后确定，建议同时设「单张限价」兜底。
+场景预估价：平台标注维护中，暂不支持。
+万达专用报价：成本取【万达座位图的会员价】（area[].wPlusActivity.price）。
+  ★ 没圈座位也能报价 —— 那代表买家要会员座位，取「W+专享」区的会员价。
+  加价 / 动态折扣 / 取整方式和别的规则一样，只是把渠道标清楚。
+  ★ 下单走出票系统的订单集成接口，不走良票。">?</i>
+          </label>
+          <div class="radio-group" id="f-quote-mode"></div>
+          <div class="rf-help" id="quote-mode-help"></div>
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label">猫淘价</label>
+          <span class="inline">
+            <input type="text" id="f-price-left" class="text-input narrow" value="0" placeholder="原价左区间">
+            <em>—</em>
+            <input type="text" id="f-price-right" class="text-input narrow" value="999" placeholder="原价右区间">
+          </span>
+          <div class="rf-help">例：设置 0 - 999，判断方式为 0 ≤ 原价 &lt; 999</div>
+        </div>
+
+
+
+        <div class="rf-item">
+          <label class="rf-label">报价方式</label>
+          <select id="f-method" class="text-input rf-wide"></select>
+        </div>
+
+        <!-- ★★ 报价金额 和 分档表 是【互斥】的 —— 对齐 V5 的弹窗行为。
+             V5 里选了「动态折扣」，「报价金额」整个不显示，只留「单张限价」。
+             我原来两个同时显示：分档表已经算出价了，报价金额还在旁边，
+             既混乱又误导（用户不知道该填哪个）。 -->
+        <div class="rf-item" id="f-markup-row">
+          <label class="rf-label required">报价金额</label>
+          <span class="input-group">
+            <span class="group-addon">预估成本 <b class="plus">+</b></span>
+            <input type="text" id="f-markup" class="group-input" value="0">
+            <span class="group-suffix">元</span>
+          </span>
+          <div class="rf-help">★ 报给买家的价</div>
+        </div>
+
+        <div class="rf-item">
+          <label class="rf-label required">单张限价
+            <!-- ★ 对齐票达人：这个 tooltip 挂在「单张限价」上，写的是
+                 「折扣率=预估价格/原价」。★ 核对过我实现的口径一致：
+                 折扣率 = base × 10000 / original，estimated 时 base 就是预估成本。
+                 （票达人叫「预估价格」，我叫「预估成本」，同一个东西两种叫法。） -->
+            <i class="tip-required" title="折扣率 = 预估价格 / 原价
+
+预估价格就是截图报价里的「预估成本」。
+例：成本 34.62 元、官方原价 38.90 元 → 折扣率 = 34.62/38.90 = 88.99%
+     → 落到 85%-90% 那一档，按该档的比例加价或减价。">?</i>
+          </label>
+          <span class="input-group">
+            <span class="group-addon">预估成本 <b class="plus">+</b></span>
+            <input type="text" id="f-limit" class="group-input" value="0">
+            <span class="group-suffix">元</span>
+          </span>
+          <!-- ★ 用词纠正：这个数是【总限价】。
+               良票-接入规格.md:232「maxPrice | 总限价（分，数字）」，
+               而代码算的是 (成本单张 + M) × 座位数 —— 本来就是总价。
+               标签原来写「单张限价」会让人以为要填单张的价。 -->
+          <div class="rf-help">★ 给上游的<b>总</b>限价（成本+M 再×座位数），必须 ≥ 报价总额</div>
+        </div>
+
+        <!-- ================================================== 分档报价 -->
+        <!-- ★★ 这张表对应 V5 弹窗里的「动态报价加法」。
+             报价方式选「动态折扣」时才显示；选「加法」时整块隐藏 ——
+             和 V5 一致。原来一直显示，会让人以为两个都要填。 -->
+        <!-- ★ rf-span2：分档表【必须跨两列】。
+             它是 5 列的表格，挤在单栏（约 300px）里会：① 「报价调整类型」
+             被压到旁边跟它重叠；② 比例列的 % 和 ± 按钮叠在一起。
+             这是栅格布局的常识 —— 表格这类宽内容不能塞进单栏。 -->
+        <div class="rf-item rf-span2 rf-tier-block" id="f-tier-block" hidden>
+          <label class="rf-label">动态报价加法（分档）</label>
+          <!-- ★★ 「折扣率按」这个下拉【藏起来】—— 票达人和 V5 的弹窗里都没有它。
+               票达人那张表只有四列：折扣率大于等于 / 折扣率小于 / 比例 / 操作，
+               折扣率的算法是固定的（预估成本 ÷ 官方原价）。
+               ★ 元素保留在 DOM 里、默认 estimated，因为代码还要读它的值
+                 （以后接万达会员价那种 fixed_per_ticket 才用得上）。
+                 藏 ≠ 删，删了 JS 会取到空值。 -->
+          <div class="tier-basis-row" hidden>
+            <select id="f-basis" class="text-input"></select>
+          </div>
+          <table class="tier-table">
+            <thead>
+              <tr>
+                <th>折扣率大于等于</th>
+                <th>折扣率小于</th>
+                <th id="f-tier-col3">比例</th>
+                <th>+ / −</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="f-tiers"></tbody>
+          </table>
+          <div class="tier-actions">
+            <button type="button" class="btn-ghost" id="f-tier-add">添加一档</button>
+            <span class="tier-help" id="f-tier-help"></span>
+          </div>
+        </div>
+
+        <div class="rf-item">
+          <label class="rf-label">报价调整类型</label>
+          <select id="f-adjust" class="text-input rf-wide"></select>
+        </div>
+
+        <div class="rf-item">
+          <label class="rf-label">是否限价</label>
+          <div class="radio-group" id="f-capped"></div>
+        </div>
+
+        <div class="rf-item rf-span2">
+          <label class="rf-label">启用状态</label>
+          <button class="switch" id="f-enabled" type="button" role="switch"></button>
+        </div>
+      </div>
+
+      <div class="rule-preview" id="rule-preview"></div>
+
+      <div class="m-actions">
+        <button class="btn primary" id="m-save">保存并生效</button>
+        <button class="btn" id="m-cancel">取 消</button>
+        <span class="m-status" id="m-status"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="shop-push.js"></script>
+<script src="rules.js"></script>
+
+<script src="theme.js"></script>
+</body>
+</html>

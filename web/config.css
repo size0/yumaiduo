@@ -1,0 +1,521 @@
+/* ============================================================
+   config.css —— 功能设置页的布局
+
+   复用 style.css 的液态玻璃变量与控件（.switch / .checks / .card / .btn）。
+   这里只加"左侧分类导航 + 右侧配置网格"这套骨架，
+   以及两种 style.css 里没有的小控件（数字范围、标签选择）。
+
+   三条铁律照旧：
+     1. 玻璃下面有光斑
+     2. 不嵌套玻璃（卡片内的小块用 .glass-inset 或实底）
+     3. 长文本区保持可读实底
+   ============================================================ */
+
+.setting-shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 92px;   /* 给底部吸底操作条留位置 */
+}
+
+/* ---------------------------------------------- 左侧分类导航 */
+.cfg-nav {
+  position: sticky;
+  top: 76px;
+  align-self: start;
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+  padding: 14px 12px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  border-radius: var(--radius);
+}
+
+.cfg-nav::-webkit-scrollbar { width: 6px; }
+.cfg-nav::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: var(--radius-xs);
+}
+
+.nav-cat { margin-bottom: 14px; }
+.nav-cat:last-child { margin-bottom: 0; }
+
+.nav-cat-label {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--text-faint);
+  padding: 0 8px 6px;
+}
+
+.nav-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.nav-sec:hover { background: var(--glass-veil-2); color: var(--text); }
+.nav-sec.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.nav-sec-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.nav-sec-cnt {
+  flex: none;
+  min-width: 20px;
+  padding: 0 5px;
+  font-size: var(--fs-2xs);
+  line-height: 16px;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  background: var(--line-faint);
+  color: var(--text-faint);
+}
+.nav-sec.active .nav-sec-cnt { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------------------------------------------- 右侧配置区 */
+.cfg-body {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.sec-block {
+  margin: 0;
+  scroll-margin-top: 80px;
+}
+
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 18px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: var(--glass-edge);
+}
+
+.sec-title { font-size: var(--fs-lg); font-weight: 600; }
+.sec-desc { font-size: var(--fs-xs); color: var(--text-faint); }
+
+.sec-meta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  flex: none;
+}
+
+/* 配置卡片：玻璃外壳，但内部是实底 —— 避免玻璃套玻璃 */
+.sec-card {
+  padding: 4px 18px 8px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border: var(--glass-border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--glass-shadow);
+}
+
+.rowBox {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 16px 24px;
+  align-items: center;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+.rowBox:first-child { border-top: none; }
+
+/* 话术类字段：标签顶对齐，文本域占满整行更宽敞 */
+.rowBox.tall { align-items: start; }
+.rowBox.tall .label-row { padding-top: 9px; }
+
+/* 识别报价的三个候选关键字是一个配置组，按官方样式横向排列。 */
+.keyword-group { align-items: start; }
+.keyword-group > .label-row { padding-top: 9px; }
+.keyword-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+.keyword-field { min-width: 0; }
+.keyword-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.keyword-field .field { width: 100%; }
+.keyword-field .text-input { width: 100%; }
+
+@media (max-width: 760px) {
+  .keyword-fields { grid-template-columns: 1fr; }
+}
+
+.label-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.label-text { font-size: var(--fs-md); color: var(--text); }
+
+/* 悬停显示的解释 —— 对应票达人那个蓝色 "i" 图标 */
+.info {
+  flex: none;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  cursor: help;
+  font-style: normal;
+  user-select: none;
+}
+
+/* ★ justify-content: flex-start 是必须的：
+   .rowBox 的第二列在 grid 里是 1fr（很宽），默认 stretch 会把子元素拉满。
+   而 .field 自己又会被拉宽，里面的 input 跟着变长。
+   显式让内容靠左、并阻止自身被拉伸，输入框才会保持设定宽度。 */
+.field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  justify-self: start;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+
+/* 话术类字段要占满整行，单独放开 */
+.field.stretch { justify-self: stretch; }
+
+/* ---------------------------------------------- 数字输入 */
+.num-input {
+  width: 116px;
+  flex: none;              /* ★ 不加会被 flex 容器拉长 */
+  padding: 7px 10px;
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--text);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.num-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.num-input.narrow { width: 78px; }
+
+.unit { font-size: var(--fs-sm); color: var(--text-dim); }
+
+/* 数字范围：100 - 500 毫秒 */
+.range-line { display: flex; align-items: center; gap: 8px; }
+.range-sep { color: var(--text-faint); }
+
+/* ---------------------------------------------- 文本输入 */
+.text-input {
+  width: 200px;
+  max-width: 100%;
+  flex: none;              /* ★ 不加会被 flex 容器拉长 */
+  padding: 7px 10px;
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--text);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.text-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 时间输入窄一点 */
+input[type="time"].text-input { width: 128px; }
+
+/* 话术文本域：实底，保证长文可读 */
+.ta-wrap { position: relative; width: 100%; }
+.ta-wrap textarea {
+  width: 100%;
+  padding: 10px 12px 26px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  outline: none;
+}
+.ta-wrap textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 可插入的变量标签 —— 点一下就插进话术里 */
+.tokens { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.token {
+  padding: 2px 8px;
+  font-size: var(--fs-2xs);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s;
+}
+.token:hover { background: var(--accent-soft-2); }
+
+/* ---------------------------------------------- 单选 / 复选框 */
+.radio-group, .check-group { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
+.radio-group label, .check-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-md);
+  color: var(--text);
+  cursor: pointer;
+}
+.radio-group input, .check-group input { accent-color: var(--accent); }
+.radio-group label.disabled { color: var(--text-faint); cursor: not-allowed; }
+
+/* 复选框组外面加个浅底框，视觉上成组（复选框多的时候好认）
+   ★ 这里用实底而不是 var(--glass-inset) —— 那是 style.css 里的【类名】不是变量，
+     写成变量会引用失败、背景直接变透明。 */
+.check-box {
+  padding: 9px 12px;
+  background: var(--glass-veil-2);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-md);
+  width: 100%;
+}
+
+/* ---------------------------------------------- 可排序列表（优先报价模式） */
+.sortable { display: flex; flex-direction: column; gap: 5px; width: 100%; max-width: 420px; }
+
+.sortable-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 11px;
+  font-size: var(--fs-sm);
+  background: var(--glass-veil-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+}
+.sortable-item.off { opacity: .45; }
+.sortable-item.dragging { opacity: .35; }
+
+.sort-badge {
+  flex: none;
+  width: 18px; height: 18px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+.sortable-item.off .sort-badge { background: var(--text-faint); }
+.sort-grip { margin-left: auto; color: var(--text-faint); font-size: var(--fs-sm); letter-spacing: -1px; }
+
+/* ★★ 未实现的模式（2026-10-14）
+   店主确认：只有「简易报价规则」有实现，其余三个是规划过的方向。
+   显示成「虚线 + 透明底 + 未实现标签」，明确区别于「已实现但被停用」
+   （停用是实线、只是透明度低）—— 两者含义完全不同。
+   用同一种视觉会让运营分不清「我能打开它」和「它根本还没有」。 */
+.sortable-item.not-impl {
+  border-style: dashed;
+  background: transparent;
+  cursor: not-allowed;
+  opacity: .6;
+}
+.sortable-item.not-impl .sort-badge { background: var(--text-faint); }
+.not-impl-tag {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: var(--fs-2xs);
+  color: var(--text-faint);
+  border: 1px solid var(--line-faint);
+  /* ★ 圆角只能用设计规范里的档位（6/8/12/16/22/100）
+     —— 我第一版写了 999px 这种常见胶囊写法，
+        被「圆角只取档位」那条断言抓住了。规范存在的意义就在这。 */
+  border-radius: 100px;
+}
+
+/* ---------------------------------------------- 按钮式配置（弹窗入口） */
+.picker-btn { display: flex; align-items: center; gap: 10px; }
+.link-btn {
+  padding: 5px 14px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-inverse);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.link-btn:hover { filter: brightness(1.06); }
+
+/* 预览小图标（取票图模板那行的眼睛） */
+.eye { color: var(--accent); cursor: pointer; font-size: var(--fs-md); }
+
+/* ---------------------------------------------- 校验告警 */
+.alert-warn {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  padding: 9px 14px;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+}
+/* ★ display:flex 会覆盖 hidden 属性，必须显式处理，
+   否则【没有问题时也会留一条空横幅】。 */
+.alert-warn[hidden] { display: none; }
+.alert-warn b { font-weight: 600; }
+.alert-warn ul { margin: 0; padding-left: 18px; }
+
+/* ---------------------------------------------- 底部保存状态 */
+.save-status { font-size: var(--fs-sm); color: var(--text-dim); }
+.save-status.ok { color: var(--success); }
+.save-status.bad { color: var(--danger); }
+
+/* ---------------------------------------------- 顶部页签变成链接 */
+a.top-tab { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* ---------------------------------------------- 窄屏 */
+@media (max-width: 1000px) {
+  .setting-shell { grid-template-columns: 1fr; }
+  .cfg-nav {
+    position: static;
+    max-height: none;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 10px;
+  }
+  .cfg-nav .nav-cat { display: flex; gap: 6px; margin: 0; align-items: center; }
+  .cfg-nav .nav-cat-label { padding: 0 4px; white-space: nowrap; }
+  .nav-sec { white-space: nowrap; }
+  .rowBox { grid-template-columns: 1fr; gap: 8px; }
+  .rowBox.tall .label-row { padding-top: 0; }
+  .cfg-body { grid-template-columns: 1fr; }
+}
+
+/* 凭证表单（和订单管理页的 .deliver-form 同一套视觉） */
+.cred-form { margin-top: 12px; padding: 14px; border-radius: var(--radius-md);
+  background: var(--glass-veil); border: 1px solid var(--glass-veil-4); }
+.cred-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+  margin-bottom: 10px; }
+.cred-row:last-child { margin-bottom: 0; }
+.cred-item { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+.cred-item.grow { flex: 1 1 220px; }
+.cred-item label { font-size: var(--fs-xs); opacity: .75; }
+.cred-item input { width: 100%; padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-veil); background: var(--line-strong);
+  color: inherit; font: inherit; font-size: var(--fs-sm); }
+.cred-item input:focus { outline: none; border-color: var(--mark-magenta); }
+.cred-item .spacer { flex: 1; }
+
+
+/* ============================================================ 未接线标记
+   ★★ 为什么要有这个样式：设置页上有 58 个控件"能动、能存、
+      但没有任何代码读它"。不标出来就是骗人 ——
+      运营以为关掉了某个功能，其实没有。
+   ★ 颜色全部走令牌（规范 §1 禁令 1）。 */
+.unwired-badge {
+  display: inline-flex; align-items: center;
+  margin-left: var(--sp-2);
+  padding: 1px 6px;
+  font-size: var(--fs-2xs); line-height: var(--lh-2xs);
+  font-weight: 500;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  border-radius: var(--radius-full);
+  cursor: help;
+  white-space: nowrap;
+}
+.rowBox.unwired .label-text { color: var(--text-muted); }
+.rowBox.unwired { background: var(--line-faint); border-radius: var(--radius-md); }
+.unwired-note {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-2xs);
+  color: var(--text-subtle);
+  line-height: var(--lh-2xs);
+}
+.rowBox.unwired input:disabled,
+.rowBox.unwired select:disabled { opacity: .6; cursor: not-allowed; }
+
+
+/* ★★ 未接线的可排序列表（优先报价模式）：整块不可交互。
+   ★ 我第一版只写了 `.handle` —— 那是猜的选择器，实际类名是 `.sort-grip`，
+     而且拖动靠元素上的 `draggable="true"`、启停靠 click。
+     光藏把手不够：整项还能拖、还能点。
+   ⇒ 用 pointer-events 兜住交互，并把【暗示可操作】的东西藏掉
+     （拖动把手、序号徽标）。界面不做成可操作的样子，
+     比"能点但没效果"诚实。 */
+.rowBox.unwired .sortable { pointer-events: none; }
+.rowBox.unwired .sort-grip,
+.rowBox.unwired .sort-badge { display: none; }
+.rowBox.unwired .sortable-item { cursor: default; }
+
+
+/* ==================================================================== 图片上传（取票图）
+   ★ 2026-10-14 新增：取票图是店主的图，得有个地方传上来。
+   ★ 所有颜色都走令牌，不写字面值（这是本项目的硬规矩）。 */
+.img-pick {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.img-file { display: none; }
+.img-cur {
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.img-cur.dim { color: var(--text-dim); }
+.img-note {
+  display: block; margin-top: 8px;
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.img-note.ok { color: var(--success); }
+.img-note.bad { color: var(--danger); }
+
+
+/* picker 控件的当前值显示（★ 2026-10-14：picker 原来不保存，
+   现在多了一个 hidden input 和一个当前值提示，用户才知道存了什么） */
+.picker-shown {
+  font-size: var(--fs-sm); color: var(--text); margin-left: 10px;
+}
+.picker-shown.dim { color: var(--text-dim); }
